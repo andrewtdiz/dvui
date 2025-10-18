@@ -339,7 +339,11 @@ pub fn textEntryWidgets(demo_win_id: dvui.Id) void {
                             break :blk null;
                         };
                         if (file) |f| {
-                            bytes = f.deprecatedReader().readAllAlloc(dvui.currentWindow().gpa, 30_000_000) catch null;
+                            defer f.close();
+                            var buf: [30_000_000]u8 = undefined;
+                            var file_reader = f.reader(&buf);
+                            const reader = &file_reader.interface;
+                            bytes = reader.buffer;
                         }
                     }
 
@@ -575,6 +579,7 @@ test "DOCIMG text_entry" {
     try t.saveImage(frame, null, "Examples-text_entry.png");
 }
 
-const dvui = @import("../dvui.zig");
 const std = @import("std");
+
+const dvui = @import("../dvui.zig");
 const entypo = dvui.entypo;

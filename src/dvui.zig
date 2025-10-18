@@ -399,7 +399,7 @@ pub fn logError(src: std.builtin.SourceLocation, err: anyerror, comptime fmt: []
 
     var addresses: [stack_trace_frame_count]usize = @splat(0);
     var stack_trace = std.builtin.StackTrace{ .instruction_addresses = &addresses, .index = 0 };
-    if (!builtin.strip_debug_info) std.debug.captureStackTrace(@returnAddress(), &stack_trace);
+    if (!builtin.strip_debug_info) stack_trace = std.debug.captureCurrentStackTrace(.{ .first_address = @returnAddress() }, &addresses);
 
     const error_trace_fmt, const err_trace_arg = if (err_trace_enabled)
         .{ "\nError trace: {?f}", @errorReturnTrace() }
@@ -552,8 +552,8 @@ pub fn svgToTvg(allocator: std.mem.Allocator, svg_bytes: []const u8) (std.mem.Al
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn iconWidth(name: []const u8, tvg_bytes: []const u8, height: f32) TvgError!f32 {
     if (height == 0) return 0.0;
-    var stream = std.io.fixedBufferStream(tvg_bytes);
-    var parser = tvg.tvg.parse(currentWindow().arena(), stream.reader()) catch |err| {
+    var fb_reader = std.Io.Reader.fixed(tvg_bytes);
+    var parser = tvg.tvg.parse(currentWindow().arena(), &fb_reader) catch |err| {
         log.warn("iconWidth Tinyvg error {any} parsing icon {s}\n", .{ err, name });
         return TvgError.tvgError;
     };

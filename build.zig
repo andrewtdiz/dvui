@@ -1,7 +1,8 @@
 const std = @import("std");
-const enums_backend = @import("src/enums_backend.zig");
 const Pkg = std.Build.Pkg;
 const Compile = std.Build.Step.Compile;
+
+const enums_backend = @import("src/enums_backend.zig");
 
 // NOTE: Keep in-sync with raylib's definition
 pub const LinuxDisplayBackend = enum {
@@ -135,7 +136,7 @@ pub fn build(b: *std.Build) !void {
         run_add_logo.addFileArg(b.path("docs/index.html"));
         run_add_logo.addFileArg(b.path("docs/favicon.svg"));
         run_add_logo.addFileArg(b.path("docs/logo.svg"));
-        const indexhtml_file = run_add_logo.captureStdOut();
+        const indexhtml_file = run_add_logo.captureStdOut(.{});
         docs_step.dependOn(&b.addInstallFileWithDir(indexhtml_file, .prefix, "docs/index.html").step);
     }
 }
@@ -739,7 +740,7 @@ fn addWebExample(
     cb_run.addFileArg(b.path("src/backends/index.html"));
     cb_run.addFileArg(b.path("src/backends/web.js"));
     cb_run.addFileArg(web_test.getEmittedBin());
-    const output = cb_run.captureStdOut();
+    const output = cb_run.captureStdOut(.{});
 
     const install_noto = b.addInstallFileWithDir(b.path("src/fonts/NotoSansKR-Regular.ttf"), install_dir, "NotoSansKR-Regular.ttf");
 
