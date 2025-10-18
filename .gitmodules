@@ -1,3 +1,6 @@
 [submodule "libs/curl"]
 	path = libs/curl
 	url = https://github.com/david-vanderson/curl
+[submodule "deps/wgpu-native-zig"]
+	path = deps/wgpu-native-zig
+	url = https://github.com/andrewtdiz/wgpu_native_zig

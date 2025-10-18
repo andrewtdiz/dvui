@@ -226,8 +226,6 @@ pub fn drawClippedTriangles(
 ) dvui.Backend.GenericError!void {
     _ = self;
     _ = texture;
-    _ = vtx;
-    _ = idx;
     _ = clipr;
 
     // TODO: Implement WebGPU triangle rendering
@@ -368,7 +366,6 @@ pub fn renderTarget(
     texture: ?dvui.TextureTarget,
 ) dvui.Backend.GenericError!void {
     _ = self;
-    _ = texture;
 
     // TODO: Set WebGPU render target
     // - If texture is null, render to swap chain

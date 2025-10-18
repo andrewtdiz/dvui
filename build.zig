@@ -507,9 +507,9 @@ pub fn buildBackend(backend: enums_backend.Backend, test_dvui_and_app: bool, dvu
             dvui_opts.addTests(webgpu_mod, "webgpu-backend");
 
             // TODO: Add wgpu-native dependency when available
-            // if (b.lazyDependency("wgpu_native_zig", .{})) |wgpu_dep| {
-            //     webgpu_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
-            // }
+            if (b.lazyDependency("wgpu_native_zig", .{})) |wgpu_dep| {
+                webgpu_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
+            }
 
             const dvui_webgpu = addDvuiModule("dvui_webgpu", dvui_opts);
             dvui_opts.addChecks(dvui_webgpu, "dvui_webgpu");

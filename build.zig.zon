@@ -46,5 +46,8 @@
             .url = "https://github.com/AccessKit/accesskit-c/releases/download/0.17.1/accesskit-c-0.17.1.zip",
             .hash = "N-V-__8AAJ37FAuEZXG593uEuYETrkoxDz78QLL32k0GkaYG",
         },
+        .wgpu_native_zig = .{
+            .path = "./deps/wgpu-native-zig",
+        },
     },
 }
