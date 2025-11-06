@@ -6,6 +6,9 @@ var layout_gravity_y: f32 = 0.5;
 var layout_rotation: f32 = 0;
 var layout_corner_radius: Rect = Rect.all(5);
 var layout_flex_content_justify: dvui.FlexBoxWidget.ContentPosition = .center;
+var layout_flex_align_items: dvui.FlexBoxWidget.AlignItems = .start;
+var layout_flex_direction: dvui.enums.Direction = .horizontal;
+var layout_flex_align_content: dvui.FlexBoxWidget.AlignContent = .start;
 var layout_expand: dvui.Options.Expand = .none;
 var paned_collapsed_width: f32 = 400;
 var paned_autofit_direction: dvui.enums.Direction = .vertical;
@@ -304,7 +307,7 @@ pub fn layout() void {
             }
         }
         {
-            var fbox = dvui.flexbox(@src(), .{ .justify_content = layout_flex_content_justify }, .{
+            var fbox = dvui.flexbox(@src(), .{ .direction = layout_flex_direction, .justify_content = layout_flex_content_justify, .align_items = layout_flex_align_items, .align_content = layout_flex_align_content }, .{
                 .border = dvui.Rect.all(1),
                 .background = true,
                 .padding = .{ .w = 4, .h = 4 },
@@ -369,7 +372,7 @@ pub fn layout() void {
     {
         const should_fit = dvui.button(@src(), "Fit first pane", .{}, .{});
         var paned = dvui.paned(@src(), .{
-            .direction = paned_autofit_direction,
+            .direction = .vertical,
             .handle_margin = 4,
             .collapsed_size = 0,
             .autofit_first = .{ .min_split = 0.2, .max_split = 0.8, .min_size = 50 },
@@ -383,15 +386,15 @@ pub fn layout() void {
             var vbox = dvui.box(@src(), .{}, .{ .expand = .both, .background = true, .border = .all(1) });
             defer vbox.deinit();
 
-            dvui.label(@src(), "First Pane\nWith multiple lines of content\nWhere the first pane fits the content", .{}, .{});
-            _ = dvui.button(@src(), "With this button right against the split", .{}, .{});
+            dvui.label(@src(), "Top Side\nWith multiple lines of content\nWhere the first pane fits the content", .{}, .{});
+            _ = dvui.button(@src(), "With this button right above the split", .{}, .{});
         }
 
         if (paned.showSecond()) {
             var vbox = dvui.box(@src(), .{}, .{ .expand = .both, .background = true, .border = .all(1) });
             defer vbox.deinit();
 
-            dvui.label(@src(), "Second Pane", .{}, .{});
+            dvui.label(@src(), "Bottom Side", .{}, .{});
         }
     }
 }
