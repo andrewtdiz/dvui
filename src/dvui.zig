@@ -15,6 +15,7 @@
 //! - [Web](#dvui.backends.web)
 //! - [rayLib](#dvui.backends.raylib)
 //! - [Dx11](#dvui.backends.dx11)
+//! - [WGPU](#dvui.backends.wgpu)
 //! - [Testing](#dvui.backends.testing)
 //!
 const builtin = @import("builtin");
@@ -33,6 +34,7 @@ const std = @import("std");
 /// ```
 pub const backend = @import("backend");
 const tvg = @import("svg2tvg");
+const io_compat = @import("io_compat.zig");
 
 pub const math = std.math;
 pub const fnv = std.hash.Fnv1a_64;
@@ -92,6 +94,7 @@ pub const ScrollAreaWidget = widgets.ScrollAreaWidget;
 pub const ScrollBarWidget = widgets.ScrollBarWidget;
 pub const ScrollContainerWidget = widgets.ScrollContainerWidget;
 pub const SuggestionWidget = widgets.SuggestionWidget;
+pub const SelectionWidget = widgets.SelectionWidget;
 pub const TabsWidget = widgets.TabsWidget;
 pub const TextEntryWidget = widgets.TextEntryWidget;
 pub const TextLayoutWidget = widgets.TextLayoutWidget;
@@ -101,8 +104,8 @@ pub const GridWidget = widgets.GridWidget;
 pub const struct_ui = @import("struct_ui.zig");
 pub const enums = @import("enums.zig");
 pub const easing = @import("easing.zig");
-pub const testing = @import("testing.zig");
 pub const selection = @import("selection.zig");
+pub const testing = @import("testing.zig");
 pub const TrackingAutoHashMap = @import("tracking_hash_map.zig").TrackingAutoHashMap;
 pub const PNGEncoder = @import("PNGEncoder.zig");
 pub const JPGEncoder = @import("JPGEncoder.zig");
@@ -565,8 +568,8 @@ pub fn svgToTvg(allocator: std.mem.Allocator, svg_bytes: []const u8) (std.mem.Al
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn iconWidth(name: []const u8, tvg_bytes: []const u8, height: f32) TvgError!f32 {
     if (height == 0) return 0.0;
-    var stream = std.io.fixedBufferStream(tvg_bytes);
-    var parser = tvg.tvg.parse(currentWindow().arena(), stream.reader()) catch |err| {
+    const reader_state = io_compat.FixedSliceReader.init(tvg_bytes);
+    var parser = tvg.tvg.parse(currentWindow().arena(), reader_state) catch |err| {
         log.warn("iconWidth Tinyvg error {any} parsing icon {s}\n", .{ err, name });
         return TvgError.tvgError;
     };
@@ -977,18 +980,13 @@ pub fn clipboardTextSet(text: []const u8) void {
     };
 }
 
-pub const OpenURLOptions = struct {
-    url: []const u8,
-    new_window: bool = true,
-};
-
 /// Ask the system to open the given url.
 /// http:// and https:// urls can be opened.
 /// returns true if the backend reports the URL was opened.
 ///
 /// Only valid between `Window.begin`and `Window.end`.
-pub fn openURL(opts: OpenURLOptions) bool {
-    const parsed = std.Uri.parse(opts.url) catch return false;
+pub fn openURL(url: []const u8) bool {
+    const parsed = std.Uri.parse(url) catch return false;
     if (!std.ascii.eqlIgnoreCase(parsed.scheme, "http") and
         !std.ascii.eqlIgnoreCase(parsed.scheme, "https"))
     {
@@ -999,17 +997,17 @@ pub fn openURL(opts: OpenURLOptions) bool {
     }
 
     const cw = currentWindow();
-    cw.backend.openURL(opts.url, opts.new_window) catch |err| {
-        logError(@src(), err, "Could not open url '{s}'", .{opts.url});
+    cw.backend.openURL(url) catch |err| {
+        logError(@src(), err, "Could not open url '{s}'", .{url});
         return false;
     };
     return true;
 }
 
 test openURL {
-    try std.testing.expect(openURL(.{ .url = "notepad.exe" }) == false);
-    try std.testing.expect(openURL(.{ .url = "https://" }) == false);
-    try std.testing.expect(openURL(.{ .url = "file:///" }) == false);
+    try std.testing.expect(openURL("notepad.exe") == false);
+    try std.testing.expect(openURL("https://") == false);
+    try std.testing.expect(openURL("file:///") == false);
 }
 
 /// Seconds elapsed between last frame and current.  This value can be quite
@@ -1273,9 +1271,7 @@ pub fn dataGet(win: ?*Window, id: Id, key: []const u8, comptime T: type) ?T {
 pub fn dataGetDefault(win: ?*Window, id: Id, key: []const u8, comptime T: type, default: T) T {
     const w = currentOverrideOrPanic(win);
     if (w.data_store.getPtr(id.update(key), T)) |v| return v.* else {
-        w.data_store.set(w.gpa, id.update(key), default) catch |err| {
-            dvui.logError(@src(), err, "id {x} key {s}", .{ id, key });
-        };
+        w.data_store.set(w.gpa, id.update(key), default);
         return default;
     }
 }
@@ -1387,29 +1383,6 @@ pub fn dataRemove(win: ?*Window, id: Id, key: []const u8) void {
     return w.data_store.remove(w.gpa, id.update(key)) catch |err| {
         dvui.logError(@src(), err, "id {x} key {s}", .{ id, key });
     };
-}
-
-test "data get/set/remove basic" {
-    var t = try dvui.testing.init(.{});
-    defer t.deinit();
-
-    dataSet(null, .zero, "data", {});
-    try std.testing.expectEqual({}, dataGet(null, .zero, "data", void));
-
-    dataSetSlice(null, .zero, "dataSlice", @as([]const u8, "ab"));
-    try std.testing.expectEqualSlices(u8, "ab", dataGetSlice(null, .zero, "dataSlice", []u8).?);
-    dataSetSlice(null, .zero, "dataSliceSentinel", "ab");
-    try std.testing.expectEqualSlices(u8, "ab", dataGetSlice(null, .zero, "dataSliceSentinel", [:0]u8).?);
-
-    dataSetSliceCopies(null, .zero, "dataSliceCopies", @as([]const u8, "ab"), 2);
-    try std.testing.expectEqualSlices(u8, "abab", dataGetSlice(null, .zero, "dataSliceCopies", []u8).?);
-    dataSetSliceCopies(null, .zero, "dataSliceCopiesSentinel", &[_:1234]u16{ 1, 2 }, 2);
-    try std.testing.expectEqualSlices(u16, &.{ 1, 2, 1, 2 }, dataGetSlice(null, .zero, "dataSliceCopiesSentinel", [:1234]u16).?);
-
-    try std.testing.expectEqual('a', dataGetDefault(null, .zero, "data_default", u8, 'a'));
-    try std.testing.expectEqual('a', dataGet(null, .zero, "data_default", u8));
-    dataRemove(null, .zero, "data_default");
-    try std.testing.expectEqual(null, dataGet(null, .zero, "data_default", u8));
 }
 
 /// Return a rect that fits inside avail given the options. avail wins over
@@ -1873,11 +1846,6 @@ pub const TabIndex = struct {
     windowId: Id,
     widgetId: Id,
     tabIndex: u16,
-
-    // If true, prevents tabbing to this entry.  This is used to be able to
-    // look up a widget inside a focus group so we know where to start, but
-    // don't want to be able to tab inside a focus group.
-    shadow: bool = false,
 };
 
 /// Set the tab order for this widget.  `tab_index` values are visited starting
@@ -1889,31 +1857,15 @@ pub const TabIndex = struct {
 /// A null `tab_index` means it will be visited after all normal values.  All
 /// null widgets are visited in order of calling `tabIndexSet`.
 ///
-/// If inside a FocusGroupWidget, `tab_index` controls order traversed by arrow
-/// keys instead of tab.
-///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn tabIndexSet(widget_id: Id, tab_index: ?u16) void {
     if (tab_index != null and tab_index.? == 0)
         return;
 
     var cw = currentWindow();
-    var ti = TabIndex{ .windowId = cw.subwindows.current_id, .widgetId = widget_id, .tabIndex = (tab_index orelse math.maxInt(u16)) };
-
-    if (cw.subwindows.get(cw.subwindows.current_id)) |sw| {
-        if (sw.focus_group) |fg| {
-            fg.tab_index.append(cw.arena(), ti) catch |err| {
-                logError(@src(), err, "Could not set focus group tab index.", .{});
-            };
-
-            // now modify the TabIndex so that we can look it up in the global order
-            ti.shadow = true;
-            ti.tabIndex = fg.data().options.tab_index orelse math.maxInt(u16);
-        }
-    }
-
+    const ti = TabIndex{ .windowId = cw.subwindows.current_id, .widgetId = widget_id, .tabIndex = (tab_index orelse math.maxInt(u16)) };
     cw.tab_index.append(cw.gpa, ti) catch |err| {
-        logError(@src(), err, "Could not set tab index.", .{});
+        logError(@src(), err, "Could not set tab index. This might break keyboard navigation as the widget may become unreachable via tab", .{});
     };
 }
 
@@ -1927,12 +1879,12 @@ pub fn tabIndexNext(event_num: ?u16) void {
     tabIndexNextEx(event_num, currentWindow().tab_index_prev.items);
 }
 
-pub fn tabIndexNextEx(event_num: ?u16, tabidxs: []dvui.TabIndex) void {
+pub fn tabIndexNextEx(event_num: ?u16, _: []dvui.TabIndex) void {
     const cw = currentWindow();
     const widgetId = focusedWidgetId();
     var oldtab: ?u16 = null;
     if (widgetId != null) {
-        for (tabidxs) |ti| {
+        for (cw.tab_index_prev.items) |ti| {
             if (ti.windowId == cw.subwindows.focused_id and ti.widgetId == widgetId.?) {
                 oldtab = ti.tabIndex;
                 break;
@@ -1946,23 +1898,16 @@ pub fn tabIndexNextEx(event_num: ?u16, tabidxs: []dvui.TabIndex) void {
     var newId: ?Id = null;
     var foundFocus = false;
 
-    for (tabidxs) |ti| {
+    for (cw.tab_index_prev.items) |ti| {
         if (ti.windowId == cw.subwindows.focused_id) {
             if (ti.widgetId == widgetId) {
                 foundFocus = true;
-                continue;
-            }
-
-            if (ti.shadow) continue;
-
-            if (foundFocus == true and oldtab != null and ti.tabIndex == oldtab.?) {
+            } else if (foundFocus == true and oldtab != null and ti.tabIndex == oldtab.?) {
                 // found the first widget after current that has the same tabindex
                 newtab = ti.tabIndex;
                 newId = ti.widgetId;
                 break;
             } else if (oldtab == null or ti.tabIndex > oldtab.?) {
-                // tabidxs is ordered by insertion, not tab index, so have to
-                // search all of them to find the lowest that is above oldtab
                 if (newId == null or ti.tabIndex < newtab) {
                     newtab = ti.tabIndex;
                     newId = ti.widgetId;
@@ -1984,16 +1929,14 @@ pub fn tabIndexPrev(event_num: ?u16) void {
     tabIndexPrevEx(event_num, currentWindow().tab_index_prev.items);
 }
 
-pub fn tabIndexPrevEx(event_num: ?u16, tabidxs: []dvui.TabIndex) void {
+pub fn tabIndexPrevEx(event_num: ?u16, _: []dvui.TabIndex) void {
     const cw = currentWindow();
     const widgetId = focusedWidgetId();
     var oldtab: ?u16 = null;
-    var oldshadow: bool = false;
     if (widgetId != null) {
-        for (tabidxs) |ti| {
+        for (cw.tab_index_prev.items) |ti| {
             if (ti.windowId == cw.subwindows.focused_id and ti.widgetId == widgetId.?) {
                 oldtab = ti.tabIndex;
-                oldshadow = ti.shadow;
                 break;
             }
         }
@@ -2005,7 +1948,7 @@ pub fn tabIndexPrevEx(event_num: ?u16, tabidxs: []dvui.TabIndex) void {
     var newId: ?Id = null;
     var foundFocus = false;
 
-    for (tabidxs) |ti| {
+    for (cw.tab_index_prev.items) |ti| {
         if (ti.windowId == cw.subwindows.focused_id) {
             if (ti.widgetId == widgetId) {
                 foundFocus = true;
@@ -2015,27 +1958,16 @@ pub fn tabIndexPrevEx(event_num: ?u16, tabidxs: []dvui.TabIndex) void {
                     // might be none before so we'll go to null
                     break;
                 }
-            } else if (!ti.shadow) {
-                // tabidxs is ordered by insertion, not tab index, so have to
-                // search all of them to find the highest that is below oldtab
-                if (oldtab == null or ti.tabIndex < oldtab.? or (!foundFocus and ti.tabIndex == oldtab.?)) {
-                    if (ti.tabIndex >= newtab) {
-                        newtab = ti.tabIndex;
-                        newId = ti.widgetId;
-                    }
+            } else if (oldtab == null or ti.tabIndex < oldtab.? or (!foundFocus and ti.tabIndex == oldtab.?)) {
+                if (ti.tabIndex >= newtab) {
+                    newtab = ti.tabIndex;
+                    newId = ti.widgetId;
                 }
             }
         }
     }
 
     focusWidget(newId, null, event_num);
-
-    if (oldshadow) {
-        // If we shift-tabbed from inside a focusGroup, we will always focus
-        // the focusGroup itself, so do this again to focus the widget before
-        // the focusGroup.
-        tabIndexPrevEx(event_num, tabidxs);
-    }
 }
 
 /// Widgets that accept text input should call this on frames they have focus.
@@ -2730,17 +2662,17 @@ pub fn expander(src: std.builtin.SourceLocation, label_str: []const u8, init_opt
         b.data().focusBorder();
     }
 
-    if (expanded) {
-        icon(@src(), "down_arrow", entypo.triangle_down, .{}, .{ .gravity_y = 0.5, .role = .none });
-    } else {
-        icon(
-            @src(),
-            "right_arrow",
-            entypo.triangle_right,
-            .{},
-            .{ .gravity_y = 0.5, .role = .none },
-        );
-    }
+    // if (expanded) {
+    //     icon(@src(), "down_arrow", entypo.triangle_down, .{}, .{ .gravity_y = 0.5, .role = .none });
+    // } else {
+    //     icon(
+    //         @src(),
+    //         "right_arrow",
+    //         entypo.triangle_right,
+    //         .{},
+    //         .{ .gravity_y = 0.5, .role = .none },
+    //     );
+    // }
     labelNoFmt(@src(), label_str, .{}, options.strip().override(.{ .label = .{ .for_id = b.data().id } }));
 
     dvui.dataSet(null, b.data().id, "_expand", expanded);
@@ -2829,31 +2761,6 @@ pub fn tooltip(src: std.builtin.SourceLocation, init_opts: FloatingTooltipWidget
     tt.deinit();
 }
 
-/// Turns off normal tab navigation.  Use for things where tab should go to the
-/// group as a whole, but within the group focus moves via key up/down.
-///
-/// See `radioGroup`.
-///
-/// Widgets inside the group are ordered by their Options.tab_index.
-///
-/// FocusGroupWidget does no layout.
-///
-/// Only valid between `Window.begin`and `Window.end`.
-pub fn focusGroup(src: std.builtin.SourceLocation, init_opts: FocusGroupWidget.InitOptions, opts: Options) *FocusGroupWidget {
-    const defaults: Options = .{ .role = .group };
-    var ret = widgetAlloc(FocusGroupWidget);
-    ret.* = FocusGroupWidget.init(src, init_opts, defaults.override(opts));
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    return ret;
-}
-
-/// `focusGroup` where the default role is "radio_group".
-pub fn radioGroup(src: std.builtin.SourceLocation, init_opts: FocusGroupWidget.InitOptions, opts: Options) *FocusGroupWidget {
-    const defaults: Options = .{ .role = .radio_group };
-    return focusGroup(src, init_opts, defaults.override(opts));
-}
-
 /// Shim to make widget ids unique.
 ///
 /// Useful when you wrap some widgets into a function, but that function does
@@ -2880,6 +2787,15 @@ pub fn overlay(src: std.builtin.SourceLocation, opts: Options) *OverlayWidget {
     ret.data().was_allocated_on_widget_stack = true;
     ret.install();
     ret.drawBackground();
+    return ret;
+}
+
+pub fn selectionBox(src: std.builtin.SourceLocation, init_opts: SelectionWidget.InitOptions, opts: Options) *SelectionWidget {
+    var ret = widgetAlloc(SelectionWidget);
+    ret.* = SelectionWidget.init(src, init_opts, opts);
+    ret.data().was_allocated_on_widget_stack = true;
+    ret.install();
+    ret.processEvents();
     return ret;
 }
 
@@ -3246,14 +3162,6 @@ pub fn scale(src: std.builtin.SourceLocation, init_opts: ScaleWidget.InitOptions
     return ret;
 }
 
-pub fn tabs(src: std.builtin.SourceLocation, init_opts: TabsWidget.InitOptions, opts: Options) *TabsWidget {
-    var ret = widgetAlloc(TabsWidget);
-    ret.* = TabsWidget.init(src, init_opts, opts);
-    ret.init_options.was_allocated_on_widget_stack = true;
-    ret.install();
-    return ret;
-}
-
 pub fn menu(src: std.builtin.SourceLocation, dir: enums.Direction, opts: Options) *MenuWidget {
     var ret = widgetAlloc(MenuWidget);
     ret.* = MenuWidget.init(src, .{ .dir = dir }, opts);
@@ -3316,44 +3224,17 @@ pub fn menuItem(src: std.builtin.SourceLocation, init_opts: MenuItemWidget.InitO
     return ret;
 }
 
-pub const LinkOptions = struct {
-    /// url navigated to when clicked
-    url: []const u8,
-
-    /// label shown to user - if null, uses url
-    label: ?[]const u8 = null,
-};
-
-/// A label that calls `openURL` when clicked.
-pub fn link(src: std.builtin.SourceLocation, init_opts: LinkOptions, opts: Options) void {
-    const defaults: Options = .{ .color_text = dvui.themeGet().focus };
-    var click_event: dvui.Event.EventTypes = undefined;
-    if (dvui.labelClick(src, "{s}", .{init_opts.label orelse init_opts.url}, .{ .click_event = &click_event }, defaults.override(opts))) {
-        const new_window = (click_event == .mouse and (click_event.mouse.button == .middle or click_event.mouse.mod.matchBind("ctrl/cmd")));
-        _ = dvui.openURL(.{ .url = init_opts.url, .new_window = new_window });
-    }
-}
-
-pub const LabelClickOptions = struct {
-    label_opts: LabelWidget.InitOptions = .{},
-    click_event: ?*Event.EventTypes = null,
-};
-
-/// A clickable label.  See `link`.
+/// A clickable label.  Good for hyperlinks.
 /// Returns true if it's been clicked.
-pub fn labelClick(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype, init_opts: LabelClickOptions, opts: Options) bool {
+pub fn labelClick(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype, init_opts: LabelWidget.InitOptions, opts: Options) bool {
     const defaults: Options = .{ .name = "LabelClick", .role = .link };
-    var lw = LabelWidget.init(src, fmt, args, init_opts.label_opts, defaults.override(opts));
+    var lw = LabelWidget.init(src, fmt, args, init_opts, defaults.override(opts));
     // draw border and background
     lw.install();
 
     dvui.tabIndexSet(lw.data().id, lw.data().options.tab_index);
 
-    var ret = false;
-    if (dvui.clickedEx(lw.data(), .{ .buttons = .any })) |click_event| {
-        ret = true;
-        if (init_opts.click_event) |ce| ce.* = click_event;
-    }
+    const ret = dvui.clicked(lw.data(), .{});
 
     // draw text
     lw.draw();
@@ -3864,7 +3745,7 @@ pub fn sliderEntry(src: std.builtin.SourceLocation, comptime label_fmt: ?[]const
     const exp_stretch = 0.02;
     const key_percentage = 0.05;
 
-    var options = slider_entry_defaults.themeOverride().min_sizeM(10, 1).override(opts);
+    var options = slider_entry_defaults.min_sizeM(10, 1).override(opts);
 
     var ret = false;
     var hover = false;
@@ -3949,6 +3830,13 @@ pub fn sliderEntry(src: std.builtin.SourceLocation, comptime label_fmt: ?[]const
                 focusWidget(b.data().id, null, e.num);
             }
 
+            if (e.evt == .text) {
+                e.handle(@src(), b.data());
+                text_mode = false;
+                te.textSet(e.evt.text.txt, false);
+                new_val = std.fmt.parseFloat(f32, te_buf[0..te.len]) catch null;
+            }
+
             if (!e.handled) {
                 te.processEvent(e);
             }
@@ -3966,11 +3854,8 @@ pub fn sliderEntry(src: std.builtin.SourceLocation, comptime label_fmt: ?[]const
         if (!text_mode) {
             refresh(null, @src(), b.data().id);
 
-            if (new_val) |*nv| {
-                if (init_opts.min) |min| nv.* = @max(min, nv.*);
-                if (init_opts.max) |max| nv.* = @min(max, nv.*);
-
-                init_opts.value.* = nv.*;
+            if (new_val) |nv| {
+                init_opts.value.* = nv;
                 ret = true;
             }
         }
@@ -4300,7 +4185,7 @@ pub fn checkbox(src: std.builtin.SourceLocation, target: *bool, label_str: ?[]co
 }
 
 pub fn checkboxEx(src: std.builtin.SourceLocation, target: *bool, label_str: ?[]const u8, sel_opts: selection.SelectOptions, opts: Options) bool {
-    const options = checkbox_defaults.themeOverride().override(opts);
+    const options = checkbox_defaults.override(opts);
     var ret = false;
 
     var b = box(src, .{ .dir = .horizontal }, options);
@@ -4394,7 +4279,7 @@ pub var radio_defaults: Options = .{
 };
 
 pub fn radio(src: std.builtin.SourceLocation, active: bool, label_str: ?[]const u8, opts: Options) bool {
-    const options = radio_defaults.themeOverride().override(opts);
+    const options = radio_defaults.override(opts);
     var ret = false;
 
     var b = box(src, .{ .dir = .horizontal }, options);

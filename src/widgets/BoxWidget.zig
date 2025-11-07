@@ -42,6 +42,7 @@ packed_children: f32 = 0,
 total_weight: f32 = 0,
 child_rect: Rect = Rect{},
 child_positioned: bool = false,
+has_absolute_children: bool = false,
 child_id: if (builtin.mode == .Debug) dvui.Id else void,
 ratio_extra: f32 = 0,
 ran_off: bool = false,
@@ -60,6 +61,8 @@ pub fn init(src: std.builtin.SourceLocation, init_options: InitOptions, opts: Op
 
 pub fn install(self: *BoxWidget) void {
     self.data().register();
+    self.child_positioned = false;
+    self.has_absolute_children = false;
 
     // our rect for children has to start at 0,0
     self.child_rect = self.data().contentRect().justSize();
@@ -95,7 +98,16 @@ pub fn drawBackground(self: *BoxWidget) void {
 }
 
 pub fn matchEvent(self: *BoxWidget, e: *Event) bool {
-    return dvui.eventMatchSimple(e, self.data());
+    const wd = self.data();
+    if (self.has_absolute_children) {
+        switch (e.evt) {
+            .mouse => {
+                return dvui.eventMatch(e, .{ .id = wd.id, .r = dvui.windowRectPixels() });
+            },
+            else => {},
+        }
+    }
+    return dvui.eventMatchSimple(e, wd);
 }
 
 pub fn widget(self: *BoxWidget) Widget {
@@ -121,6 +133,7 @@ pub fn rectFor(self: *BoxWidget, id: dvui.Id, min_size: Size, e: Options.Expand,
     };
 
     if (self.child_positioned) {
+        self.has_absolute_children = true;
         // don't pack this, we treat this like overlay - put it where they asked
         return dvui.placeIn(self.data().contentRect().justSize(), min_size, e, g);
     }

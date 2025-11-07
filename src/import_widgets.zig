@@ -28,6 +28,7 @@ pub const PanedWidget = @import("widgets/PanedWidget.zig");
 pub const PlotWidget = @import("widgets/PlotWidget.zig");
 pub const ReorderWidget = @import("widgets/ReorderWidget.zig");
 pub const ScaleWidget = @import("widgets/ScaleWidget.zig");
+pub const SelectionWidget = @import("widgets/SelectionWidget.zig");
 pub const ScrollAreaWidget = @import("widgets/ScrollAreaWidget.zig");
 pub const ScrollBarWidget = @import("widgets/ScrollBarWidget.zig");
 pub const ScrollContainerWidget = @import("widgets/ScrollContainerWidget.zig");

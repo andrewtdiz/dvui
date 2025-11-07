@@ -33,9 +33,12 @@
         },
         // required for the directx11 backend
         .win32 = .{
-            .url = "git+https://github.com/marlersoft/zigwin32#5587b16fa040573846a6bf531301f6206d31a6bf",
+            .url = "https://github.com/marlersoft/zigwin32/archive/refs/heads/main.tar.gz",
             .hash = "zigwin32-25.0.28-preview-AAAAAICM5AMResOGQnQ85mfe60TTOQeMtt7GRATUOKoP",
             .lazy = true,
+        },
+        .wgpu_native_zig = .{
+            .path = "./deps/wgpu_native_zig",
         },
         // for rendering tvg icons
         .svg2tvg = .{
@@ -45,6 +48,9 @@
         .accesskit = .{
             .url = "https://github.com/AccessKit/accesskit-c/releases/download/0.17.1/accesskit-c-0.17.1.zip",
             .hash = "N-V-__8AAJ37FAuEZXG593uEuYETrkoxDz78QLL32k0GkaYG",
+        },
+        .zig_quickjs = .{
+            .path = "./deps/zig-quickjs",
         },
     },
 }
