@@ -13,6 +13,11 @@ const AccesskitOptions = enum {
     off,
 };
 
+const StbOptions = struct {
+    image: bool,
+    image_write: bool,
+};
+
 pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -22,11 +27,11 @@ pub fn build(b: *Build) !void {
     const linux_display_backend = detectLinuxDisplayBackend(b, target);
 
     const build_options = initBuildOptions(b);
-    const dvui_mod = addDvuiModule(b, target, optimize, build_options, .{
+    const dvui_mod = addDvuiModule(b, target, optimize, build_options, StbOptions{
         .image = false,
         .image_write = false,
     });
-    const dvui_lib = addDvuiLibrary(b, target, optimize, build_options, .{
+    const dvui_lib = addDvuiLibrary(b, target, optimize, build_options, StbOptions{
         .image = false,
         .image_write = false,
     });
@@ -120,10 +125,7 @@ fn configureDvuiModule(
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
-    stb: struct {
-        image: bool,
-        image_write: bool,
-    },
+    stb: StbOptions,
 ) void {
     module.addOptions("build_options", build_options);
     module.addImport("svg2tvg", b.dependency("svg2tvg", .{
@@ -184,10 +186,7 @@ fn addDvuiModule(
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
-    stb: struct {
-        image: bool,
-        image_write: bool,
-    },
+    stb: StbOptions,
 ) *Build.Module {
     const dvui_mod = b.addModule("dvui", .{
         .root_source_file = b.path("src/dvui.zig"),
@@ -203,16 +202,18 @@ fn addDvuiLibrary(
     target: Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
-    stb: struct {
-        image: bool,
-        image_write: bool,
-    },
+    stb: StbOptions,
 ) *std.Build.Step.Compile {
-    const dvui_lib = b.addStaticLibrary(.{
-        .name = "dvui",
+    const dvui_module = b.createModule(.{
         .root_source_file = b.path("src/dvui.zig"),
         .target = target,
         .optimize = optimize,
+    });
+
+    const dvui_lib = b.addLibrary(.{
+        .name = "dvui",
+        .linkage = .static,
+        .root_module = dvui_module,
     });
     configureDvuiModule(b, dvui_lib.root_module, target, optimize, build_options, stb);
     return dvui_lib;
