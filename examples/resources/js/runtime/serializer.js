@@ -77,6 +77,38 @@ function attachStyle(command, node, eventManager) {
   const style = parseClassNames(className, componentState);
   if (style) {
     command.style = style;
+    if (shouldUseFlexBox(node, style)) {
+      command.type = "FlexBox";
+      copyFlexStyleToProps(command, style);
+    }
+  }
+}
+
+function shouldUseFlexBox(node, style) {
+  if (!style || style.display !== "flex") {
+    return false;
+  }
+  return typeof node.type === "string" && node.type.toLowerCase() === "div";
+}
+
+function copyFlexStyleToProps(command, style) {
+  let target = command.props;
+  if (!target) {
+    target = Object.create(null);
+    command.props = target;
+  }
+
+  if (style.flexDirection) {
+    target.flexDirection = style.flexDirection;
+  }
+  if (style.justifyContent) {
+    target.justifyContent = style.justifyContent;
+  }
+  if (style.alignItems) {
+    target.alignItems = style.alignItems;
+  }
+  if (style.alignContent) {
+    target.alignContent = style.alignContent;
   }
 }
 

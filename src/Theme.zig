@@ -216,6 +216,7 @@ pub const builtin = struct {
     pub const gruvbox = QuickTheme.builtin.gruvbox.toTheme(null) catch unreachable;
     pub const jungle = QuickTheme.builtin.jungle.toTheme(null) catch unreachable;
     pub const opendyslexic = QuickTheme.builtin.opendyslexic.toTheme(null) catch unreachable;
+    pub const shadcn = QuickTheme.builtin.shadcn.toTheme(null) catch unreachable;
 
     test {
         // Ensures all builting themes are valid
@@ -248,6 +249,7 @@ pub const QuickTheme = struct {
         pub const gruvbox: QuickTheme = @import("themes/gruvbox.zon");
         pub const jungle: QuickTheme = @import("themes/jungle.zon");
         pub const opendyslexic: QuickTheme = @import("themes/opendyslexic.zon");
+        pub const shadcn: QuickTheme = @import("themes/shadcn.zon");
 
         test {
             // Ensures all the .zon files are valid `QuickTheme` types

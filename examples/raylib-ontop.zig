@@ -8,12 +8,12 @@ const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.c;
 
 const jsruntime = @import("jsruntime/mod.zig");
-const ReactBridge = @import("jsruntime/ReactBridge.zig");
+const react = @import("jsruntime/react/mod.zig");
 
 const js_console_log = std.log.scoped(.quickjs_console);
 
 const js_entry_script = "examples/resources/js/main.js";
-const theme_font_size_delta: f32 = 12.0;
+const theme_font_size_delta: f32 = 8.0;
 
 var layout_flex_direction: dvui.enums.Direction = .horizontal;
 var layout_flex_align_content: dvui.FlexBoxWidget.AlignContent = .start;
@@ -81,32 +81,16 @@ const rotation_increment_step: f32 = std.math.pi / 8.0;
 
 var selected = false;
 
-var selection_state = dvui.SelectionWidget.State{
-    .rect = .{
-        .x = 160,
-        .y = 120,
-        .w = 280,
-        .h = 200,
-    },
-};
-
 fn toggleProportional() void {
     use_proportional_scaling = !use_proportional_scaling;
-    logScalingState("Proportional", use_proportional_scaling);
 }
 
 fn toggleCentered() void {
     centered_scaling_enabled = !centered_scaling_enabled;
-    logScalingState("Centered", centered_scaling_enabled);
 }
 
 fn toggleFixedIncrements() void {
     fixed_increment_scaling_enabled = !fixed_increment_scaling_enabled;
-    logScalingState("Fixed Increments", fixed_increment_scaling_enabled);
-}
-
-fn logScalingState(name: []const u8, enabled: bool) void {
-    std.debug.print("{s} scaling {s}\n", .{ name, if (enabled) "enabled" else "disabled" });
 }
 
 comptime {
@@ -121,7 +105,6 @@ var js_mouse_initialized = false;
 
 pub fn main() !void {
     if (@import("builtin").os.tag == .windows) { // optional
-        // on windows graphical apps have no console, so output goes to nowhere - attach it manually. related: https://github.com/ziglang/zig/issues/4196
         try dvui.Backend.Common.windowsAttachConsole();
     }
     RaylibBackend.enableRaylibLogging();
@@ -137,15 +120,12 @@ pub fn main() !void {
     ray.InitWindow(800, 600, "DVUI Raylib Ontop Example");
     defer ray.CloseWindow();
 
-    // init Raylib backend
-    // init() means the app owns the window (and must call CloseWindow itself)
     var backend = RaylibBackend.init(gpa);
     defer backend.deinit();
     backend.log_events = true;
 
-    // init dvui Window (maps onto a single OS window)
-    // OS window is managed by raylib, not dvui
     var win = try dvui.Window.init(@src(), gpa, backend.backend(), .{});
+    win.theme = dvui.Theme.builtin.shadcn;
     defer win.deinit();
     applySegoeFonts(&win);
 
@@ -217,25 +197,17 @@ pub fn main() !void {
         forwardJsRuntimeEvents();
 
         if (backend.shouldBlockRaylibInput()) {
-            // NOTE: I am using raygui here because it has a simple lock-unlock system
-            // Non-raygui raylib apps could also easily implement such a system
             ray.GuiLock();
         } else {
             ray.GuiUnlock();
         }
-        // if dvui widgets might not cover the whole window, then need to clear
-        // the previous frame's render
         ray.ClearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
-        ReactBridge.render(dvui, &js_runtime);
+        react.render(&js_runtime);
 
-        // marks end of dvui frame, don't call dvui functions after this
-        // - sends all dvui stuff to backend for rendering, must be called before EndDrawing()
         _ = try win.end(.{});
 
-        // cursor management
         if (win.cursorRequestedFloating()) |cursor| {
-            // cursor is over floating window, dvui sets it
             backend.setCursor(cursor);
         } else {
             backend.setCursor(win.cursorRequested());
@@ -253,15 +225,6 @@ fn forwardJsRuntimeEvents() void {
             else => {},
         }
     }
-}
-
-fn colorFromPacked(value: u32) dvui.Color {
-    const r: u8 = @truncate((value >> 24) & 0xff);
-    const g: u8 = @truncate((value >> 16) & 0xff);
-    const b: u8 = @truncate((value >> 8) & 0xff);
-    const a: u8 = @truncate(value & 0xff);
-    
-    return .{ .r = r, .g = g, .b = b, .a = a };
 }
 
 fn handleJsMouseEvent(mouse: dvui.Event.Mouse) void {
@@ -359,46 +322,4 @@ fn applySegoeFonts(win: *dvui.Window) void {
     win.theme.font_title_2 = win.theme.font_title_2.switchFont(FontId.SegoeUIBd);
     win.theme.font_title_3 = win.theme.font_title_3.switchFont(FontId.SegoeUIBd);
     win.theme.font_title_4 = win.theme.font_title_4.switchFont(FontId.SegoeUIBd);
-}
-
-fn updateDebugHitboxView() void {
-    for (dvui.events()) |*e| {
-        switch (e.evt) {
-            .key => |ke| {
-                if (ke.action == .down) {
-                    switch (ke.code) {
-                        .f6 => {
-                            debug_show_hitboxes = !debug_show_hitboxes;
-                        },
-                        .left_shift => toggleProportional(),
-                        .left_control => toggleCentered(),
-                        .left_alt => toggleFixedIncrements(),
-                        else => {},
-                    }
-                    continue;
-                }
-                if (ke.action == .up) {
-                    switch (ke.code) {
-                        .left_shift => toggleProportional(),
-                        .left_control => toggleCentered(),
-                        .left_alt => toggleFixedIncrements(),
-                        else => {},
-                    }
-                    continue;
-                }
-            },
-            .mouse => |me| {
-                if (me.action == .press and me.button.pointer()) {
-                    const click_nat = dvui.Point.cast(me.p.toNatural());
-                    const in_selection = selection_state.rect.contains(click_nat);
-                    if (in_selection) {
-                        selected = true;
-                    } else if (selected) {
-                        selected = false;
-                    }
-                }
-            },
-            else => {},
-        }
-    }
 }

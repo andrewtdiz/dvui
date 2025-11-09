@@ -18,7 +18,7 @@ pub var defaults: Options = .{
     .role = .button,
     .margin = Rect.all(4),
     .corner_radius = Rect.all(5),
-    .padding = Rect.all(6),
+    .padding = Rect{ .x = 12, .y = 6, .w = 12, .h = 6 },
     .background = true,
     .style = .control,
 };

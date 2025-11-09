@@ -1,0 +1,46 @@
+.{ 
+    .name = "Shadcn Dark",
+    .font_size = 16,
+    .font_name_body = "SegoeUI",
+    .font_name_heading = "SegoeUIBd",
+    .font_name_caption = "SegoeUI",
+    .font_name_title = "SegoeUIBd",
+
+    .focus = "#737373",
+    .text = "#fafafa",
+    .text_hover = "#a1a1a1",
+    .text_press = "#171717",
+    .fill = "#0a0a0a",
+    .fill_hover = "#171717",
+    .fill_press = "#262626",
+    .border = "#282828",
+
+    .control = .{
+        .fill = "#e5e5e5",
+        .fill_hover = "#d4d4d4",
+        .fill_press = "#a3a3a3",
+        .text = "#171717",
+        .text_press = "#262626",
+        .border = "#525252",
+    },
+    .window = .{
+        .fill = "#171717",
+        .text = "#fafafa",
+        .border = "#282828",
+    },
+    .highlight = .{
+        .fill = "#404040",
+        .fill_hover = "#525252",
+        .fill_press = "#1447e6",
+        .text = "#fafafa",
+        .text_press = "#e5e5e5",
+        .border = "#737373",
+    },
+    .err = .{
+        .fill = "#ff6467",
+        .fill_hover = "#ff6467",
+        .fill_press = "#ff6467",
+        .text = "#fafafa",
+        .border = "#ff6467",
+    },
+}

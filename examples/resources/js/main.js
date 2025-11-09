@@ -1,52 +1,8 @@
-import { React, createRoot, render } from "./runtime/index.js";
-import { Button, Label } from "./components/index.js";
-import EventManager from "./runtime/eventManager.js";
-import { serializeContainer } from "./runtime/serializer.js";
-import { installListenerBridge } from "./bridge/events.js";
-import { ensureNativeAppState, publishRenderSnapshot } from "./bridge/native.js";
+import { React, render } from "./dvui.js";
+import { Button } from "./components/index.js";
 const useState = React.useState;
-const eventManager = new EventManager();
-ensureNativeAppState();
-let renderInFlight = false;
-let rerenderQueued = false;
-const root = createRoot();
-installListenerBridge(eventManager, () => {
-  queueMicrotask(() => {
-    syncRenderTree();
-  });
-});
 function App() {
   const [count, setCount] = useState(0);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Button, { className: "", onClick: () => setCount(count + 1) }, "Button Count: ", count), /* @__PURE__ */ React.createElement(Label, { className: "" }, "hey it's me!"), count > 4 && /* @__PURE__ */ React.createElement(Label, null, "Greater than 4"));
+  return /* @__PURE__ */ React.createElement("div", { className: "bg-neutral-800 flex items-center w-full justify-between" }, /* @__PURE__ */ React.createElement(Button, { className: "bg-green-500 text-neutral-100", onClick: () => setCount(count + 1) }, "Increment"), /* @__PURE__ */ React.createElement(Button, { className: "bg-blue-500 text-neutral-100", onClick: () => setCount(count - 1) }, "Decrease"), /* @__PURE__ */ React.createElement(Button, { className: "bg-red-500 text-neutral-100", onClick: () => setCount(0) }, "Reset"), /* @__PURE__ */ React.createElement("p", null, "Count: ", count), count > 4 && /* @__PURE__ */ React.createElement("p", null, "Greater than 4"), count < 0 && /* @__PURE__ */ React.createElement("p", null, "Less than 0"));
 }
-async function syncRenderTree() {
-  if (renderInFlight) {
-    rerenderQueued = true;
-    return;
-  }
-  renderInFlight = true;
-  try {
-    eventManager.reset();
-    const container = await render(/* @__PURE__ */ React.createElement(App, null), root);
-    const snapshot = serializeContainer(container, { eventManager });
-    publishRenderSnapshot(snapshot);
-  } catch (error) {
-    console.error("Failed to render React bridge:", error);
-    if (error && typeof error === "object") {
-      if ("message" in error) console.error("Message:", error.message);
-      if ("stack" in error) console.error("Stack:", error.stack);
-    }
-  } finally {
-    renderInFlight = false;
-    if (rerenderQueued) {
-      rerenderQueued = false;
-      queueMicrotask(() => {
-        syncRenderTree();
-      });
-    }
-  }
-}
-editor.Tick.Connect(({ position }) => {
-  return position;
-});
-syncRenderTree();
+render(/* @__PURE__ */ React.createElement(App, null));

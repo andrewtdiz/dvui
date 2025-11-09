@@ -1,197 +1,14 @@
-//! Utilities for rendering the QuickJS-backed React snapshot inside dvui.
-
 const std = @import("std");
 const quickjs = @import("quickjs");
-const jsruntime = @import("mod.zig");
+const dvui = @import("dvui");
+const jsruntime = @import("../mod.zig");
 
-const log = std.log.scoped(.react_bridge);
+const types = @import("types.zig");
+const utils = @import("utils.zig");
 
-pub fn render(comptime Dvui: type, runtime: *jsruntime.JSRuntime) void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
-
-    var nodes = ReactCommandMap(Dvui).init(allocator);
-    defer nodes.deinit();
-    var root_ids: std.ArrayList([]const u8) = .empty;
-    defer root_ids.deinit(allocator);
-
-    buildReactCommandGraph(Dvui, runtime, &nodes, &root_ids, allocator) catch |err| {
-        switch (err) {
-            error.MissingRenderTree => {},
-            else => log.err("React bridge build failed: {s}", .{@errorName(err)}),
-        }
-        return;
-    };
-
-    if (root_ids.items.len == 0) {
-        return;
-    }
-
-    var root_container = Dvui.box(@src(), .{}, .{
-        .expand = .both,
-        .name = "ReactBridgeRoot",
-        .padding = .{ .x = 16, .y = 16 },
-    });
-    defer root_container.deinit();
-
-    for (root_ids.items) |node_id| {
-        renderReactNode(Dvui, runtime, &nodes, node_id);
-    }
-}
-
-fn ReactCommandStyle(comptime Dvui: type) type {
-    return struct {
-        background: ?Dvui.Color = null,
-        text: ?Dvui.Color = null,
-    };
-}
-
-fn ReactCommand(comptime Dvui: type) type {
-    return struct {
-        command_type: []const u8,
-        text: ?[]const u8 = null,
-        text_content: ?[]const u8 = null,
-        children: []const []const u8 = &.{},
-        on_click_id: ?[]const u8 = null,
-        style: ReactCommandStyle(Dvui) = .{},
-    };
-}
-
-fn ReactCommandMap(comptime Dvui: type) type {
-    return std.StringHashMap(ReactCommand(Dvui));
-}
-
-fn renderReactNode(
-    comptime Dvui: type,
+pub fn buildReactCommandGraph(
     runtime: *jsruntime.JSRuntime,
-    nodes: *const ReactCommandMap(Dvui),
-    node_id: []const u8,
-) void {
-    const entry = nodes.get(node_id) orelse return;
-    if (std.mem.eql(u8, entry.command_type, "box")) {
-        var box_options = Dvui.Options{
-            .name = "ReactBox",
-            .background = true,
-            .padding = .{ .x = 8, .y = 8 },
-        };
-
-        if (entry.style.background) |color| {
-            box_options.color_fill = color;
-            box_options.background = true;
-        }
-
-        var box_widget = Dvui.box(@src(), .{}, box_options);
-        defer box_widget.deinit();
-        for (entry.children) |child_id| {
-            renderReactNode(Dvui, runtime, nodes, child_id);
-        }
-        return;
-    }
-
-    if (std.mem.eql(u8, entry.command_type, "label")) {
-        renderLabelNode(Dvui, runtime, nodes, node_id, entry);
-        return;
-    }
-
-    if (std.mem.eql(u8, entry.command_type, "button")) {
-        renderButtonNode(Dvui, runtime, nodes, node_id, entry);
-        return;
-    }
-
-    if (std.mem.eql(u8, entry.command_type, "text-content")) {
-        const content = entry.text orelse "";
-        var tl = Dvui.textLayout(@src(), .{}, .{ .expand = .horizontal, .background = false });
-        tl.addText(content, .{});
-        tl.deinit();
-        return;
-    }
-
-    for (entry.children) |child_id| {
-        renderReactNode(Dvui, runtime, nodes, child_id);
-    }
-}
-
-fn renderLabelNode(
-    comptime Dvui: type,
-    runtime: *jsruntime.JSRuntime,
-    nodes: *const ReactCommandMap(Dvui),
-    node_id: []const u8,
-    entry: ReactCommand(Dvui),
-) void {
-    const content = entry.text_content orelse resolveCommandText(nodes, entry.children);
-
-    var label_opts = Dvui.Options{};
-    label_opts.id_extra = nodeIdExtra(node_id);
-    if (entry.style.text) |color| {
-        label_opts.color_text = color;
-    }
-
-    Dvui.labelNoFmt(@src(), content, .{}, label_opts);
-
-    for (entry.children) |child_id| {
-        const child_entry = nodes.get(child_id) orelse continue;
-        if (std.mem.eql(u8, child_entry.command_type, "text-content")) continue;
-        renderReactNode(Dvui, runtime, nodes, child_id);
-    }
-}
-
-fn renderButtonNode(
-    comptime Dvui: type,
-    runtime: *jsruntime.JSRuntime,
-    nodes: *const ReactCommandMap(Dvui),
-    node_id: []const u8,
-    entry: ReactCommand(Dvui),
-) void {
-    const caption = entry.text_content orelse resolveCommandText(nodes, entry.children);
-
-    var button_opts = Dvui.Options{};
-    button_opts.id_extra = nodeIdExtra(node_id);
-    if (entry.style.background) |color| {
-        button_opts.color_fill = color;
-        button_opts.background = true;
-    }
-    if (entry.style.text) |color| {
-        button_opts.color_text = color;
-    }
-
-    const pressed = Dvui.button(@src(), caption, .{}, button_opts);
-    if (pressed) {
-        if (entry.on_click_id) |listener_id| {
-            runtime.invokeListener(listener_id) catch |err| {
-                log.err("React onClick failed: {s}", .{@errorName(err)});
-            };
-        }
-    }
-
-    for (entry.children) |child_id| {
-        const child_entry = nodes.get(child_id) orelse continue;
-        if (std.mem.eql(u8, child_entry.command_type, "text-content")) continue;
-        renderReactNode(Dvui, runtime, nodes, child_id);
-    }
-}
-
-fn resolveCommandText(nodes: anytype, child_ids: []const []const u8) []const u8 {
-    for (child_ids) |child_id| {
-        const child = nodes.get(child_id) orelse continue;
-        if (!std.mem.eql(u8, child.command_type, "text-content")) continue;
-        if (child.text) |text| {
-            return text;
-        }
-    }
-    return "";
-}
-
-fn nodeIdExtra(node_id: []const u8) usize {
-    const hash: u64 = std.hash.Wyhash.hash(0, node_id);
-    return @intCast(hash & std.math.maxInt(usize));
-}
-
-fn buildReactCommandGraph(
-    comptime Dvui: type,
-    runtime: *jsruntime.JSRuntime,
-    nodes: *ReactCommandMap(Dvui),
+    nodes: *types.ReactCommandMap,
     root_ids: *std.ArrayList([]const u8),
     allocator: std.mem.Allocator,
 ) !void {
@@ -244,7 +61,7 @@ fn buildReactCommandGraph(
         const id = try dupPropertyString(ctx, allocator, command_const, "id");
         const node_type = try dupPropertyString(ctx, allocator, command_const, "type");
 
-        var command = ReactCommand(Dvui){
+        var command = types.ReactCommand{
             .command_type = node_type,
         };
 
@@ -254,7 +71,8 @@ fn buildReactCommandGraph(
             command.children = try readChildIdList(ctx, allocator, command_const, &referenced_children);
         }
 
-        command.style = try readCommandStyle(Dvui, ctx, command_const);
+        command.style = try readCommandStyle(ctx, command_const);
+        command.flex = try readFlexProps(ctx, allocator, command_const);
         command.text_content = try dupOptionalPropertyString(ctx, allocator, command_const, "textContent");
         command.on_click_id = try dupOptionalPropertyString(ctx, allocator, command_const, "onClickId");
 
@@ -351,10 +169,9 @@ fn dupOptionalPropertyString(
 }
 
 fn readCommandStyle(
-    comptime Dvui: type,
     ctx: *quickjs.JSContext,
     obj: quickjs.JSValueConst,
-) !ReactCommandStyle(Dvui) {
+) !types.ReactCommandStyle {
     const style_prop = "style\x00";
     const style_value = quickjs.JS_GetPropertyStr(ctx, obj, @ptrCast(style_prop.ptr));
     defer quickjs.JS_FreeValue(ctx, style_value);
@@ -370,17 +187,57 @@ fn readCommandStyle(
     }
 
     return .{
-        .background = try readStyleColor(Dvui, ctx, style_const, "backgroundColor"),
-        .text = try readStyleColor(Dvui, ctx, style_const, "textColor"),
+        .background = try readStyleColor(ctx, style_const, "backgroundColor"),
+        .text = try readStyleColor(ctx, style_const, "textColor"),
+        .width = try readStyleWidth(ctx, style_const),
     };
 }
 
+fn readFlexProps(
+    ctx: *quickjs.JSContext,
+    allocator: std.mem.Allocator,
+    obj: quickjs.JSValueConst,
+) !?types.ReactFlexProps {
+    const props_prop = "props\x00";
+    const props_value = quickjs.JS_GetPropertyStr(ctx, obj, @ptrCast(props_prop.ptr));
+    defer quickjs.JS_FreeValue(ctx, props_value);
+    const props_const = quickjs.asValueConst(props_value);
+    if (quickjs.JS_IsException(props_const)) {
+        return error.JsError;
+    }
+    if (quickjs.JS_IsUndefined(props_const) or quickjs.JS_IsNull(props_const)) {
+        return null;
+    }
+    if (!quickjs.JS_IsObject(props_const)) {
+        return error.InvalidRenderTree;
+    }
+
+    var result = types.ReactFlexProps{};
+    var has_value = false;
+
+    result.direction = try dupOptionalPropertyString(ctx, allocator, props_const, "flexDirection");
+    if (result.direction != null) has_value = true;
+
+    result.justify_content = try dupOptionalPropertyString(ctx, allocator, props_const, "justifyContent");
+    if (result.justify_content != null) has_value = true;
+
+    result.align_items = try dupOptionalPropertyString(ctx, allocator, props_const, "alignItems");
+    if (result.align_items != null) has_value = true;
+
+    result.align_content = try dupOptionalPropertyString(ctx, allocator, props_const, "alignContent");
+    if (result.align_content != null) has_value = true;
+
+    if (!has_value) {
+        return null;
+    }
+    return result;
+}
+
 fn readStyleColor(
-    comptime Dvui: type,
     ctx: *quickjs.JSContext,
     style_obj: quickjs.JSValueConst,
     comptime name: []const u8,
-) !?Dvui.Color {
+) !?dvui.Color {
     const prop = name ++ "\x00";
     const value = quickjs.JS_GetPropertyStr(ctx, style_obj, @ptrCast(prop.ptr));
     defer quickjs.JS_FreeValue(ctx, value);
@@ -396,7 +253,44 @@ fn readStyleColor(
     if (quickjs.JS_ToUint32(ctx, &_packed, value_const) != 0) {
         return error.InvalidRenderTree;
     }
-    return colorFromPacked(Dvui, _packed);
+    return utils.colorFromPacked(_packed);
+}
+
+fn readStyleWidth(
+    ctx: *quickjs.JSContext,
+    style_obj: quickjs.JSValueConst,
+) !?types.ReactWidth {
+    const prop = "width\x00";
+    const value = quickjs.JS_GetPropertyStr(ctx, style_obj, @ptrCast(prop.ptr));
+    defer quickjs.JS_FreeValue(ctx, value);
+    const value_const = quickjs.asValueConst(value);
+    if (quickjs.JS_IsException(value_const)) {
+        return error.JsError;
+    }
+    if (quickjs.JS_IsUndefined(value_const) or quickjs.JS_IsNull(value_const)) {
+        return null;
+    }
+    if (quickjs.JS_IsString(value_const)) {
+        var length: usize = 0;
+        const ptr = quickjs.JS_ToCStringLen(ctx, &length, value_const) orelse {
+            return error.JsError;
+        };
+        defer quickjs.JS_FreeCString(ctx, ptr);
+        const slice = ptr[0..length];
+        if (std.mem.eql(u8, slice, "full")) return .full;
+        return null;
+    }
+
+    var raw: f64 = 0;
+    if (quickjs.JS_ToFloat64(ctx, &raw, value_const) != 0) {
+        return error.InvalidRenderTree;
+    }
+    if (raw < 0) {
+        return error.InvalidRenderTree;
+    }
+    const max_allowed: f64 = @floatCast(dvui.max_float_safe);
+    const clamped = @min(raw, max_allowed);
+    return types.ReactWidth{ .pixels = @floatCast(clamped) };
 }
 
 fn dupJsStringValue(
@@ -491,12 +385,4 @@ fn extractRootIdsFromJs(
     }
 
     return true;
-}
-
-fn colorFromPacked(comptime Dvui: type, value: u32) Dvui.Color {
-    const r: u8 = @intCast((value >> 24) & 0xff);
-    const g: u8 = @intCast((value >> 16) & 0xff);
-    const b: u8 = @intCast((value >> 8) & 0xff);
-    const a: u8 = @intCast(value & 0xff);
-    return Dvui.Color{ .r = r, .g = g, .b = b, .a = a };
 }

@@ -1,72 +1,24 @@
-import { React, createRoot, render } from "./runtime/index.js";
-import { Button, Label } from "./components/index.js";
-import EventManager from "./runtime/eventManager.js";
-import { serializeContainer } from "./runtime/serializer.js";
-import { installListenerBridge } from "./bridge/events.js";
-import { ensureNativeAppState, publishRenderSnapshot } from "./bridge/native.js";
+import { React, render } from "./dvui.js";
+import { Button } from "./components/index.js";
 
 const useState = React.useState;
-const eventManager = new EventManager();
-
-ensureNativeAppState();
-
-let renderInFlight = false;
-let rerenderQueued = false;
-
-const root = createRoot();
-
-installListenerBridge(eventManager, () => {
-  queueMicrotask(() => {
-    syncRenderTree();
-  });
-});
 
 function App() {
   const [count, setCount] = useState(0);
 
   return (
-    <>
-      <Button className="" onClick={() => setCount(count + 1)}>
-        Button Count: {count}
-      </Button>
-      <Label className="">hey it's me!</Label>
-      {count > 4 && <Label>Greater than 4</Label>}
-    </>
+    <div className="bg-neutral-800 flex items-center w-full justify-between">
+      {/* <h1>DVUI React Bridge</h1>
+      <h2>Heading level 2</h2>
+      <h3>Heading level 3</h3> */}
+      <Button className="bg-green-500 text-neutral-100" onClick={() => setCount(count + 1)}>Increment</Button>
+      <Button className="bg-blue-500 text-neutral-100" onClick={() => setCount(count - 1)}>Decrease</Button>
+      <Button className="bg-red-500 text-neutral-100" onClick={() => setCount(0)}>Reset</Button>
+      <p>Count: {count}</p>
+      {count > 4 && <p>Greater than 4</p>}
+      {count < 0 && <p>Less than 0</p>}
+    </div>
   );
 }
 
-async function syncRenderTree() {
-  if (renderInFlight) {
-    rerenderQueued = true;
-    return;
-  }
-
-  renderInFlight = true;
-
-  try {
-    eventManager.reset();
-    const container = await render(<App />, root);
-    const snapshot = serializeContainer(container, { eventManager });
-    publishRenderSnapshot(snapshot);
-  } catch (error) {
-    console.error("Failed to render React bridge:", error);
-    if (error && typeof error === "object") {
-      if ("message" in error) console.error("Message:", error.message);
-      if ("stack" in error) console.error("Stack:", error.stack);
-    }
-  } finally {
-    renderInFlight = false;
-    if (rerenderQueued) {
-      rerenderQueued = false;
-      queueMicrotask(() => {
-        syncRenderTree();
-      });
-    }
-  }
-}
-
-editor.Tick.Connect(({ position }) => {
-  return position;
-});
-
-syncRenderTree();
+render(<App />);
