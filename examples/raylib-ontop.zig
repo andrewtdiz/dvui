@@ -1,15 +1,19 @@
 const std = @import("std");
 
 const dvui = @import("dvui");
+const FontId = dvui.Font.FontId;
 var layout_flex_content_justify = dvui.FlexBoxWidget.ContentPosition.start;
 var layout_flex_align_items = dvui.FlexBoxWidget.AlignItems.start;
 const RaylibBackend = @import("raylib-backend");
+const ray = RaylibBackend.c;
+
 const jsruntime = @import("jsruntime/mod.zig");
+const ReactBridge = @import("jsruntime/ReactBridge.zig");
+
 const js_console_log = std.log.scoped(.quickjs_console);
 
 const js_entry_script = "examples/resources/js/main.js";
-
-const ray = RaylibBackend.c;
+const theme_font_size_delta: f32 = 12.0;
 
 var layout_flex_direction: dvui.enums.Direction = .horizontal;
 var layout_flex_align_content: dvui.FlexBoxWidget.AlignContent = .start;
@@ -75,6 +79,17 @@ var debug_show_hitboxes = false;
 const scale_increment_step: f32 = 50.0;
 const rotation_increment_step: f32 = std.math.pi / 8.0;
 
+var selected = false;
+
+var selection_state = dvui.SelectionWidget.State{
+    .rect = .{
+        .x = 160,
+        .y = 120,
+        .w = 280,
+        .h = 200,
+    },
+};
+
 fn toggleProportional() void {
     use_proportional_scaling = !use_proportional_scaling;
     logScalingState("Proportional", use_proportional_scaling);
@@ -99,9 +114,6 @@ comptime {
 }
 
 const window_icon_png = @embedFile("zig-favicon.png");
-
-//TODO:
-//Figure out the best way to integrate raylib and dvui Event Handling
 
 var js_runtime: jsruntime.JSRuntime = undefined;
 var js_mouse_snapshot: jsruntime.MouseSnapshot = .{ .x = 0, .y = 0 };
@@ -135,6 +147,7 @@ pub fn main() !void {
     // OS window is managed by raylib, not dvui
     var win = try dvui.Window.init(@src(), gpa, backend.backend(), .{});
     defer win.deinit();
+    applySegoeFonts(&win);
 
     js_runtime = try jsruntime.JSRuntime.init(js_entry_script);
     jsruntime.setGlobalRuntime(&js_runtime);
@@ -194,18 +207,14 @@ pub fn main() !void {
 
         if (js_runtime.runFrame(frame_data)) |result| {
             selection_rotation = result.new_position;
-            updateSelectionBorderColorFromJs();
         } else |err| {
             std.log.err("JavaScript runFrame error: {s}", .{@errorName(err)});
         }
 
-        // marks the beginning of a frame for dvui, can call dvui functions after this
         try win.begin(std.time.nanoTimestamp());
 
-        // send all Raylib events to dvui for processing
         _ = try backend.addAllEvents(&win);
         forwardJsRuntimeEvents();
-        updateSelectionBorderColorFromJs();
 
         if (backend.shouldBlockRaylibInput()) {
             // NOTE: I am using raygui here because it has a simple lock-unlock system
@@ -218,7 +227,7 @@ pub fn main() !void {
         // the previous frame's render
         ray.ClearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
-        dvuiStuff();
+        ReactBridge.render(dvui, &js_runtime);
 
         // marks end of dvui frame, don't call dvui functions after this
         // - sends all dvui stuff to backend for rendering, must be called before EndDrawing()
@@ -246,18 +255,13 @@ fn forwardJsRuntimeEvents() void {
     }
 }
 
-fn updateSelectionBorderColorFromJs() void {
-    if (js_runtime.takeSelectionColor()) |color| {
-        selection_border_color = colorFromPacked(color);
-    }
-}
-
 fn colorFromPacked(value: u32) dvui.Color {
-    const r: u8 = @intCast((value >> 24) & 0xff);
-    const g: u8 = @intCast((value >> 16) & 0xff);
-    const b: u8 = @intCast((value >> 8) & 0xff);
-    const a: u8 = @intCast(value & 0xff);
-    return dvui.Color{ .r = r, .g = g, .b = b, .a = a };
+    const r: u8 = @truncate((value >> 24) & 0xff);
+    const g: u8 = @truncate((value >> 16) & 0xff);
+    const b: u8 = @truncate((value >> 8) & 0xff);
+    const a: u8 = @truncate(value & 0xff);
+    
+    return .{ .r = r, .g = g, .b = b, .a = a };
 }
 
 fn handleJsMouseEvent(mouse: dvui.Event.Mouse) void {
@@ -344,6 +348,19 @@ fn jsConsoleSink(_: ?*anyopaque, level: []const u8, message: []const u8) void {
     js_console_log.info("{s}: {s}", .{ level, message });
 }
 
+fn applySegoeFonts(win: *dvui.Window) void {
+    win.theme = win.theme.fontSizeAdd(theme_font_size_delta);
+    win.theme.font_body = win.theme.font_body.switchFont(FontId.SegoeUI);
+    win.theme.font_heading = win.theme.font_heading.switchFont(FontId.SegoeUIBd);
+    win.theme.font_caption = win.theme.font_caption.switchFont(FontId.SegoeUILt);
+    win.theme.font_caption_heading = win.theme.font_caption_heading.switchFont(FontId.SegoeUIIl);
+    win.theme.font_title = win.theme.font_title.switchFont(FontId.SegoeUIBd);
+    win.theme.font_title_1 = win.theme.font_title_1.switchFont(FontId.SegoeUIBd);
+    win.theme.font_title_2 = win.theme.font_title_2.switchFont(FontId.SegoeUIBd);
+    win.theme.font_title_3 = win.theme.font_title_3.switchFont(FontId.SegoeUIBd);
+    win.theme.font_title_4 = win.theme.font_title_4.switchFont(FontId.SegoeUIBd);
+}
+
 fn updateDebugHitboxView() void {
     for (dvui.events()) |*e| {
         switch (e.evt) {
@@ -384,48 +401,4 @@ fn updateDebugHitboxView() void {
             else => {},
         }
     }
-}
-
-var hovered = false;
-var selected = false;
-
-var selection_state = dvui.SelectionWidget.State{
-    .rect = .{
-        .x = 160,
-        .y = 120,
-        .w = 280,
-        .h = 200,
-    },
-};
-const selection_min_size = dvui.Size{ .w = 10, .h = 10 };
-
-fn dvuiStuff() void {
-    updateDebugHitboxView();
-
-    var overlay = dvui.overlay(@src(), .{
-        .expand = .both,
-        .name = "SelectionOverlay",
-    });
-    defer overlay.deinit();
-
-    const modifiers = dvui.SelectionWidget.TransformModifiers{
-        .proportional = use_proportional_scaling,
-        .centered = centered_scaling_enabled,
-        .fixed_increment = fixed_increment_scaling_enabled,
-        .scale_increment = scale_increment_step,
-        .rotation_increment = rotation_increment_step,
-    };
-
-    var selection = dvui.selectionBox(@src(), .{
-        .state = &selection_state,
-        .min_size = selection_min_size,
-        .transform_modifiers = modifiers,
-        .color_fill = dvui.Color{ .r = 0x20, .g = 0x9b, .b = 0xff, .a = 0x40 },
-        .color_border = dvui.Color{ .r = 0x20, .g = 0x9b, .b = 0xff, .a = 0xff },
-    }, .{
-        .rect = selection_state.rect,
-        .name = "SelectionWidget",
-    });
-    defer selection.deinit();
-    selection.draw();
 }

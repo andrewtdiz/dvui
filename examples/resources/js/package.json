@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "build:reconciler": "bunx --bun esbuild --bundle --format=esm --platform=neutral --log-level=info ./reconciler/reconciler.js --outfile=./reconciler.bundle.js",
+    "build:main": "bunx --bun esbuild ./main.jsx --format=esm --platform=neutral --loader:.jsx=jsx --target=es2020 --log-level=info --outfile=./main.js"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-reconciler": "^0.33.0",
+    "scheduler": "^0.23.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  }
+}

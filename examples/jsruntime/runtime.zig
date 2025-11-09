@@ -4,6 +4,7 @@ const quickjs = @import("quickjs");
 
 const alloc = @import("../alloc.zig");
 const console = @import("console.zig");
+pub const ConsoleSink = console.ConsoleSink;
 const event_ops = @import("events.zig");
 const frame_ops = @import("frame.zig");
 const hot_reload = @import("hotreload.zig");
@@ -21,25 +22,27 @@ pub const KeyEventKind = types.KeyEventKind;
 pub const KeyCode = types.KeyCode;
 
 const bootstrap_script_path = "examples/resources/js/runtime.js";
+const default_js_stack_size: usize = 8 * 1024 * 1024; // bump QJS limit for deeper React render stacks
 const CommandSlot = struct {
     command: ?FrameCommand = null,
     selection_color: ?SelectionColor = null,
 };
 
 var g_command_slot: ?*CommandSlot = null;
+var g_js_app: ?*quickjs.js_app = null;
 
 pub const EvalResult = struct {
     success: bool,
     result: []u8,
 };
 
-pub const ConsoleSink = console.ConsoleSink;
-
 pub const JSRuntime = @This();
 
 allocator: std.mem.Allocator,
 handle: *quickjs.js_app,
 command_slot: *CommandSlot,
+quickjs_runtime: *quickjs.JSRuntime,
+max_stack_usage: usize = 0,
 
 pub const Error = error{
     RuntimeInitFailed,
@@ -63,15 +66,29 @@ pub fn init(script_path: []const u8) Error!JSRuntime {
         if (curr_slot == slot) g_command_slot = null;
     };
 
+    g_js_app = runtime;
+    errdefer {
+        if (g_js_app) |curr_app| {
+            if (curr_app == runtime) g_js_app = null;
+        }
+    }
+
+    const ctx_ptr = quickjs.js_app_get_context(runtime) orelse return error.RuntimeInitFailed;
+    const quickjs_ctx: *quickjs.JSContext = @ptrCast(ctx_ptr);
+    const quickjs_runtime = quickjs.JS_GetRuntime(quickjs_ctx);
+    quickjs.JS_SetMaxStackSize(quickjs_runtime, default_js_stack_size);
+    quickjs.JS_UpdateStackTop(quickjs_runtime);
+
     var instance = JSRuntime{
         .allocator = allocator,
         .handle = runtime,
         .command_slot = slot,
+        .quickjs_runtime = quickjs_runtime,
     };
 
-    try evalScriptFile(allocator, runtime, bootstrap_script_path);
+    try evalScriptFile(allocator, runtime, bootstrap_script_path, .script);
     try instance.installNativeBindings();
-    try evalScriptFile(allocator, runtime, script_path);
+    try evalScriptFile(allocator, runtime, script_path, .module);
     try hot_reload.enable(script_path);
 
     return instance;
@@ -80,6 +97,9 @@ pub fn init(script_path: []const u8) Error!JSRuntime {
 pub fn deinit(self: *JSRuntime) void {
     if (g_command_slot == self.command_slot) {
         g_command_slot = null;
+    }
+    if (g_js_app == self.handle) {
+        g_js_app = null;
     }
     self.allocator.destroy(self.command_slot);
     quickjs.js_app_free(self.handle);
@@ -99,6 +119,21 @@ pub fn emitMouseEvent(self: *JSRuntime, event: MouseEvent) Error!void {
 
 pub fn emitKeyEvent(self: *JSRuntime, event: KeyEvent) Error!void {
     return event_ops.emitKeyEvent(self, event);
+}
+
+pub fn recordStackUsage(self: *JSRuntime) void {
+    const peak = quickjs.JS_GetStackPeakSize(self.quickjs_runtime);
+    if (peak == 0) return;
+    if (peak <= self.max_stack_usage) return;
+    self.max_stack_usage = peak;
+
+    const limit = quickjs.JS_GetMaxStackSize(self.quickjs_runtime);
+    if (limit > 0) {
+        const percent: usize = @intCast((@as(u128, peak) * 100) / @as(u128, limit));
+        std.log.info("QuickJS stack usage: {d}/{d} bytes ({d}%)", .{ peak, limit, percent });
+    } else {
+        std.log.info("QuickJS stack usage: {d} bytes (no limit)", .{peak});
+    }
 }
 
 pub fn setFloatProperty(
@@ -183,7 +218,57 @@ pub fn populateWindowEventCommon(
     return self.setStringProperty(ctx, target, "type", event_type);
 }
 
+pub fn invokeListener(self: *JSRuntime, listener_id: []const u8) Error!void {
+    const ctx = try self.acquireContext();
+
+    const global = quickjs.JS_GetGlobalObject(ctx);
+    defer quickjs.JS_FreeValue(ctx, global);
+    const global_const = quickjs.asValueConst(global);
+
+    const fn_name = "dvuiInvokeListener\x00";
+    const fn_value = quickjs.JS_GetPropertyStr(ctx, global_const, @ptrCast(fn_name.ptr));
+    defer quickjs.JS_FreeValue(ctx, fn_value);
+    const fn_const = quickjs.asValueConst(fn_value);
+    if (quickjs.JS_IsException(fn_const)) {
+        self.warnLastException("dvuiInvokeListener.lookup");
+        return error.CallFailed;
+    }
+    if (!quickjs.JS_IsFunction(ctx, fn_const)) {
+        std.log.err("Global dvuiInvokeListener is not callable", .{});
+        return error.CallFailed;
+    }
+
+    const arg_value = quickjs.JS_NewStringLen(ctx, @ptrCast(listener_id.ptr), listener_id.len);
+    const arg_const = quickjs.asValueConst(arg_value);
+    if (quickjs.JS_IsException(arg_const)) {
+        quickjs.JS_FreeValue(ctx, arg_value);
+        self.warnLastException("dvuiInvokeListener.arg");
+        return error.CallFailed;
+    }
+
+    var argv = [_]quickjs.JSValueConst{ arg_const };
+    const argc: c_int = argv.len;
+    const this_val = quickjs.JS_GetUndefined();
+    const result_value = quickjs.JS_Call(
+        ctx,
+        fn_const,
+        quickjs.asValueConst(this_val),
+        argc,
+        @ptrCast(&argv),
+    );
+    quickjs.JS_FreeValue(ctx, arg_value);
+
+    const result_const = quickjs.asValueConst(result_value);
+    if (quickjs.JS_IsException(result_const)) {
+        quickjs.JS_FreeValue(ctx, result_value);
+        self.warnLastException("dvuiInvokeListener.call");
+        return error.CallFailed;
+    }
+    quickjs.JS_FreeValue(ctx, result_value);
+}
+
 pub fn acquireContext(self: *JSRuntime) Error!*quickjs.JSContext {
+    quickjs.JS_UpdateStackTop(self.quickjs_runtime);
     const ctx_ptr = quickjs.js_app_get_context(self.handle) orelse {
         self.warnLastException("context");
         return error.CallFailed;
@@ -298,6 +383,10 @@ fn installNativeBindings(self: *JSRuntime) Error!void {
         quickjs.JS_FreeValue(ctx, engine_obj);
         return err;
     };
+    installEngineMethod(self, ctx, engine_const, "flushMicrotasks", engineFlushMicrotasks, 0) catch |err| {
+        quickjs.JS_FreeValue(ctx, engine_obj);
+        return err;
+    };
 
     const engine_prop = "engine\x00";
     const engine_prop_ptr: [*c]const u8 = @ptrCast(engine_prop.ptr);
@@ -310,17 +399,28 @@ fn installNativeBindings(self: *JSRuntime) Error!void {
     try console.installBindings(self, ctx, global_const);
 }
 
+const EvalScriptMode = enum {
+    script,
+    module,
+};
+
 fn evalScriptFile(
     allocator: std.mem.Allocator,
     runtime: *quickjs.js_app,
     path: []const u8,
+    mode: EvalScriptMode,
 ) Error!void {
     const script_c = allocator.allocSentinel(u8, path.len, 0) catch return error.ScriptLoadFailed;
     defer allocator.free(script_c);
 
     @memcpy(script_c[0..path.len], path);
 
-    if (quickjs.js_app_eval_file(runtime, script_c.ptr) != 0) {
+    const rc = switch (mode) {
+        .script => quickjs.js_app_eval_file(runtime, script_c.ptr),
+        .module => quickjs.js_app_eval_module_file(runtime, script_c.ptr),
+    };
+
+    if (rc != 0) {
         warnLastExceptionHandle(runtime, path);
         return error.ScriptLoadFailed;
     }
@@ -394,6 +494,20 @@ fn engineSetSelectionBorderColor(
                 slot.selection_color = value_u32;
             }
         }
+    }
+    return quickjs.JS_GetUndefined();
+}
+
+fn engineFlushMicrotasks(
+    _: *quickjs.JSContext,
+    _: quickjs.JSValueConst,
+    _: c_int,
+    _: [*c]quickjs.JSValueConst,
+) callconv(.c) quickjs.JSValue {
+    // Drain all pending microtasks using the global js_app handle
+    if (g_js_app) |app| {
+        // Execute all pending jobs (microtasks) with no limit (-1)
+        _ = quickjs.js_app_execute_jobs(app, -1);
     }
     return quickjs.JS_GetUndefined();
 }

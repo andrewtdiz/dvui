@@ -30,6 +30,8 @@ pub fn installBindings(
     }
 
     try installMethod(runtime, ctx, console_const, "log", engineConsoleLog);
+    try installMethod(runtime, ctx, console_const, "info", engineConsoleInfo);
+    try installMethod(runtime, ctx, console_const, "debug", engineConsoleDebug);
     try installMethod(runtime, ctx, console_const, "warn", engineConsoleWarn);
     try installMethod(runtime, ctx, console_const, "error", engineConsoleError);
 
@@ -120,6 +122,26 @@ fn engineConsoleLog(
     argv: [*c]quickjs.JSValueConst,
 ) callconv(.c) quickjs.JSValue {
     runtimeConsoleCallback("log", ctx, argc, argv);
+    return quickjs.JS_GetUndefined();
+}
+
+fn engineConsoleInfo(
+    ctx: *quickjs.JSContext,
+    _: quickjs.JSValueConst,
+    argc: c_int,
+    argv: [*c]quickjs.JSValueConst,
+) callconv(.c) quickjs.JSValue {
+    runtimeConsoleCallback("info", ctx, argc, argv);
+    return quickjs.JS_GetUndefined();
+}
+
+fn engineConsoleDebug(
+    ctx: *quickjs.JSContext,
+    _: quickjs.JSValueConst,
+    argc: c_int,
+    argv: [*c]quickjs.JSValueConst,
+) callconv(.c) quickjs.JSValue {
+    runtimeConsoleCallback("debug", ctx, argc, argv);
     return quickjs.JS_GetUndefined();
 }
 

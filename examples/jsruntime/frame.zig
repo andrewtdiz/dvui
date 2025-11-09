@@ -69,6 +69,14 @@ pub fn runFrame(runtime: anytype, frame_data: FrameData) !FrameResult {
     }
     defer quickjs.JS_FreeValue(ctx, result_value);
 
+    const pending_jobs = quickjs.js_app_execute_jobs(runtime.handle, 0);
+    if (pending_jobs < 0) {
+        runtime.warnLastException("runFrame.jobs");
+        return error.CallFailed;
+    }
+
+    runtime.recordStackUsage();
+
     if (runtime.takeFrameCommand()) |command| {
         switch (command) {
             .set_animated_position => |value| {

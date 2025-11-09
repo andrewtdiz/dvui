@@ -160,6 +160,10 @@ pub const FontId = enum(u64) {
     OpenDyslexicBd = dvui.fnv.hash("OpenDyslexicBd"),
     OpenDyslexicIt = dvui.fnv.hash("OpenDyslexicIt"),
     OpenDyslexicBdIt = dvui.fnv.hash("OpenDyslexicBdIt"),
+    SegoeUI = dvui.fnv.hash("SegoeUI"),
+    SegoeUIBd = dvui.fnv.hash("SegoeUIBd"),
+    SegoeUIIl = dvui.fnv.hash("SegoeUIIl"),
+    SegoeUILt = dvui.fnv.hash("SegoeUILt"),
     // Not included in TTFBytes but should still be named
     Noto = dvui.fnv.hash("Noto"),
     _,
@@ -220,6 +224,10 @@ pub const builtin = struct {
     pub const OpenDyslexicBd = @embedFile("fonts/OpenDyslexic/compiled/OpenDyslexic-Bold.otf");
     //pub const OpenDyslexicIt = @embedFile("fonts/OpenDyslexic/compiled/OpenDyslexic-Italic.otf");
     //pub const OpenDyslexicBdIt = @embedFile("fonts/OpenDyslexic/compiled/OpenDyslexic-Bold-Italic.otf");
+    pub const SegoeUI = @embedFile("fonts/Segoe/Segoe-UI.TTF");
+    pub const SegoeUIBd = @embedFile("fonts/Segoe/Segoe-UI-Bold.TTF");
+    pub const SegoeUIIl = @embedFile("fonts/Segoe/Segoe-UI-Italic.TTF");
+    pub const SegoeUILt = @embedFile("fonts/Segoe/Segoe-UI-Light.TTF");
 };
 
 pub const Cache = struct {
