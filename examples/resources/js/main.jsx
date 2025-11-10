@@ -1,5 +1,5 @@
 import { React, render } from "./dvui.js";
-import { Button } from "./components/index.js";
+import { Button, Image } from "./components/index.js";
 
 const useState = React.useState;
 
@@ -15,6 +15,8 @@ function App() {
       <Button className="bg-blue-500 text-neutral-100" onClick={() => setCount(count - 1)}>Decrease</Button>
       <Button className="bg-red-500 text-neutral-100" onClick={() => setCount(0)}>Reset</Button>
       <p>Count: {count}</p>
+      <p>Here is the Zig favicon:</p>
+      {/* <Image src="zig-favicon.png" /> */}
       {count > 4 && <p>Greater than 4</p>}
       {count < 0 && <p>Less than 0</p>}
     </div>

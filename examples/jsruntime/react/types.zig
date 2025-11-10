@@ -27,18 +27,20 @@ pub const ReactCommand = struct {
     on_click_id: ?[]const u8 = null,
     style: ReactCommandStyle = .{},
     flex: ?ReactFlexProps = null,
+    image_src: ?[]const u8 = null,
 };
 
 pub const ReactCommandMap = std.StringHashMap(ReactCommand);
 
 pub const CommandType = enum {
-    @"box",
-    @"div",
-    @"FlexBox",
-    @"p",
-    @"h1",
-    @"h2",
-    @"h3",
-    @"button",
+    box,
+    div,
+    FlexBox,
+    p,
+    h1,
+    h2,
+    h3,
+    button,
+    image,
     @"text-content",
 };
