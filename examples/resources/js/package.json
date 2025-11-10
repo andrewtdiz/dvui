@@ -1,14 +1,15 @@
 {
   "scripts": {
-    "build:reconciler": "bunx --bun esbuild --bundle --format=esm --platform=neutral --log-level=info ./reconciler/reconciler.js --outfile=./reconciler.bundle.js",
-    "build:main": "bunx --bun esbuild ./main.jsx --format=esm --platform=neutral --loader:.jsx=jsx --target=es2020 --log-level=info --outfile=./main.js"
+    "build:main": "bun scripts/build-main.ts"
   },
   "dependencies": {
+    "@babel/core": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "babel-preset-solid": "^1.9.10",
     "react": "^19.2.0",
     "react-reconciler": "^0.33.0",
-    "scheduler": "^0.23.2"
+    "scheduler": "^0.23.2",
+    "solid-js": "^1.9.10"
   },
-  "devDependencies": {
-    "esbuild": "^0.21.5"
-  }
+  "devDependencies": {}
 }

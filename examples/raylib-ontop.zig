@@ -8,7 +8,7 @@ const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.c;
 
 const jsruntime = @import("jsruntime/mod.zig");
-const react = @import("jsruntime/react/mod.zig");
+const solid = @import("jsruntime/solid/mod.zig");
 
 const js_console_log = std.log.scoped(.quickjs_console);
 
@@ -203,7 +203,7 @@ pub fn main() !void {
         }
         ray.ClearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
-        react.render(&js_runtime);
+        solid.render(&js_runtime);
 
         _ = try win.end(.{});
 

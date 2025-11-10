@@ -6,7 +6,7 @@
     .font_name_caption = "SegoeUI",
     .font_name_title = "SegoeUIBd",
 
-    .focus = "#737373",
+    .focus = "#5E9ED6",
     .text = "#fafafa",
     .text_hover = "#a1a1a1",
     .text_press = "#171717",

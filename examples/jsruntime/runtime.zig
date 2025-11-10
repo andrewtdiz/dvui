@@ -22,7 +22,7 @@ pub const KeyEventKind = types.KeyEventKind;
 pub const KeyCode = types.KeyCode;
 
 const bootstrap_script_path = "examples/resources/js/runtime.js";
-const default_js_stack_size: usize = 8 * 1024 * 1024; // bump QJS limit for deeper React render stacks
+const default_js_stack_size: usize = 8 * 1024 * 1024; // bump QJS limit for deeper render stacks
 const CommandSlot = struct {
     command: ?FrameCommand = null,
     selection_color: ?SelectionColor = null,
