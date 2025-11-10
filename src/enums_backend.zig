@@ -10,6 +10,7 @@ pub const Backend = enum {
     sdl3,
     raylib,
     dx11,
+    wgpu,
     web,
     /// Does no rendering!
     testing,
