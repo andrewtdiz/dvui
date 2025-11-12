@@ -16,10 +16,6 @@ pub const Subwindow = struct {
     rect: Rect,
     rect_pixels: Rect.Physical,
     focused_widget_id: ?Id = null,
-    /// Uses `arena` allocator
-    render_cmds: std.ArrayList(dvui.RenderCommand) = .empty,
-    /// Uses `arena` allocator
-    render_cmds_after: std.ArrayList(dvui.RenderCommand) = .empty,
     used: bool = true,
     modal: bool = false,
     stay_above_parent_window: ?Id = null,
@@ -29,9 +25,6 @@ pub const Subwindow = struct {
 
 pub fn add(self: *Subwindows, gpa: std.mem.Allocator, id: Id, rect: Rect, rect_pixels: Rect.Physical, modal: bool, stay_above_parent_window: ?Id, mouse_events: bool) !void {
     if (self.get(id)) |sw| {
-        if (sw.render_cmds.items.len > 0 or sw.render_cmds_after.items.len > 0) {
-            dvui.log.warn("subwindowAdd {x} is clearing some drawing commands (did you try to draw between subwindowCurrentSet and subwindowAdd?)\n", .{id});
-        }
         // this window was here previously, just update data, so it stays in the same place in the stack
         sw.used = true;
         sw.rect = rect;
@@ -39,9 +32,6 @@ pub fn add(self: *Subwindows, gpa: std.mem.Allocator, id: Id, rect: Rect, rect_p
         sw.modal = modal;
         sw.stay_above_parent_window = stay_above_parent_window;
         sw.mouse_events = mouse_events;
-
-        sw.render_cmds.clearRetainingCapacity();
-        sw.render_cmds_after.clearRetainingCapacity();
         return;
     }
     // haven't seen this window before
@@ -167,7 +157,6 @@ const dvui = @import("./dvui.zig");
 const Id = dvui.Id;
 const Rect = dvui.Rect;
 const Point = dvui.Point;
-const RenderCommand = dvui.RenderCommand;
 
 test {
     @import("std").testing.refAllDecls(@This());

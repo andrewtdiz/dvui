@@ -91,6 +91,36 @@ pub const StartOptions = struct {
     /// be used for all backends and platforms, meaning the platform
     /// defaults will be overrulled.
     window_init_options: dvui.Window.InitOptions = .{},
+    /// Controls whether the new webview-powered frontend is enabled and which
+    /// HTML entry point should be mounted when it is.
+    webview: WebviewOptions = .{},
+
+    /// Returns the active webview configuration if the feature is enabled.
+    pub fn webviewConfig(self: StartOptions) ?WebviewOptions {
+        if (!self.webview.enable) return null;
+        return self.webview;
+    }
+
+    /// Helper used by backends that need to bootstrap the JavaScript runtime.
+    /// Allocates and returns a configured `JSRuntime` instance when webview
+    /// support is turned on.
+    pub fn initJsRuntime(self: StartOptions, allocator: std.mem.Allocator) !?jsruntime.JSRuntime {
+        if (!self.webview.enable) return null;
+
+        var runtime = jsruntime.JSRuntime.init(allocator, self.webview.index_html_path);
+        try runtime.ensureIndexLoaded();
+        return runtime;
+    }
+};
+
+/// Declarative configuration for the DOM/webview frontend.
+pub const WebviewOptions = struct {
+    enable: bool = false,
+    /// Path to the HTML shell that hosts the SolidJS bundle.
+    index_html_path: []const u8 = "src/backends/index.html",
+    /// CSS selector that represents the default DOM target where native events
+    /// should be re-injected.
+    target_selector: []const u8 = "#root",
 };
 
 pub const Result = enum {
@@ -120,6 +150,7 @@ pub fn get() ?App {
 
 const std = @import("std");
 const dvui = @import("dvui.zig");
+const jsruntime = @import("jsruntime/runtime.zig");
 
 test {
     std.testing.refAllDecls(@This());

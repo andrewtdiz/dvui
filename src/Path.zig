@@ -142,37 +142,8 @@ pub const FillConvexOptions = struct {
 ///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn fillConvex(path: Path, opts: FillConvexOptions) void {
-    if (path.points.len < 3) {
-        return;
-    }
-
-    if (dvui.clipGet().empty()) {
-        return;
-    }
-
-    const cw = dvui.currentWindow();
-
-    if (!cw.render_target.rendering) {
-        const new_path = path.dupe(cw.arena()) catch |err| {
-            dvui.logError(@src(), err, "Could not reallocate path for render command", .{});
-            return;
-        };
-        cw.addRenderCommand(.{ .pathFillConvex = .{ .path = new_path, .opts = opts } }, false);
-        return;
-    }
-
-    var options = opts;
-    options.color = options.color.opacity(cw.alpha);
-
-    var triangles = path.fillConvexTriangles(cw.lifo(), options) catch |err| {
-        dvui.logError(@src(), err, "Could not get triangles for path", .{});
-        return;
-    };
-    defer triangles.deinit(cw.lifo());
-    dvui.renderTriangles(triangles, null) catch |err| {
-        dvui.logError(@src(), err, "Could not draw path, opts: {any}", .{options});
-        return;
-    };
+    _ = path;
+    _ = opts;
 }
 
 /// Generates triangles to fill path (must be convex).
@@ -301,33 +272,8 @@ pub const StrokeOptions = struct {
 ///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn stroke(path: Path, opts: StrokeOptions) void {
-    if (path.points.len == 0) {
-        return;
-    }
-
-    const cw = dvui.currentWindow();
-
-    if (opts.after or !cw.render_target.rendering) {
-        const new_path = path.dupe(cw.arena()) catch |err| {
-            dvui.logError(@src(), err, "Could not reallocate path for render command", .{});
-            return;
-        };
-        cw.addRenderCommand(.{ .pathStroke = .{ .path = new_path, .opts = opts } }, opts.after);
-        return;
-    }
-
-    var options = opts;
-    options.color = options.color.opacity(cw.alpha);
-
-    var triangles = path.strokeTriangles(cw.lifo(), options) catch |err| {
-        dvui.logError(@src(), err, "Could not get triangles for path", .{});
-        return;
-    };
-    defer triangles.deinit(cw.lifo());
-    dvui.renderTriangles(triangles, null) catch |err| {
-        dvui.logError(@src(), err, "Could not draw path, opts: {any}", .{opts});
-        return;
-    };
+    _ = path;
+    _ = opts;
 }
 
 /// Generates triangles to stroke path.

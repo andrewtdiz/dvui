@@ -7,10 +7,15 @@
 pub const Window = @This();
 const Self = Window;
 
+pub const NativeActionHandler = jsruntime.JSRuntime.ActionCallback;
+
 // Would it make sense to have a separate scope for the window ?
 pub const log = std.log.scoped(.dvui);
 
 backend: dvui.Backend,
+js_runtime: ?*jsruntime.JSRuntime = null,
+dom_target_selector: []const u8 = "#root",
+native_action_handler: ?NativeActionHandler = null,
 previous_window: ?*Window = null,
 
 subwindows: dvui.Subwindows = .{},
@@ -30,6 +35,7 @@ kerning: bool = true,
 /// The alpha value for all rendering. All colors alpha values will be
 /// multiplied by this value.
 alpha: f32 = 1.0,
+legacy_rendering_enabled: bool = true,
 
 /// Uses `arena` allocator
 events: std.ArrayListUnmanaged(Event) = .{},
@@ -116,8 +122,6 @@ _arena: std.heap.ArenaAllocator,
 _lifo_arena: std.heap.ArenaAllocator,
 /// Used to allocate widgets with a fixed location
 _widget_stack: std.heap.ArenaAllocator,
-render_target: dvui.RenderTarget = .{ .texture = null, .offset = .{} },
-end_rendering_done: bool = false,
 
 debug: @import("Debug.zig") = .{},
 
@@ -138,6 +142,13 @@ pub const InitOptions = struct {
     } = null,
 
     button_order: ?dvui.enums.DialogButtonOrder = null,
+    /// Optional pointer to the JS runtime hosting the DOM-based frontend.
+    js_runtime: ?*jsruntime.JSRuntime = null,
+    /// CSS selector describing the DOM element that should receive forwarded
+    /// native events.
+    dom_target_selector: []const u8 = "#root",
+    /// Optional callback invoked when JavaScript calls `dvui.native.performAction`.
+    native_action_handler: ?NativeActionHandler = null,
 };
 
 pub fn init(
@@ -168,6 +179,9 @@ pub fn init(
         // Set in `begin`
         .current_parent = undefined,
         .backend = backend_ctx,
+        .js_runtime = init_opts.js_runtime,
+        .dom_target_selector = init_opts.dom_target_selector,
+        .native_action_handler = init_opts.native_action_handler,
         // TODO: Add some way to opt-out of including the builtin fonts in the built binary
         .fonts = try .initWithBuiltins(gpa),
         .theme = if (init_opts.theme) |t| t else switch (init_opts.color_scheme orelse backend_ctx.preferredColorScheme() orelse .light) {
@@ -177,7 +191,9 @@ pub fn init(
         .accesskit = .{},
     };
 
-    try self.initEvents();
+	try self.initEvents();
+
+	self.installJsBridge();
 
     self.button_order = init_opts.button_order orelse switch (builtin.os.tag) {
         .windows => .ok_cancel,
@@ -495,6 +511,7 @@ pub fn addEventKey(self: *Self, event: Event.Key) std.mem.Allocator.Error!bool {
         .target_windowId = self.subwindows.focused_id,
         .target_widgetId = if (self.subwindows.focused()) |sw| sw.focused_widget_id else null,
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != self.subwindows.focused_id);
     try self.positionMouseEventAdd();
@@ -531,6 +548,7 @@ pub fn addEventText(self: *Self, opts: AddEventTextOptions) std.mem.Allocator.Er
         .target_windowId = self.subwindows.focused_id,
         .target_widgetId = opts.target_id orelse if (self.subwindows.focused()) |sw| sw.focused_widget_id else null,
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != self.subwindows.focused_id);
     try self.positionMouseEventAdd();
@@ -574,6 +592,7 @@ pub fn addEventFocus(self: *Self, opts: AddEventFocusOptions) std.mem.Allocator.
             },
         },
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     try self.positionMouseEventAdd();
     return (self.data().id != winId);
@@ -618,6 +637,7 @@ pub fn addEventMouseMotion(self: *Self, opts: AddEventMouseMotionOptions) std.me
             },
         },
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != winId);
     try self.positionMouseEventAdd();
@@ -692,6 +712,7 @@ pub fn addEventPointer(self: *Self, opts: AddEventPointerOptions) std.mem.Alloca
             },
         },
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != winId);
     try self.positionMouseEventAdd();
@@ -734,6 +755,7 @@ pub fn addEventMouseWheel(self: *Self, ticks: f32, dir: dvui.enums.Direction) st
             },
         },
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != winId);
     try self.positionMouseEventAdd();
@@ -772,10 +794,227 @@ pub fn addEventTouchMotion(self: *Self, finger: dvui.enums.Button, xnorm: f32, y
             },
         },
     });
+    self.forwardEventToBridge(&self.events.items[self.events.items.len - 1]);
 
     const ret = (self.data().id != winId);
     try self.positionMouseEventAdd();
     return ret;
+}
+
+fn forwardEventToBridge(self: *Self, event: *const Event) void {
+    const runtime = self.js_runtime orelse return;
+    if (self.dom_target_selector.len == 0) return;
+
+    const json = eventToJson(self.gpa, event, self.dom_target_selector, self.modifiers) catch |err| {
+        log.warn("unable to encode native event for webview bridge: {any}", .{err});
+        return;
+    };
+    defer self.gpa.free(json);
+
+    runtime.dispatchNativeEvent(json) catch |err| {
+        log.warn("unable to dispatch native event to JavaScript: {any}", .{err});
+    };
+}
+
+pub fn setNativeActionHandler(self: *Self, handler: ?NativeActionHandler) void {
+    self.native_action_handler = handler;
+}
+
+pub fn forwardJsMessage(self: *Self, message_json: []const u8) void {
+    const runtime = self.js_runtime orelse {
+        log.warn("received JS envelope but no runtime is attached", .{});
+        return;
+    };
+    runtime.handleMessageFromJs(message_json) catch |err| {
+        log.warn("unable to handle JS envelope: {any}", .{err});
+    };
+}
+
+fn installJsBridge(self: *Self) void {
+    const runtime = self.js_runtime orelse return;
+    runtime.setActionHandler(.{
+        .ctx = self,
+        .handler = handleActionFromJs,
+    });
+    runtime.executeJavaScript(
+        \\window.dvui && window.dvui.test && window.dvui.test('window-ready');
+    ) catch |err| {
+        log.warn("unable to invoke dvui.test from Zig: {any}", .{err});
+    };
+}
+
+fn handleActionFromJs(ctx: ?*anyopaque, action_name: []const u8, payload_json: []const u8) anyerror!void {
+    if (ctx == null) return;
+    const self: *Self = @ptrCast(@alignCast(ctx.?));
+    try self.dispatchJsAction(action_name, payload_json);
+}
+
+fn dispatchJsAction(self: *Self, action_name: []const u8, payload_json: []const u8) !void {
+    if (self.native_action_handler) |handler| {
+        try handler.handler(handler.ctx, action_name, payload_json);
+        return;
+    }
+
+    log.info(
+        "JS requested action '{s}' with payload '{s}', but no native handler is installed",
+        .{ action_name, payload_json },
+    );
+}
+
+fn eventToJson(
+    allocator: std.mem.Allocator,
+    event: *const Event,
+    target_selector: []const u8,
+    fallback_mods: dvui.enums.Mod,
+) ![]u8 {
+    var buffer = std.ArrayList(u8).init(allocator);
+    errdefer buffer.deinit();
+
+    var writer = buffer.writer();
+    var first = true;
+    try writer.writeByte('{');
+
+    switch (event.evt) {
+        .mouse => |mouse| {
+            const event_type: []const u8 = switch (mouse.action) {
+                .press => "mousedown",
+                .release => "mouseup",
+                .wheel_x, .wheel_y => "wheel",
+                .focus => "focus",
+                .motion, .position => "mousemove",
+            };
+            try writeStringField(&writer, &first, "type", event_type);
+
+            const pointer_type: []const u8 = if (mouse.button.touch()) "touch" else "mouse";
+            try writeStringField(&writer, &first, "pointerType", pointer_type);
+            try writeIntField(&writer, &first, "pointerId", pointerIdFromButton(mouse.button));
+
+            if (mouse.action != .focus) {
+                try writeFloatField(&writer, &first, "clientX", @floatFromInt(f32, mouse.p.x));
+                try writeFloatField(&writer, &first, "clientY", @floatFromInt(f32, mouse.p.y));
+            }
+
+            switch (mouse.action) {
+                .press, .release => {
+                    if (mapButtonToDom(mouse.button)) |index| {
+                        try writeIntField(&writer, &first, "button", index);
+                    }
+                },
+                .motion => |delta| {
+                    try writeFloatField(&writer, &first, "movementX", @floatFromInt(f32, delta.x));
+                    try writeFloatField(&writer, &first, "movementY", @floatFromInt(f32, delta.y));
+                },
+                .wheel_x => |dx| {
+                    try writeFloatField(&writer, &first, "deltaX", dx);
+                },
+                .wheel_y => |dy| {
+                    try writeFloatField(&writer, &first, "deltaY", dy);
+                },
+                else => {},
+            }
+        },
+        .key => |key| {
+            const event_type: []const u8 = switch (key.action) {
+                .down, .repeat => "keydown",
+                .up => "keyup",
+            };
+            try writeStringField(&writer, &first, "type", event_type);
+
+            const key_name = @tagName(key.code);
+            try writeStringField(&writer, &first, "key", key_name);
+            try writeStringField(&writer, &first, "code", key_name);
+            if (key.action == .repeat) {
+                try writeBoolField(&writer, &first, "repeat", true);
+            }
+        },
+        .text => |text| {
+            try writeStringField(&writer, &first, "type", "beforeinput");
+            if (text.txt.len > 0) {
+                try writeStringField(&writer, &first, "data", text.txt);
+            }
+            if (text.selected) try writeBoolField(&writer, &first, "selected", true);
+            if (text.replace) try writeBoolField(&writer, &first, "replace", true);
+        },
+    }
+
+    try writeStringField(&writer, &first, "target", target_selector);
+    try writeBoolField(&writer, &first, "bubbles", true);
+
+    const mods = switch (event.evt) {
+        .mouse => |mouse| mouse.mod,
+        .key => |key| key.mod,
+        .text => fallback_mods,
+    };
+
+    try writeBoolField(&writer, &first, "shiftKey", mods.shift());
+    try writeBoolField(&writer, &first, "ctrlKey", mods.control());
+    try writeBoolField(&writer, &first, "altKey", mods.alt());
+    try writeBoolField(&writer, &first, "metaKey", mods.command());
+
+    try writer.writeByte('}');
+    return try buffer.toOwnedSlice();
+}
+
+fn writeStringField(writer: anytype, first: *bool, key: []const u8, value: []const u8) !void {
+    try writeFieldPrefix(writer, first, key);
+    try writeJSONString(writer, value);
+}
+
+fn writeBoolField(writer: anytype, first: *bool, key: []const u8, value: bool) !void {
+    try writeFieldPrefix(writer, first, key);
+    try writer.writeAll(if (value) "true" else "false");
+}
+
+fn writeFloatField(writer: anytype, first: *bool, key: []const u8, value: f32) !void {
+    try writeFieldPrefix(writer, first, key);
+    try writer.print("{f}", .{@floatCast(f64, value)});
+}
+
+fn writeIntField(writer: anytype, first: *bool, key: []const u8, value: i32) !void {
+    try writeFieldPrefix(writer, first, key);
+    try writer.print("{d}", .{value});
+}
+
+fn writeFieldPrefix(writer: anytype, first: *bool, key: []const u8) !void {
+    if (!first.*) try writer.writeByte(',') else first.* = false;
+    try writeJSONString(writer, key);
+    try writer.writeByte(':');
+}
+
+fn writeJSONString(writer: anytype, value: []const u8) !void {
+    try writer.writeByte('"');
+    for (value) |char| switch (char) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        '\n' => try writer.writeAll("\\n"),
+        '\r' => try writer.writeAll("\\r"),
+        '\t' => try writer.writeAll("\\t"),
+        else => {
+            if (char < 0x20) {
+                try writer.print("\\u{x:0>4}", .{@intCast(u16, char)});
+            } else {
+                try writer.writeByte(char);
+            }
+        },
+    };
+    try writer.writeByte('"');
+}
+
+fn mapButtonToDom(button: dvui.enums.Button) ?i32 {
+    return switch (button) {
+        .left => 0,
+        .middle => 1,
+        .right => 2,
+        else => null,
+    };
+}
+
+fn pointerIdFromButton(button: dvui.enums.Button) i32 {
+    if (button.touch()) {
+        const offset = @intFromEnum(button) - @intFromEnum(dvui.enums.Button.touch0);
+        return @intCast(i32, offset);
+    }
+    return 0;
 }
 
 pub fn FPS(self: *const Self) f32 {
@@ -981,7 +1220,6 @@ pub fn begin(
         }
     }
 
-    self.end_rendering_done = false;
     self.cursor_requested = null;
     self.text_input_rect = null;
     self.last_focused_id_this_frame = .zero;
@@ -1128,76 +1366,6 @@ pub fn textInputRequested(self: *const Self) ?Rect.Natural {
     return self.text_input_rect;
 }
 
-pub fn addRenderCommand(self: *Self, cmd: dvui.RenderCommand.Command, after: bool) void {
-    var sw = self.subwindows.current() orelse &self.subwindows.stack.items[0];
-    const render_cmd: dvui.RenderCommand = .{
-        .clip = self.clipRect,
-        .alpha = self.alpha,
-        .snap = self.snap_to_pixels,
-        .kerning = self.kerning,
-        .cmd = cmd,
-    };
-    if (after) {
-        sw.render_cmds_after.append(self.arena(), render_cmd) catch |err| {
-            dvui.logError(@src(), err, "Could not append to render_cmds_after", .{});
-        };
-    } else {
-        sw.render_cmds.append(self.arena(), render_cmd) catch |err| {
-            dvui.logError(@src(), err, "Could not append to render_cmds", .{});
-        };
-    }
-}
-
-pub fn renderCommands(self: *Self, queue: []const dvui.RenderCommand) !void {
-    const old_snap = self.snap_to_pixels;
-    defer self.snap_to_pixels = old_snap;
-
-    const old_kern = self.kerning;
-    defer self.kerning = old_kern;
-
-    const old_alpha = self.alpha;
-    defer self.alpha = old_alpha;
-
-    const old_clip = self.clipRect;
-    defer self.clipRect = old_clip;
-
-    const old_rendering = self.render_target.rendering;
-    self.render_target.rendering = true;
-    defer self.render_target.rendering = old_rendering;
-
-    for (queue) |*drc| {
-        self.snap_to_pixels = drc.snap;
-        self.kerning = drc.kerning;
-        self.clipRect = drc.clip;
-        self.alpha = drc.alpha;
-        switch (drc.cmd) {
-            .text => |t| {
-                try dvui.renderText(t);
-            },
-            .texture => |t| {
-                try dvui.renderTexture(t.tex, t.rs, t.opts);
-            },
-            .pathFillConvex => |pf| {
-                var options = pf.opts;
-                options.color = options.color.opacity(self.alpha);
-                var triangles = try pf.path.fillConvexTriangles(self.lifo(), options);
-                defer triangles.deinit(self.lifo());
-                try dvui.renderTriangles(triangles, null);
-            },
-            .pathStroke => |ps| {
-                var options = ps.opts;
-                options.color = options.color.opacity(self.alpha);
-                var triangles = try ps.path.strokeTriangles(self.lifo(), options);
-                defer triangles.deinit(self.lifo());
-                try dvui.renderTriangles(triangles, null);
-            },
-            .triangles => |t| {
-                try dvui.renderTriangles(t.tri, t.tex);
-            },
-        }
-    }
-}
-
 pub fn timer(self: *Self, id: Id, micros: i32) void {
     // when start_time is in the future, we won't spam frames, so this will
     // cause a single frame and then expire
@@ -1260,22 +1428,6 @@ pub fn endRendering(self: *Self, opts: endOptions) void {
     }
 
     self.debug.show();
-
-    for (self.subwindows.stack.items) |*sw| {
-        self.renderCommands(sw.render_cmds.items) catch |err| {
-            dvui.logError(@src(), err, "Failed to render commands for subwindow {x}", .{sw.id});
-        };
-        // Set to empty because it's allocated on the arena and will be freed there
-        sw.render_cmds = .empty;
-
-        self.renderCommands(sw.render_cmds_after.items) catch |err| {
-            dvui.logError(@src(), err, "Failed to render commands after for subwindow {x}", .{sw.id});
-        };
-        // Set to empty because it's allocated on the arena and will be freed there
-        sw.render_cmds_after = .empty;
-    }
-
-    self.end_rendering_done = true;
 }
 
 /// End of this window gui's rendering.  Renders retained dialogs and all
@@ -1287,9 +1439,7 @@ pub fn end(self: *Self, opts: endOptions) !?u32 {
     // make sure all widgets reset the parent
     dvui.parentReset(self.data().id, self.widget());
 
-    if (!self.end_rendering_done) {
-        self.endRendering(opts);
-    }
+    self.endRendering(opts);
 
     // Call this before freeing data so backend can use data allocated during frame.
     try self.backend.end();
@@ -1470,6 +1620,7 @@ const std = @import("std");
 const math = std.math;
 const builtin = @import("builtin");
 const dvui = @import("dvui.zig");
+const jsruntime = @import("jsruntime/runtime.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

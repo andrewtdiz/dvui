@@ -221,7 +221,6 @@ pub fn dragEnd() void {
 }
 
 pub const render = @import("render.zig");
-pub const RenderCommand = render.RenderCommand;
 pub const RenderTarget = render.Target;
 pub const renderTarget = render.Target.setAsCurrent;
 pub const renderTriangles = render.renderTriangles;
@@ -1081,9 +1080,9 @@ pub fn parentReset(id: Id, prev_parent: Widget) void {
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn renderingSet(r: bool) bool {
     const cw = currentWindow();
-    const ret = cw.render_target.rendering;
-    cw.render_target.rendering = r;
-    return ret;
+    const previous = cw.legacy_rendering_enabled;
+    cw.legacy_rendering_enabled = r;
+    return previous;
 }
 
 /// Get the OS window size in natural pixels.  Physical pixels might be more on

@@ -1,6 +1,7 @@
 const std = @import("std");
 const dvui = @import("dvui");
 const wgpu = @import("wgpu");
+const jsruntime = @import("../jsruntime/runtime.zig");
 
 pub const kind: dvui.enums.Backend = .wgpu;
 
@@ -23,6 +24,7 @@ pub const InitOptions = struct {
     sample_count: u32 = 1,
     max_frames_in_flight: u32 = 1,
     preferred_color_scheme: ?dvui.enums.ColorScheme = null,
+    js_runtime: ?*jsruntime.JSRuntime = null,
 };
 
 const DrawCommand = struct {
@@ -75,6 +77,7 @@ depth_format: ?wgpu.TextureFormat,
 sample_count: u32,
 max_frames_in_flight: u32,
 preferred_color_scheme: ?dvui.enums.ColorScheme,
+js_runtime: ?*jsruntime.JSRuntime = null,
 
 surface: SurfaceConfig = .{},
 
@@ -107,6 +110,7 @@ pub fn init(options: InitOptions) !WgpuBackend {
         .sample_count = options.sample_count,
         .max_frames_in_flight = options.max_frames_in_flight,
         .preferred_color_scheme = options.preferred_color_scheme,
+        .js_runtime = options.js_runtime,
     };
 
     try wgpu_backend.ensurePipeline();
@@ -177,6 +181,10 @@ pub fn hasCommands(self: *const WgpuBackend) bool {
 }
 
 pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wgpu.TextureView) !void {
+    if (self.js_runtime != null) {
+        self.clearFrameData();
+        return;
+    }
     if (self.draw_commands.items.len == 0) return;
 
     try self.ensurePipeline();
@@ -229,6 +237,9 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
 pub fn begin(self: *WgpuBackend, arena: std.mem.Allocator) !void {
     self.frame_arena = arena;
     self.clearFrameData();
+    if (self.js_runtime) |runtime| {
+        try runtime.ensureIndexLoaded();
+    }
 }
 
 pub fn end(_: *WgpuBackend) !void {}
@@ -373,6 +384,10 @@ pub fn textureFromTarget(_: *WgpuBackend, _: dvui.TextureTarget) dvui.Backend.Te
 
 pub fn renderTarget(_: *WgpuBackend, _: ?dvui.TextureTarget) dvui.Backend.GenericError!void {
     return error.BackendError;
+}
+
+pub fn attachJsRuntime(self: *WgpuBackend, runtime: *jsruntime.JSRuntime) void {
+    self.js_runtime = runtime;
 }
 
 pub fn clipboardText(_: *WgpuBackend) dvui.Backend.GenericError![]const u8 {

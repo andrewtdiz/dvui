@@ -1,21 +1,94 @@
-<!doctype html>
-<html lang="en" style="height: 100%;">
+<!DOCTYPE html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DVUI Hybrid Webview</title>
+    <style>
+      :root,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #111827;
+        color: #e5e7eb;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
 
-    <title>DVUI Web Backend</title>
-    <!-- TEMPLATE_HASH replaced by build.zig -->
-    <script src="web.js?cache-buster=TEMPLATE_HASH_WITH_PADDING__ITS_64_BYTES_LONG_THE_SAME_AS_SHA256"></script>
+      #root {
+        height: 100%;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .dvui-shell {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 2rem;
+        max-width: 960px;
+        margin: 0 auto;
+        box-sizing: border-box;
+      }
+
+      .dvui-shell__header {
+        border-bottom: 1px solid #1f2937;
+        padding-bottom: 1rem;
+      }
+
+      .dvui-shell__content {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .dvui-shell__content button {
+        align-self: flex-start;
+        padding: 0.5rem 1.25rem;
+        border-radius: 0.5rem;
+        border: 1px solid #6b7280;
+        background: #111827;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .dvui-shell__content button:hover {
+        border-color: #93c5fd;
+      }
+
+      .dvui-shell__bubble-demo {
+        border: 1px solid #1f2937;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        background: #0f172a;
+      }
+
+      .dvui-shell__bubble-log {
+        list-style: none;
+        padding-left: 0;
+        margin: 0.75rem 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .dvui-shell__bubble-log code {
+        padding: 0.1rem 0.35rem;
+        border-radius: 0.25rem;
+        background: #1f2937;
+      }
+    </style>
+    <script type="module" src="./main.js" defer></script>
   </head>
-
-  <body style="height: 100%; margin: 0; padding: 0;" onload='dvui("#dvui-canvas", "web.wasm?cache-buster=TEMPLATE_HASH_WITH_PADDING__ITS_64_BYTES_LONG_THE_SAME_AS_SHA256");'>
-    <!-- need tabIndex for the canvas to receive keydown/keyup/beforeinput events -->
-    <canvas id="dvui-canvas" tabIndex="1" style="display: block; width: 100%; height: 100%; outline: none; caret-color: transparent;"></canvas>
+  <body>
+    <div id="root">
+      <noscript>DVUI requires JavaScript to render the interface.</noscript>
+    </div>
   </body>
 </html>
