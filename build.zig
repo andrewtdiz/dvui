@@ -22,6 +22,7 @@ pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const quickjs_dep = b.dependency("zig_quickjs", .{});
     const use_lld = b.option(bool, "use-lld", "Link executables with lld");
     const linux_display_backend = detectLinuxDisplayBackend(b, target);
 
@@ -40,12 +41,13 @@ pub fn build(b: *Build) !void {
     dvui_mod.addImport("backend", raylib_mod);
 
     const root_mod = b.createModule(.{
-        .root_source_file = b.path("examples/raylib-ontop.zig"),
+        .root_source_file = b.path("src/raylib-ontop.zig"),
         .target = target,
         .optimize = optimize,
     });
     root_mod.addImport("dvui", dvui_mod);
     root_mod.addImport("raylib-backend", raylib_mod);
+    root_mod.addImport("quickjs", quickjs_dep.module("quickjs"));
 
     if (target.result.os.tag == .windows) {
         if (b.lazyDependency("win32", .{})) |zigwin32| {
@@ -58,6 +60,8 @@ pub fn build(b: *Build) !void {
         .root_module = root_mod,
         .use_lld = use_lld,
     });
+    
+    exe.linkLibrary(quickjs_dep.artifact("zig-quickjs"));
 
     if (target.result.os.tag == .windows) {
         exe.win32_manifest = b.path("src/main.manifest");
