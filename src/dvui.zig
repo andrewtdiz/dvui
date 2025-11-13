@@ -82,6 +82,7 @@ pub const FloatingWidget = widgets.FloatingWidget;
 pub const FloatingTooltipWidget = widgets.FloatingTooltipWidget;
 pub const FloatingMenuWidget = widgets.FloatingMenuWidget;
 pub const FocusGroupWidget = widgets.FocusGroupWidget;
+pub const GizmoWidget = widgets.GizmoWidget;
 pub const IconWidget = widgets.IconWidget;
 pub const LabelWidget = widgets.LabelWidget;
 pub const MenuWidget = widgets.MenuWidget;
@@ -2797,6 +2798,18 @@ pub fn selectionBox(src: std.builtin.SourceLocation, init_opts: SelectionWidget.
     ret.install();
     ret.processEvents();
     return ret;
+}
+
+/// Render a draggable 2D gizmo with horizontal (blue) and vertical (green) vectors.
+/// Only valid between `Window.begin` and `Window.end`.
+pub fn gizmo2d(src: std.builtin.SourceLocation, init_opts: GizmoWidget.InitOptions, opts: Options) void {
+    var gizmo = widgetAlloc(GizmoWidget);
+    defer gizmo.deinit();
+    gizmo.* = GizmoWidget.init(src, init_opts, opts);
+    gizmo.data().was_allocated_on_widget_stack = true;
+    gizmo.install();
+    gizmo.processEvents();
+    gizmo.draw();
 }
 
 /// Box that packs children with gravity 0 or 1, or anywhere with gravity
