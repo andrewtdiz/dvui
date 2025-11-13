@@ -251,7 +251,7 @@ fn buildAxis(self: *GizmoWidget, axis: Axis, rs: RectScale, center: Point.Physic
 
     return switch (axis) {
         .horizontal => blk: {
-            const start = center.x + @max(thickness, 4.0);
+            const start = center.x;
             const shaft = Rect.Physical{ .x = start, .y = center.y - thickness / 2, .w = shaft_len, .h = thickness };
             const tip = ArrowTip{
                 .tip = .{ .x = start + length_px, .y = center.y },
