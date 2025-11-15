@@ -41,6 +41,11 @@ const ClipRect = struct {
     height: i32 = 0,
 };
 
+const Extent2D = struct {
+    width: u32 = 0,
+    height: u32 = 0,
+};
+
 const Vertex = extern struct {
     position: [2]f32,
     uv: [2]f32,
@@ -96,6 +101,10 @@ index_buffer: ?*wgpu.Buffer = null,
 default_texture: ?*TextureResource = null,
 
 frame_arena: std.mem.Allocator = undefined,
+
+msaa_texture: ?*wgpu.Texture = null,
+msaa_view: ?*wgpu.TextureView = null,
+msaa_extent: Extent2D = .{},
 
 pub fn init(options: InitOptions) !WgpuBackend {
     var wgpu_backend: WgpuBackend = .{
@@ -159,6 +168,8 @@ pub fn deinit(self: *WgpuBackend) void {
         self.globals_bind_group_layout = null;
     }
 
+    self.destroyMsaaResources();
+
     self.vertex_data.deinit(self.gpa);
     self.index_data.deinit(self.gpa);
     self.draw_commands.deinit(self.gpa);
@@ -170,6 +181,9 @@ pub fn backend(self: *WgpuBackend) dvui.Backend {
 
 pub fn updateSurface(self: *WgpuBackend, config: SurfaceConfig) void {
     self.surface = config;
+    if (self.sample_count > 1) {
+        self.destroyMsaaResources();
+    }
 }
 
 pub fn hasCommands(self: *const WgpuBackend) bool {
@@ -183,13 +197,21 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
     try self.ensureGlobals();
     try self.uploadGeometry();
 
-    const color_attachment = wgpu.ColorAttachment{
+    var color_attachment = wgpu.ColorAttachment{
         .view = color_view,
         .resolve_target = null,
         .load_op = wgpu.LoadOp.load,
         .store_op = wgpu.StoreOp.store,
         .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
     };
+
+    if (self.sample_count > 1) {
+        try self.ensureMsaaResources();
+        color_attachment.view = self.msaa_view.?;
+        color_attachment.resolve_target = color_view;
+        color_attachment.load_op = wgpu.LoadOp.clear;
+        color_attachment.store_op = wgpu.StoreOp.discard;
+    }
 
     const pass = encoder.beginRenderPass(&wgpu.RenderPassDescriptor{
         .label = wgpu.StringView.fromSlice("dvui pass"),
@@ -598,6 +620,55 @@ fn clearFrameData(self: *WgpuBackend) void {
     self.vertex_data.clearRetainingCapacity();
     self.index_data.clearRetainingCapacity();
     self.draw_commands.clearRetainingCapacity();
+}
+
+fn destroyMsaaResources(self: *WgpuBackend) void {
+    if (self.msaa_view) |view| {
+        view.release();
+        self.msaa_view = null;
+    }
+    if (self.msaa_texture) |texture| {
+        texture.release();
+        self.msaa_texture = null;
+    }
+    self.msaa_extent = .{};
+}
+
+fn ensureMsaaResources(self: *WgpuBackend) !void {
+    if (self.sample_count <= 1) return;
+
+    const target_width: u32 = if (self.surface.surface_size.w <= 0) @as(u32, 0) else @intFromFloat(@ceil(self.surface.surface_size.w));
+    const target_height: u32 = if (self.surface.surface_size.h <= 0) @as(u32, 0) else @intFromFloat(@ceil(self.surface.surface_size.h));
+
+    if (target_width == 0 or target_height == 0) {
+        return dvui.Backend.GenericError.BackendError;
+    }
+
+    if (self.msaa_texture != null and self.msaa_extent.width == target_width and self.msaa_extent.height == target_height) {
+        return;
+    }
+
+    self.destroyMsaaResources();
+
+    const descriptor = wgpu.TextureDescriptor{
+        .label = wgpu.StringView.fromSlice("dvui msaa color"),
+        .usage = wgpu.TextureUsages.render_attachment,
+        .dimension = .@"2d",
+        .size = .{ .width = target_width, .height = target_height, .depth_or_array_layers = 1 },
+        .format = self.color_format,
+        .mip_level_count = 1,
+        .sample_count = self.sample_count,
+    };
+
+    const texture = self.device.createTexture(&descriptor) orelse return dvui.Backend.GenericError.BackendError;
+    errdefer texture.release();
+
+    const view = texture.createView(&wgpu.TextureViewDescriptor{}) orelse return dvui.Backend.GenericError.BackendError;
+    errdefer view.release();
+
+    self.msaa_texture = texture;
+    self.msaa_view = view;
+    self.msaa_extent = .{ .width = target_width, .height = target_height };
 }
 
 fn applyClip(
