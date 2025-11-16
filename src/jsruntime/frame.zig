@@ -75,7 +75,7 @@ pub fn runFrame(runtime: anytype, frame_data: FrameData) !FrameResult {
         return error.CallFailed;
     }
 
-    runtime.recordStackUsage();
+    // runtime.recordStackUsage();
 
     if (runtime.takeFrameCommand()) |command| {
         switch (command) {

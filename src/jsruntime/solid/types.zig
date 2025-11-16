@@ -196,7 +196,7 @@ const StyleProps = struct {
 
     const Side = enum { left, right, top, bottom };
 
-    fn setSpacing(self: *StyleProps, target: *?dvui.Rect, value: []const u8) bool {
+    fn setSpacing(_: *StyleProps, target: *?dvui.Rect, value: []const u8) bool {
         const parsed = parseSpacingRect(value) orelse return false;
         if (rectEqual(target.*, parsed)) return false;
         target.* = parsed;
