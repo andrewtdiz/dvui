@@ -60,7 +60,7 @@ pub fn build(b: *Build) !void {
         .root_module = root_mod,
         .use_lld = use_lld,
     });
-    
+
     exe.linkLibrary(quickjs_dep.artifact("zig-quickjs"));
 
     if (target.result.os.tag == .windows) {
@@ -232,18 +232,18 @@ fn addRaylibBackend(
         .link_libc = true,
     });
 
-    const ray_dep = b.lazyDependency("raylib", .{
+    const ray_dep = b.dependency("raylib", .{
         .target = target,
         .optimize = optimize,
         .linux_display_backend = linux_display_backend,
-    }) orelse std.debug.panic("raylib dependency not available", .{});
+    });
 
     raylib_mod.addIncludePath(ray_dep.path("src"));
     raylib_mod.addIncludePath(ray_dep.path("src/external/glfw/include"));
     raylib_mod.addIncludePath(ray_dep.path("src/external/glfw/include/GLFW"));
     raylib_mod.linkLibrary(ray_dep.artifact("raylib"));
 
-    const raygui_dep = b.lazyDependency("raygui", .{}) orelse std.debug.panic("raygui dependency not available", .{});
+    const raygui_dep = b.dependency("raygui", .{});
     raylib_mod.addIncludePath(raygui_dep.path("src"));
 
     const write_files = b.addWriteFiles();
