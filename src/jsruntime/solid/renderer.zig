@@ -116,6 +116,7 @@ fn renderContainer(
         .expand = .none,
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     if (class_spec.is_flex) {
         const flex_init = tailwind.buildFlexOptions(&class_spec);
@@ -205,6 +206,7 @@ fn renderParagraph(
                 .id_extra = nodeIdExtra(node_id),
             };
             tailwind.applyToOptions(&class_spec, &options);
+            node.applyStyle(&options);
             if (font_override) |style_name| {
                 if (options.font_style == null) {
                     options.font_style = style_name;
@@ -220,7 +222,9 @@ fn renderParagraph(
 fn renderText(node: *types.SolidNode) void {
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
-        dvui.labelNoFmt(@src(), trimmed, .{}, .{ .id_extra = nodeIdExtra(node.id) });
+        var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
+        node.applyStyle(&options);
+        dvui.labelNoFmt(@src(), trimmed, .{}, options);
     }
     node.markRendered();
 }
@@ -242,6 +246,7 @@ fn renderButton(
         .padding = dvui.Rect.all(6),
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     const pressed = dvui.button(@src(), caption, .{}, options);
     if (pressed and node.hasListener("click")) {
@@ -276,6 +281,7 @@ fn renderImage(
         .id_extra = nodeIdExtra(node_id),
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     const image_source = image_loader.imageSource(resource);
     _ = dvui.image(@src(), .{ .source = image_source }, options);
@@ -294,6 +300,7 @@ fn renderInput(
         .background = false,
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     if (class_spec.text) |color_value| {
         options.color_text = color_value;
