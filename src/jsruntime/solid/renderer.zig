@@ -9,6 +9,36 @@ const tailwind = @import("tailwind.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
+pub const RenderStats = struct {
+    total_nodes: usize = 0,
+    rendered_nodes: usize = 0,
+    cache_hits: usize = 0,
+    cache_misses: usize = 0,
+};
+
+var g_stats: RenderStats = .{};
+var stats_logging_enabled = false;
+
+pub fn enableStatsLogging(flag: bool) void {
+    stats_logging_enabled = flag;
+}
+
+pub fn currentStats() RenderStats {
+    return g_stats;
+}
+
+fn beginFrameStats() void {
+    g_stats = .{};
+}
+
+fn endFrameStats() void {
+    if (!stats_logging_enabled) return;
+    log.info(
+        "Solid renderer stats: total={d} rendered={d} cache_hits={d} cache_misses={d}",
+        .{ g_stats.total_nodes, g_stats.rendered_nodes, g_stats.cache_hits, g_stats.cache_misses },
+    );
+}
+
 pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) void {
     const root = store.node(0) orelse return;
 
@@ -16,14 +46,17 @@ pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) void {
     defer arena.deinit();
     const scratch = arena.allocator();
 
+    beginFrameStats();
     if (root.children.items.len == 0) {
         log.debug("Solid renderer: root has no children", .{});
+        endFrameStats();
         return;
     }
 
     for (root.children.items) |child_id| {
         renderNode(runtime, store, child_id, scratch);
     }
+    endFrameStats();
 }
 
 fn renderNode(
@@ -33,6 +66,20 @@ fn renderNode(
     allocator: std.mem.Allocator,
 ) void {
     const node = store.node(node_id) orelse return;
+    g_stats.total_nodes += 1;
+
+    var cache_guard = beginNodeCache(node);
+    defer if (cache_guard) |*guard| guard.deinit();
+    if (cache_guard) |*guard| {
+        if (!guard.should_render) {
+            g_stats.cache_hits += 1;
+            node.markRendered();
+            return;
+        }
+        g_stats.cache_misses += 1;
+    }
+    g_stats.rendered_nodes += 1;
+
     switch (node.kind) {
         .root => {
             for (node.children.items) |child_id| {
@@ -116,21 +163,18 @@ fn renderContainer(
         .expand = .none,
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     if (class_spec.is_flex) {
         const flex_init = tailwind.buildFlexOptions(&class_spec);
         var flexbox_widget = dvui.flexbox(@src(), flex_init, options);
         defer flexbox_widget.deinit();
-        if (!renderCachedSubtree(runtime, store, node, allocator)) {
-            renderFlexChildren(runtime, store, node, allocator, &class_spec);
-        }
+        renderFlexChildren(runtime, store, node, allocator, &class_spec);
     } else {
         var box = dvui.box(@src(), .{}, options);
         defer box.deinit();
-        if (!renderCachedSubtree(runtime, store, node, allocator)) {
-            for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator);
-            }
+        for (node.children.items) |child_id| {
+            renderNode(runtime, store, child_id, allocator);
         }
     }
 }
@@ -177,9 +221,6 @@ fn renderGeneric(
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
 ) void {
-    if (renderCachedSubtree(runtime, store, node, allocator)) {
-        return;
-    }
     for (node.children.items) |child_id| {
         renderNode(runtime, store, child_id, allocator);
     }
@@ -205,6 +246,7 @@ fn renderParagraph(
                 .id_extra = nodeIdExtra(node_id),
             };
             tailwind.applyToOptions(&class_spec, &options);
+            node.applyStyle(&options);
             if (font_override) |style_name| {
                 if (options.font_style == null) {
                     options.font_style = style_name;
@@ -220,7 +262,9 @@ fn renderParagraph(
 fn renderText(node: *types.SolidNode) void {
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
-        dvui.labelNoFmt(@src(), trimmed, .{}, .{ .id_extra = nodeIdExtra(node.id) });
+        var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
+        node.applyStyle(&options);
+        dvui.labelNoFmt(@src(), trimmed, .{}, options);
     }
     node.markRendered();
 }
@@ -242,6 +286,7 @@ fn renderButton(
         .padding = dvui.Rect.all(6),
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     const pressed = dvui.button(@src(), caption, .{}, options);
     if (pressed and node.hasListener("click")) {
@@ -276,6 +321,7 @@ fn renderImage(
         .id_extra = nodeIdExtra(node_id),
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     const image_source = image_loader.imageSource(resource);
     _ = dvui.image(@src(), .{ .source = image_source }, options);
@@ -294,6 +340,7 @@ fn renderInput(
         .background = false,
     };
     tailwind.applyToOptions(&class_spec, &options);
+    node.applyStyle(&options);
 
     if (class_spec.text) |color_value| {
         options.color_text = color_value;
@@ -389,6 +436,30 @@ fn collectText(
     }
 }
 
+const NodeCacheGuard = struct {
+    widget: *dvui.CacheWidget,
+    should_render: bool,
+
+    fn deinit(self: *NodeCacheGuard) void {
+        self.widget.deinit();
+    }
+};
+
+fn beginNodeCache(node: *types.SolidNode) ?NodeCacheGuard {
+    if (!shouldCacheNode(node)) return null;
+
+    var cache_widget = dvui.cache(
+        @src(),
+        .{ .invalidate = node.hasDirtySubtree() },
+        .{ .id_extra = nodeCacheKey(node.id), .expand = .both },
+    );
+    const needs_render = cache_widget.uncached();
+    return NodeCacheGuard{
+        .widget = cache_widget,
+        .should_render = needs_render,
+    };
+}
+
 fn nodeIdExtra(id: u32) usize {
     var hasher = std.hash.Wyhash.init(0);
     hasher.update(std.mem.asBytes(&id));
@@ -400,37 +471,10 @@ fn nodeCacheKey(id: u32) usize {
     return nodeIdExtra(id ^ salt);
 }
 
-fn renderCachedSubtree(
-    runtime: *jsruntime.JSRuntime,
-    store: *types.NodeStore,
-    node: *types.SolidNode,
-    allocator: std.mem.Allocator,
-) bool {
-    if (!shouldCacheNode(node)) return false;
-
-    var cache = dvui.cache(
-        @src(),
-        .{ .invalidate = node.hasDirtySubtree() },
-        .{ .id_extra = nodeCacheKey(node.id), .expand = .both },
-    );
-    defer cache.deinit();
-
-    if (!cache.uncached()) {
-        return true;
-    }
-
-    for (node.children.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator);
-    }
-    return true;
-}
-
 fn shouldCacheNode(node: *types.SolidNode) bool {
     if (node.kind != .element) return false;
     if (node.children.items.len == 0) return false;
     if (node.interactive_self) return false;
     if (node.interactiveChildCount() > 0) return false;
-    const spec = node.prepareClassSpec();
-    if (spec.is_flex) return false;
     return true;
 }

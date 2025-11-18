@@ -478,7 +478,7 @@ fn applySideValues(values: *const SideValues, current: ?dvui.Rect) ?dvui.Rect {
     return rect;
 }
 
-fn lookupColor(name: []const u8) ?dvui.Color {
+pub fn lookupColor(name: []const u8) ?dvui.Color {
     if (ColorMap.get(name)) |_packed| {
         return colorFromPacked(_packed);
     }

@@ -121,19 +121,19 @@ pub fn emitKeyEvent(self: *JSRuntime, event: KeyEvent) Error!void {
     return event_ops.emitKeyEvent(self, event);
 }
 
-pub fn recordStackUsage(self: *JSRuntime) void {
-    const peak = quickjs.JS_GetStackPeakSize(self.quickjs_runtime);
-    if (peak == 0) return;
-    if (peak <= self.max_stack_usage) return;
-    self.max_stack_usage = peak;
+pub fn recordStackUsage(_: *JSRuntime) void {
+    // const peak = quickjs.JS_GetStackPeakSize(self.quickjs_runtime);
+    // if (peak == 0) return;
+    // if (peak <= self.max_stack_usage) return;
+    // self.max_stack_usage = peak;
 
-    const limit = quickjs.JS_GetMaxStackSize(self.quickjs_runtime);
-    if (limit > 0) {
-        const percent: usize = @intCast((@as(u128, peak) * 100) / @as(u128, limit));
-        std.log.info("QuickJS stack usage: {d}/{d} bytes ({d}%)", .{ peak, limit, percent });
-    } else {
-        std.log.info("QuickJS stack usage: {d} bytes (no limit)", .{peak});
-    }
+    // const limit = quickjs.JS_GetMaxStackSize(self.quickjs_runtime);
+    // if (limit > 0) {
+    //     const percent: usize = @intCast((@as(u128, peak) * 100) / @as(u128, limit));
+    //     std.log.info("QuickJS stack usage: {d}/{d} bytes ({d}%)", .{ peak, limit, percent });
+    // } else {
+    //     std.log.info("QuickJS stack usage: {d} bytes (no limit)", .{peak});
+    // }
 }
 
 pub fn setFloatProperty(

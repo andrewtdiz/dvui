@@ -454,6 +454,10 @@ fn applyOp(
         try applySet(ctx, allocator, obj, store);
         return;
     }
+    if (std.mem.eql(u8, name, "nativeSetStyle")) {
+        try applyNativeStyle(ctx, allocator, obj, store);
+        return;
+    }
 
     log.debug("Unhandled Solid op: {s}", .{name});
 }
@@ -551,6 +555,22 @@ fn applySet(
         log.info("  value id={d} len={d}", .{ id, value.len });
         return;
     }
+}
+
+fn applyNativeStyle(
+    ctx: *quickjs.JSContext,
+    allocator: std.mem.Allocator,
+    obj: quickjs.JSValueConst,
+    store: *types.NodeStore,
+) !void {
+    const id = try readIntProperty(ctx, obj, "id");
+    const name = try readStringProperty(ctx, allocator, obj, "name");
+    defer allocator.free(name);
+    const value = try readStringProperty(ctx, allocator, obj, "value");
+    defer allocator.free(value);
+
+    store.setStyle(@intCast(id), name, value);
+    log.info("  style id={d} name={s} value={s}", .{ id, name, value });
 }
 
 fn readIntProperty(

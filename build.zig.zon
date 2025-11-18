@@ -23,13 +23,11 @@
         .raylib = .{
             .url = "git+https://github.com/raysan5/raylib?ref=master#12ce106661bc9c8f74ea3f3069291e5fc4e7d50a",
             .hash = "raylib-5.6.0-dev-whq8uECwAAUfjtGTyP_uENUua4I_wf8r_-k3p0Wq3Bah",
-            .lazy = true,
         },
         //used in the raylib-ontop example
         .raygui = .{
             .url = "https://github.com/raysan5/raygui/archive/33f1659.tar.gz",
             .hash = "N-V-__8AAAHFTwBfBg00dnFXcYkNbjC8BSyi1CDcrnh12ypL",
-            .lazy = true,
         },
         // required for the directx11 backend
         .win32 = .{

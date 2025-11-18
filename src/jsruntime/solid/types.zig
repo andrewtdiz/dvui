@@ -1,4 +1,5 @@
 const std = @import("std");
+const dvui = @import("dvui");
 const tailwind = @import("tailwind.zig");
 
 pub const NodeKind = enum {
@@ -111,6 +112,281 @@ const ListenerSet = struct {
     }
 };
 
+const StyleProps = struct {
+    margin: ?dvui.Rect = null,
+    padding: ?dvui.Rect = null,
+    border: ?dvui.Rect = null,
+    border_color: ?dvui.Color = null,
+    background: ?dvui.Color = null,
+    text: ?dvui.Color = null,
+    width: ?f32 = null,
+    height: ?f32 = null,
+    corner_radius: ?f32 = null,
+
+    pub fn apply(self: *const StyleProps, options: *dvui.Options) void {
+        if (self.margin) |value| options.margin = value;
+        if (self.padding) |value| options.padding = value;
+        if (self.border) |value| options.border = value;
+        if (self.border_color) |value| options.color_border = value;
+        if (self.background) |value| {
+            options.color_fill = value;
+            options.background = true;
+        }
+        if (self.text) |value| options.color_text = value;
+        if (self.corner_radius) |radius| options.corner_radius = dvui.Rect.all(radius);
+        if (self.width) |w| applyFixedWidth(options, w);
+        if (self.height) |h| applyFixedHeight(options, h);
+    }
+
+    pub fn setProperty(self: *StyleProps, name: []const u8, value: []const u8) bool {
+        const trimmed_value = std.mem.trim(u8, value, " \n\r\t");
+        if (matchesName(name, "margin")) {
+            return self.setSpacing(&self.margin, trimmed_value);
+        }
+        if (matchesName(name, "padding")) {
+            return self.setSpacing(&self.padding, trimmed_value);
+        }
+        if (matchesName(name, "border") or matchesName(name, "border-width")) {
+            return self.setSpacing(&self.border, trimmed_value);
+        }
+        if (matchesName(name, "margin-top")) {
+            return self.setSpacingSide(&self.margin, .top, trimmed_value);
+        }
+        if (matchesName(name, "margin-right")) {
+            return self.setSpacingSide(&self.margin, .right, trimmed_value);
+        }
+        if (matchesName(name, "margin-bottom")) {
+            return self.setSpacingSide(&self.margin, .bottom, trimmed_value);
+        }
+        if (matchesName(name, "margin-left")) {
+            return self.setSpacingSide(&self.margin, .left, trimmed_value);
+        }
+        if (matchesName(name, "padding-top")) {
+            return self.setSpacingSide(&self.padding, .top, trimmed_value);
+        }
+        if (matchesName(name, "padding-right")) {
+            return self.setSpacingSide(&self.padding, .right, trimmed_value);
+        }
+        if (matchesName(name, "padding-bottom")) {
+            return self.setSpacingSide(&self.padding, .bottom, trimmed_value);
+        }
+        if (matchesName(name, "padding-left")) {
+            return self.setSpacingSide(&self.padding, .left, trimmed_value);
+        }
+        if (matchesName(name, "color")) {
+            return self.setColor(&self.text, trimmed_value);
+        }
+        if (matchesName(name, "background") or matchesName(name, "background-color")) {
+            return self.setColor(&self.background, trimmed_value);
+        }
+        if (matchesName(name, "border-color")) {
+            return self.setColor(&self.border_color, trimmed_value);
+        }
+        if (matchesName(name, "width")) {
+            return self.setLength(&self.width, trimmed_value);
+        }
+        if (matchesName(name, "height")) {
+            return self.setLength(&self.height, trimmed_value);
+        }
+        if (matchesName(name, "border-radius")) {
+            return self.setLength(&self.corner_radius, trimmed_value);
+        }
+        return false;
+    }
+
+    const Side = enum { left, right, top, bottom };
+
+    fn setSpacing(_: *StyleProps, target: *?dvui.Rect, value: []const u8) bool {
+        const parsed = parseSpacingRect(value) orelse return false;
+        if (rectEqual(target.*, parsed)) return false;
+        target.* = parsed;
+        return true;
+    }
+
+    fn setSpacingSide(self: *StyleProps, target: *?dvui.Rect, side: Side, value: []const u8) bool {
+        _ = self;
+        const parsed = parseLength(value) orelse return false;
+        var rect = target.* orelse dvui.Rect{};
+        switch (side) {
+            .left => rect.x = parsed,
+            .top => rect.y = parsed,
+            .right => rect.w = parsed,
+            .bottom => rect.h = parsed,
+        }
+        if (rectEqual(target.*, rect)) return false;
+        target.* = rect;
+        return true;
+    }
+
+    fn setColor(self: *StyleProps, target: *?dvui.Color, value: []const u8) bool {
+        _ = self;
+        const parsed = parseColor(value) orelse return false;
+        if (target.*) |existing| {
+            if (colorsEqual(existing, parsed)) return false;
+        }
+        target.* = parsed;
+        return true;
+    }
+
+    fn setLength(self: *StyleProps, target: *?f32, value: []const u8) bool {
+        _ = self;
+        const parsed = parseLength(value) orelse return false;
+        if (target.*) |existing| {
+            if (existing == parsed) return false;
+        }
+        target.* = parsed;
+        return true;
+    }
+
+    fn matchesName(input: []const u8, expected: []const u8) bool {
+        if (std.mem.eql(u8, input, expected)) return true;
+        if (std.ascii.eqlIgnoreCase(input, expected)) return true;
+        var camel_buf: [64]u8 = undefined;
+        if (camelFor(expected, &camel_buf)) |camel| {
+            if (std.ascii.eqlIgnoreCase(input, camel)) return true;
+        }
+        return false;
+    }
+
+    fn camelFor(expected: []const u8, buffer: *[64]u8) ?[]const u8 {
+        var idx: usize = 0;
+        while (idx < expected.len) : (idx += 1) {
+            if (expected[idx] == '-') break;
+        }
+        if (idx == expected.len or idx + 1 >= expected.len) return null;
+        if (expected.len - 1 > buffer.len) return null;
+        const next = expected[idx + 1];
+        const prefix = expected[0..idx];
+        @memcpy(buffer[0..prefix.len], prefix);
+        buffer[prefix.len] = std.ascii.toUpper(next);
+        const tail = expected[(idx + 2)..];
+        @memcpy(buffer[(prefix.len + 1)..(prefix.len + 1 + tail.len)], tail);
+        return buffer[0 .. prefix.len + 1 + tail.len];
+    }
+
+    fn parseSpacingRect(value: []const u8) ?dvui.Rect {
+        var parts: [4]f32 = undefined;
+        var count: usize = 0;
+        var iter = std.mem.tokenizeAny(u8, value, " \n\r\t");
+        while (iter.next()) |token| {
+            if (count >= parts.len) break;
+            parts[count] = parseLength(token) orelse return null;
+            count += 1;
+        }
+        if (count == 0) return null;
+
+        var rect = dvui.Rect{};
+        switch (count) {
+            1 => {
+                rect.x = parts[0];
+                rect.y = parts[0];
+                rect.w = parts[0];
+                rect.h = parts[0];
+            },
+            2 => {
+                rect.y = parts[0];
+                rect.h = parts[0];
+                rect.x = parts[1];
+                rect.w = parts[1];
+            },
+            3 => {
+                rect.y = parts[0];
+                rect.x = parts[1];
+                rect.w = parts[1];
+                rect.h = parts[2];
+            },
+            else => {
+                rect.y = parts[0];
+                rect.w = parts[1];
+                rect.h = parts[2];
+                rect.x = parts[3];
+            },
+        }
+        return rect;
+    }
+
+    fn parseLength(raw: []const u8) ?f32 {
+        const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+        if (trimmed.len == 0) return null;
+        if (std.mem.endsWith(u8, trimmed, "px")) {
+            return std.fmt.parseFloat(f32, trimmed[0 .. trimmed.len - 2]) catch return null;
+        }
+        return std.fmt.parseFloat(f32, trimmed) catch null;
+    }
+
+    fn parseColor(raw: []const u8) ?dvui.Color {
+        const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+        if (trimmed.len == 0) return null;
+        if (trimmed.len >= 1 and trimmed[0] == '#') {
+            return parseHexColor(trimmed[1..]);
+        }
+        return tailwind.lookupColor(trimmed);
+    }
+
+    fn parseHexColor(value: []const u8) ?dvui.Color {
+        if (value.len == 3 or value.len == 4) {
+            var channels: [4]u8 = .{0, 0, 0, 0xff};
+            var idx: usize = 0;
+            while (idx < value.len) : (idx += 1) {
+                const nibble = parseHex(value[idx]) orelse return null;
+                channels[idx] = (nibble << 4) | nibble;
+            }
+            return dvui.Color{ .r = channels[0], .g = channels[1], .b = channels[2], .a = channels[3] };
+        }
+        if (value.len == 6 or value.len == 8) {
+            var channels: [4]u8 = .{0, 0, 0, 0xff};
+            var idx: usize = 0;
+            while (idx + 1 < value.len and idx / 2 < channels.len) : (idx += 2) {
+                const hi = parseHex(value[idx]) orelse return null;
+                const lo = parseHex(value[idx + 1]) orelse return null;
+                channels[idx / 2] = (hi << 4) | lo;
+            }
+            return dvui.Color{ .r = channels[0], .g = channels[1], .b = channels[2], .a = channels[3] };
+        }
+        return null;
+    }
+
+    fn parseHex(char: u8) ?u8 {
+        return switch (char) {
+            '0'...'9' => char - '0',
+            'a'...'f' => char - 'a' + 10,
+            'A'...'F' => char - 'A' + 10,
+            else => null,
+        };
+    }
+
+    fn colorsEqual(a: dvui.Color, b: dvui.Color) bool {
+        return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a;
+    }
+
+    fn rectEqual(current: ?dvui.Rect, next: dvui.Rect) bool {
+        if (current) |rect| {
+            return rect.x == next.x and rect.y == next.y and rect.w == next.w and rect.h == next.h;
+        }
+        return false;
+    }
+
+    fn applyFixedWidth(options: *dvui.Options, width: f32) void {
+        var min_size = options.min_size_content orelse dvui.Size{};
+        min_size.w = width;
+        options.min_size_content = min_size;
+
+        var max_size = options.max_size_content orelse dvui.Options.MaxSize{ .w = dvui.max_float_safe, .h = dvui.max_float_safe };
+        max_size.w = width;
+        options.max_size_content = max_size;
+    }
+
+    fn applyFixedHeight(options: *dvui.Options, height: f32) void {
+        var min_size = options.min_size_content orelse dvui.Size{};
+        min_size.h = height;
+        options.min_size_content = min_size;
+
+        var max_size = options.max_size_content orelse dvui.Options.MaxSize{ .w = dvui.max_float_safe, .h = dvui.max_float_safe };
+        max_size.h = height;
+        options.max_size_content = max_size;
+    }
+};
+
 pub const SolidNode = struct {
     id: u32,
     kind: NodeKind,
@@ -129,6 +405,7 @@ pub const SolidNode = struct {
     class_spec: tailwind.Spec = .{},
     class_spec_dirty: bool = true,
     input_state: ?InputState = null,
+    style: StyleProps = .{},
 
     fn initCommon(allocator: std.mem.Allocator, id: u32, kind: NodeKind) SolidNode {
         return SolidNode{
@@ -244,6 +521,10 @@ pub const SolidNode = struct {
         self.last_render_version = self.subtree_version;
     }
 
+    pub fn applyStyle(self: *const SolidNode, options: *dvui.Options) void {
+        self.style.apply(options);
+    }
+
     pub fn interactiveChildCount(self: *const SolidNode) u32 {
         const self_weight: u32 = if (self.interactive_self) 1 else 0;
         if (self.total_interactive <= self_weight) return 0;
@@ -260,6 +541,10 @@ pub const SolidNode = struct {
             self.class_spec_dirty = false;
         }
         return self.class_spec;
+    }
+
+    pub fn setStyle(self: *SolidNode, name: []const u8, value: []const u8) bool {
+        return self.style.setProperty(name, value);
     }
 };
 
@@ -373,6 +658,14 @@ pub const NodeStore = struct {
         const target = self.nodes.getPtr(id) orelse return;
         try target.setImageSource(self.allocator, value);
         self.markNodeChanged(id);
+    }
+
+    pub fn setStyle(self: *NodeStore, id: u32, name: []const u8, value: []const u8) void {
+        const target = self.nodes.getPtr(id) orelse return;
+        const changed = target.setStyle(name, value);
+        if (changed) {
+            self.markNodeChanged(id);
+        }
     }
 
     fn removeRecursive(self: *NodeStore, id: u32) void {
