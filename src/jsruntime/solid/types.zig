@@ -470,15 +470,25 @@ pub const SolidNode = struct {
         return self.listeners.has(name);
     }
 
-    pub fn setClassName(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+    pub fn setClassName(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !bool {
+        if (std.mem.eql(u8, self.class_name, value)) return false;
         const copy = try allocator.dupe(u8, value);
         if (self.class_name.len > 0) allocator.free(self.class_name);
         self.class_name = copy;
         self.class_spec_dirty = true;
+        return true;
     }
 
     pub fn className(self: *const SolidNode) []const u8 {
         return self.class_name;
+    }
+
+    pub fn hasClass(self: *const SolidNode, name: []const u8) bool {
+        var iter = std.mem.tokenizeAny(u8, self.class_name, " \n\r\t");
+        while (iter.next()) |token| {
+            if (std.mem.eql(u8, token, name)) return true;
+        }
+        return false;
     }
 
     pub fn setImageSource(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
@@ -650,8 +660,10 @@ pub const NodeStore = struct {
 
     pub fn setClassName(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
-        try target.setClassName(self.allocator, value);
-        self.markNodeChanged(id);
+        const changed = try target.setClassName(self.allocator, value);
+        if (changed) {
+            self.markNodeChanged(id);
+        }
     }
 
     pub fn setImageSource(self: *NodeStore, id: u32, value: []const u8) !void {
