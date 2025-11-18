@@ -7,6 +7,45 @@ const handleSymbol = Symbol("solidNodeId");
 const handles = new Map();
 const registeredSignals = new Map();
 
+function ensureStyleStore(record) {
+  if (!record.styles) {
+    record.styles = new Map();
+  }
+  return record.styles;
+}
+
+function normalizeStyleValue(value) {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return `${value}`;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+  return null;
+}
+
+function applyStyleProps(record, styleValue) {
+  if (!styleValue || typeof styleValue !== "object") {
+    return;
+  }
+  const styles = ensureStyleStore(record);
+  const entries = Object.entries(styleValue);
+  for (const [name, raw] of entries) {
+    const normalized = normalizeStyleValue(raw);
+    if (normalized == null) continue;
+    if (styles.get(name) === normalized) continue;
+    styles.set(name, normalized);
+    push({ op: "nativeSetStyle", id: record.id, name, value: normalized });
+  }
+}
+
 function extractSetter(source) {
   if (typeof source === "function") {
     return source;
@@ -78,6 +117,7 @@ function resetHost(rootId) {
     children: [],
     props: {},
     listeners: new Map(),
+    styles: new Map(),
   });
 }
 
@@ -114,6 +154,7 @@ const host = {
       children: [],
       props: {},
       listeners: new Map(),
+      styles: new Map(),
     };
     nodes.set(id, record);
     push({ op: "create", id, tag });
@@ -131,6 +172,7 @@ const host = {
       children: [],
       props: {},
       listeners: new Map(),
+      styles: new Map(),
     };
     nodes.set(id, record);
     push({ op: "text", id, text });
@@ -146,6 +188,7 @@ const host = {
       children: [],
       props: {},
       listeners: new Map(),
+      styles: new Map(),
     };
     nodes.set(id, record);
     push({ op: "slot", id });
@@ -219,6 +262,11 @@ const host = {
       const type = name.slice(2).toLowerCase();
       record.listeners.set(type, value);
       push({ op: "listen", id, type });
+      return;
+    }
+
+    if (name === "style") {
+      applyStyleProps(record, value);
       return;
     }
 

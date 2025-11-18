@@ -104,6 +104,8 @@ const window_icon_png = @embedFile("zig-favicon.png");
 var js_runtime: jsruntime.JSRuntime = undefined;
 var js_mouse_snapshot: jsruntime.MouseSnapshot = .{ .x = 0, .y = 0 };
 var js_mouse_initialized = false;
+var js_mouse_signal_snapshot: jsruntime.MouseSnapshot = .{ .x = 0, .y = 0 };
+var js_mouse_signal_initialized = false;
 
 pub fn main() !void {
     if (@import("builtin").os.tag == .windows) { // optional
@@ -315,12 +317,33 @@ fn syncJsMousePosition(point: dvui.Point.Physical) void {
     js_runtime.updateMouse(snapshot) catch |err| {
         std.log.err("JavaScript mouse sync failed: {s}", .{@errorName(err)});
     };
+    syncMouseSignal(snapshot);
 }
 
 fn restoreJsRuntimeState() void {
     if (!js_mouse_initialized) return;
     js_runtime.updateMouse(js_mouse_snapshot) catch |err| {
         std.log.err("JavaScript mouse restore failed: {s}", .{@errorName(err)});
+    };
+    syncMouseSignal(js_mouse_snapshot);
+}
+
+fn syncMouseSignal(snapshot: jsruntime.MouseSnapshot) void {
+    const changed = !js_mouse_signal_initialized or
+        js_mouse_signal_snapshot.x != snapshot.x or
+        js_mouse_signal_snapshot.y != snapshot.y;
+    if (!changed) return;
+
+    js_mouse_signal_snapshot = snapshot;
+    js_mouse_signal_initialized = true;
+
+    var buffer: [64]u8 = undefined;
+    const payload = std.fmt.bufPrint(&buffer, "{{\"x\":{d},\"y\":{d}}}", .{ snapshot.x, snapshot.y }) catch {
+        std.log.err("Solid mouse signal formatting failed", .{});
+        return;
+    };
+    solid.quickjs.updateSolidStateString(&js_runtime, "zig:mousePosition", payload) catch |err| {
+        std.log.err("Solid mouse signal update failed: {s}", .{@errorName(err)});
     };
 }
 

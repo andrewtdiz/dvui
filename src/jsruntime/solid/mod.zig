@@ -13,6 +13,14 @@ var store: types.NodeStore = undefined;
 
 pub const quickjs = quickjs_bridge;
 
+pub fn enableRenderStatsLogging(flag: bool) void {
+    renderer.enableStatsLogging(flag);
+}
+
+pub fn renderStats() renderer.RenderStats {
+    return renderer.currentStats();
+}
+
 pub fn render(runtime: *jsruntime.JSRuntime) void {
     if (!store_initialized) {
         const allocator = alloc.allocator();
