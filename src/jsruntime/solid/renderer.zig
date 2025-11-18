@@ -59,6 +59,61 @@ fn renderElement(
     allocator: std.mem.Allocator,
 ) void {
     const class_spec = node.prepareClassSpec();
+
+    if (isPositioned(&class_spec)) {
+        renderPositionedElement(runtime, store, node_id, node, allocator, class_spec);
+        return;
+    }
+
+    renderElementByTag(runtime, store, node_id, node, allocator, class_spec);
+}
+
+fn renderPositionedElement(
+    runtime: *jsruntime.JSRuntime,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    allocator: std.mem.Allocator,
+    class_spec: tailwind.Spec,
+) void {
+    var position_opts = dvui.Options{
+        .name = "solid-absolute",
+        .id_extra = nodeIdExtra(node_id),
+        .background = false,
+    };
+    tailwind.applyToOptions(&class_spec, &position_opts);
+    node.applyStyle(&position_opts);
+
+    if (buildPositionRect(&class_spec)) |rect| {
+        position_opts.rect = rect;
+    }
+
+    const draggable = node.hasClass("draggable");
+
+    var floating = dvui.floatingWindow(
+        @src(),
+        .{
+            .process_events_in_deinit = false,
+            .stay_above_parent_window = class_spec.position == .fixed,
+        },
+        position_opts,
+    );
+    defer floating.deinit();
+    if (draggable) {
+        floating.dragAreaSet(floating.data().rectScale().r);
+    }
+
+    renderElementByTag(runtime, store, node_id, node, allocator, class_spec);
+}
+
+fn renderElementByTag(
+    runtime: *jsruntime.JSRuntime,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    allocator: std.mem.Allocator,
+    class_spec: tailwind.Spec,
+) void {
     if (std.mem.eql(u8, node.tag, "div")) {
         renderContainer(runtime, store, node, allocator, class_spec);
         node.markRendered();
@@ -118,7 +173,7 @@ fn renderContainer(
     tailwind.applyToOptions(&class_spec, &options);
     node.applyStyle(&options);
 
-    if (class_spec.is_flex) {
+    if (tailwind.isFlex(&class_spec)) {
         const flex_init = tailwind.buildFlexOptions(&class_spec);
         var flexbox_widget = dvui.flexbox(@src(), flex_init, options);
         defer flexbox_widget.deinit();
@@ -143,10 +198,10 @@ fn renderFlexChildren(
     allocator: std.mem.Allocator,
     class_spec: *const tailwind.Spec,
 ) void {
-    const direction = class_spec.direction orelse .horizontal;
+    const direction = tailwind.flexDirection(class_spec);
     const gap_main = switch (direction) {
-        .horizontal => class_spec.gap_col,
-        .vertical => class_spec.gap_row,
+        .horizontal => tailwind.gapCol(class_spec),
+        .vertical => tailwind.gapRow(class_spec),
     } orelse 0;
 
     var child_index: usize = 0;
@@ -184,6 +239,65 @@ fn renderGeneric(
     for (node.children.items) |child_id| {
         renderNode(runtime, store, child_id, allocator);
     }
+}
+
+fn isPositioned(class_spec: *const tailwind.Spec) bool {
+    return class_spec.position == .absolute or class_spec.position == .fixed;
+}
+
+fn buildPositionRect(class_spec: *const tailwind.Spec) ?dvui.Rect {
+    const window_size = dvui.windowRect().size();
+
+    var rect = dvui.Rect{};
+    var anchored = false;
+
+    if (class_spec.left) |left| {
+        rect.x = left;
+        anchored = true;
+    }
+    if (class_spec.top) |top| {
+        rect.y = top;
+        anchored = true;
+    }
+
+    if (class_spec.right) |right| {
+        if (class_spec.width) |width_spec| {
+            rect.w = dimensionToPixels(width_spec, window_size.w);
+            rect.x = window_size.w - rect.w - right;
+        } else {
+            rect.x = window_size.w - right;
+        }
+        anchored = true;
+    }
+
+    if (class_spec.bottom) |bottom| {
+        if (class_spec.height) |height_spec| {
+            rect.h = dimensionToPixels(height_spec, window_size.h);
+            rect.y = window_size.h - rect.h - bottom;
+        } else {
+            rect.y = window_size.h - bottom;
+        }
+        anchored = true;
+    }
+
+    if (rect.w == 0 and class_spec.width) |width_spec| {
+        rect.w = dimensionToPixels(width_spec, window_size.w);
+    }
+    if (rect.h == 0 and class_spec.height) |height_spec| {
+        rect.h = dimensionToPixels(height_spec, window_size.h);
+    }
+
+    if (!anchored and rect.w == 0 and rect.h == 0) return null;
+    return rect;
+}
+
+fn dimensionToPixels(dimension: tailwind.Dimension, available: f32) f32 {
+    return switch (dimension) {
+        .full => available,
+        .screen => available,
+        .fraction => |frac| available * frac,
+        .pixels => |value| value,
+    };
 }
 
 fn renderParagraph(
@@ -301,10 +415,6 @@ fn renderInput(
     };
     tailwind.applyToOptions(&class_spec, &options);
     node.applyStyle(&options);
-
-    if (class_spec.text) |color_value| {
-        options.color_text = color_value;
-    }
 
     var state = node.ensureInputState(store.allocator) catch |err| {
         log.err("Solid input state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
@@ -437,7 +547,5 @@ fn shouldCacheNode(node: *types.SolidNode) bool {
     if (node.children.items.len == 0) return false;
     if (node.interactive_self) return false;
     if (node.interactiveChildCount() > 0) return false;
-    const spec = node.prepareClassSpec();
-    if (spec.is_flex) return false;
     return true;
 }
