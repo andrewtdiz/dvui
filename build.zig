@@ -22,7 +22,6 @@ pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const quickjs_dep = b.dependency("zig_quickjs", .{});
     const use_lld = b.option(bool, "use-lld", "Link executables with lld");
     const linux_display_backend = detectLinuxDisplayBackend(b, target);
 
@@ -40,32 +39,66 @@ pub fn build(b: *Build) !void {
     raylib_mod.addImport("dvui", dvui_mod);
     dvui_mod.addImport("backend", raylib_mod);
 
+    const raylib_dep = b.lazyDependency(
+        "raylib_zig",
+        .{
+            .target = target,
+            .optimize = optimize,
+            .linux_display_backend = linux_display_backend,
+        },
+    );
+
     const root_mod = b.createModule(.{
-        .root_source_file = b.path("src/raylib-ontop.zig"),
+        .root_source_file = b.path("src/raylib-ontop-zig.zig"),
         .target = target,
         .optimize = optimize,
     });
     root_mod.addImport("dvui", dvui_mod);
     root_mod.addImport("raylib-backend", raylib_mod);
-    root_mod.addImport("quickjs", quickjs_dep.module("quickjs"));
 
+    if (raylib_dep) |dep| {
+        root_mod.addImport("raylib", dep.module("raylib"));
+    }
+
+    const wgpu_dep = b.dependency("wgpu_native_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
+
+    const native_module = b.createModule(.{
+        .root_source_file = b.path("src/native_renderer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    native_module.addImport("dvui", dvui_mod);
+    native_module.addImport("raylib-backend", raylib_mod);
     if (target.result.os.tag == .windows) {
         if (b.lazyDependency("win32", .{})) |zigwin32| {
-            root_mod.addImport("win32", zigwin32.module("win32"));
+            native_module.addImport("win32", zigwin32.module("win32"));
         }
     }
+
+    const native_lib = b.addLibrary(.{
+        .name = "native_renderer",
+        .root_module = native_module,
+        .linkage = .dynamic,
+    });
+
+    b.installArtifact(native_lib);
 
     const exe = b.addExecutable(.{
         .name = "raylib-ontop",
         .root_module = root_mod,
         .use_lld = use_lld,
     });
+    if (raylib_dep) |dep| {
+        exe.linkLibrary(dep.artifact("raylib"));
+    }
     
-    exe.linkLibrary(quickjs_dep.artifact("zig-quickjs"));
-
     if (target.result.os.tag == .windows) {
         exe.win32_manifest = b.path("src/main.manifest");
-        exe.subsystem = .Windows;
+        exe.subsystem = .Console;
     }
 
     b.installArtifact(exe);
@@ -225,30 +258,38 @@ fn addRaylibBackend(
     optimize: std.builtin.OptimizeMode,
     linux_display_backend: LinuxDisplayBackend,
 ) *Build.Module {
-    const raylib_mod = b.addModule("raylib-backend", .{
-        .root_source_file = b.path("src/backends/raylib.zig"),
+    const raylib_backend_mod = b.addModule("raylib_zig", .{
+        .root_source_file = b.path("src/backends/raylib-zig.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
 
-    const ray_dep = b.lazyDependency("raylib", .{
-        .target = target,
-        .optimize = optimize,
-        .linux_display_backend = linux_display_backend,
-    }) orelse std.debug.panic("raylib dependency not available", .{});
+    const maybe_ray = b.lazyDependency(
+        "raylib_zig",
+        .{
+            .target = target,
+            .optimize = optimize,
+            .linux_display_backend = linux_display_backend,
+        },
+    );
+    if (maybe_ray) |ray| {
+        raylib_backend_mod.linkLibrary(ray.artifact("raylib"));
+        raylib_backend_mod.addImport("raylib", ray.module("raylib"));
+        raylib_backend_mod.addImport("raygui", ray.module("raygui"));
+    }
 
-    raylib_mod.addIncludePath(ray_dep.path("src"));
-    raylib_mod.addIncludePath(ray_dep.path("src/external/glfw/include"));
-    raylib_mod.addIncludePath(ray_dep.path("src/external/glfw/include/GLFW"));
-    raylib_mod.linkLibrary(ray_dep.artifact("raylib"));
+    const maybe_glfw = b.lazyDependency(
+        "zglfw",
+        .{
+            .target = target,
+            .optimize = optimize,
+        },
+    );
+    if (maybe_glfw) |glfw| {
+        raylib_backend_mod.addImport("zglfw", glfw.module("root"));
+    }
 
-    const raygui_dep = b.lazyDependency("raygui", .{}) orelse std.debug.panic("raygui dependency not available", .{});
-    raylib_mod.addIncludePath(raygui_dep.path("src"));
 
-    const write_files = b.addWriteFiles();
-    const raygui_impl = write_files.add("raygui.c", "#define RAYGUI_IMPLEMENTATION\n#include \"raygui.h\"\n");
-    raylib_mod.addCSourceFile(.{ .file = raygui_impl });
-
-    return raylib_mod;
+    return raylib_backend_mod;
 }

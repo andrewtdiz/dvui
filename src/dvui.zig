@@ -43,7 +43,6 @@ pub const App = @import("App.zig");
 pub const Backend = @import("Backend.zig");
 pub const Window = @import("Window.zig");
 pub const Subwindows = @import("Subwindows.zig");
-pub const Examples = @import("Examples.zig");
 
 pub const Color = @import("Color.zig");
 pub const Event = @import("Event.zig");
@@ -1800,7 +1799,7 @@ pub fn timerDone(id: Id) bool {
 }
 
 /// Return true if `timerDone` or if there is no timer.  Useful for periodic
-/// events (see Clock example in `Examples.animations`).
+/// events.
 ///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn timerDoneOrNone(id: Id) bool {
@@ -2765,7 +2764,7 @@ pub fn tooltip(src: std.builtin.SourceLocation, init_opts: FloatingTooltipWidget
 /// Shim to make widget ids unique.
 ///
 /// Useful when you wrap some widgets into a function, but that function does
-/// not have a parent widget.  See makeLabels() in src/Examples.zig
+/// not have a parent widget.
 ///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn virtualParent(src: std.builtin.SourceLocation, opts: Options) *VirtualParentWidget {

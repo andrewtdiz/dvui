@@ -1,15 +1,43 @@
 const std = @import("std");
+
 const dvui = @import("dvui");
 
-const jsruntime = @import("jsruntime/mod.zig");
 const image_loader = @import("jsruntime/image_loader.zig");
-const types = @import("types.zig");
-const quickjs_bridge = @import("jsc.zig");
-const tailwind = @import("tailwind.zig");
+const jsruntime = @import("jsruntime/mod.zig");
+const jsc_bridge = @import("jsruntime/solid/jsc.zig");
+const tailwind = @import("jsruntime/solid/tailwind.zig");
+const tailwind_dvui = @import("jsruntime/solid/dvui_tailwind.zig");
+const types = @import("jsruntime/solid/types.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
-pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) void {
+var gizmo_override_rect: ?types.GizmoRect = null;
+var gizmo_rect_pending: ?types.GizmoRect = null;
+
+fn flushSolidOps(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) void {
+    const rt = runtime orelse return;
+    const drain_limit: usize = 4;
+    var pass: usize = 0;
+    while (pass < drain_limit) : (pass += 1) {
+        const applied = jsc_bridge.syncOps(rt, store) catch |err| {
+            log.err("Solid bridge sync failed: {s}", .{@errorName(err)});
+            return;
+        };
+        if (!applied) break;
+    }
+}
+
+pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
+    gizmo_override_rect = rect;
+}
+
+pub fn takeGizmoRectUpdate() ?types.GizmoRect {
+    const next = gizmo_rect_pending;
+    gizmo_rect_pending = null;
+    return next;
+}
+
+pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) void {
     const root = store.node(0) orelse return;
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -27,7 +55,7 @@ pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) void {
 }
 
 fn renderNode(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node_id: u32,
     allocator: std.mem.Allocator,
@@ -52,13 +80,42 @@ fn renderNode(
 }
 
 fn renderElement(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
 ) void {
+    if (!node.hasDirtySubtree() and node.total_interactive == 0) {
+        node.markRendered();
+        return;
+    }
     const class_spec = node.prepareClassSpec();
+    if (canCacheNode(node, &class_spec)) {
+        var cache = dvui.cache(
+            @src(),
+            .{ .invalidate = node.hasDirtySubtree() },
+            .{ .id_extra = nodeCacheKey(node.id), .expand = .both },
+        );
+        defer cache.deinit();
+        if (!cache.uncached()) {
+            node.markRendered();
+            return;
+        }
+        renderElementBody(runtime, store, node_id, node, allocator, class_spec);
+        return;
+    }
+    renderElementBody(runtime, store, node_id, node, allocator, class_spec);
+}
+
+fn renderElementBody(
+    runtime: ?*jsruntime.JSRuntime,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    allocator: std.mem.Allocator,
+    class_spec: tailwind.ClassSpec,
+) void {
     if (std.mem.eql(u8, node.tag, "div")) {
         renderContainer(runtime, store, node, allocator, class_spec);
         node.markRendered();
@@ -76,6 +133,11 @@ fn renderElement(
     }
     if (std.mem.eql(u8, node.tag, "image")) {
         renderImage(runtime, node_id, node, class_spec);
+        node.markRendered();
+        return;
+    }
+    if (std.mem.eql(u8, node.tag, "gizmo")) {
+        renderGizmo(runtime, store, node_id, node, class_spec);
         node.markRendered();
         return;
     }
@@ -103,46 +165,50 @@ fn renderElement(
     node.markRendered();
 }
 
+fn canCacheNode(node: *types.SolidNode, class_spec: *const tailwind.ClassSpec) bool {
+    if (node.kind != .element) return false;
+    if (node.children.items.len == 0) return false;
+    if (node.total_interactive > 0) return false;
+    if (tailwind_dvui.isFlex(class_spec)) return false;
+    return true;
+}
+
 fn renderContainer(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
-    class_spec: tailwind.Spec,
+    class_spec: tailwind.ClassSpec,
 ) void {
     var options = dvui.Options{
         .name = "solid-div",
         .background = false,
         .expand = .none,
     };
-    tailwind.applyToOptions(&class_spec, &options);
+    tailwind_dvui.applyToOptions(&class_spec, &options);
 
-    if (class_spec.is_flex) {
-        const flex_init = tailwind.buildFlexOptions(&class_spec);
+    if (tailwind_dvui.isFlex(&class_spec)) {
+        const flex_init = tailwind_dvui.buildFlexOptions(&class_spec);
         var flexbox_widget = dvui.flexbox(@src(), flex_init, options);
         defer flexbox_widget.deinit();
-        if (!renderCachedSubtree(runtime, store, node, allocator)) {
-            renderFlexChildren(runtime, store, node, allocator, &class_spec);
-        }
+        renderFlexChildren(runtime, store, node, allocator, &class_spec);
     } else {
         var box = dvui.box(@src(), .{}, options);
         defer box.deinit();
-        if (!renderCachedSubtree(runtime, store, node, allocator)) {
-            for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator);
-            }
+        for (node.children.items) |child_id| {
+            renderNode(runtime, store, child_id, allocator);
         }
     }
 }
 
 fn renderFlexChildren(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
     class_spec: *const tailwind.Spec,
 ) void {
-    const direction = class_spec.direction orelse .horizontal;
+    const direction = tailwind_dvui.flexDirection(class_spec);
     const gap_main = switch (direction) {
         .horizontal => class_spec.gap_col,
         .vertical => class_spec.gap_row,
@@ -172,21 +238,32 @@ fn renderFlexChildren(
 }
 
 fn renderGeneric(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
 ) void {
-    if (renderCachedSubtree(runtime, store, node, allocator)) {
-        return;
-    }
     for (node.children.items) |child_id| {
         renderNode(runtime, store, child_id, allocator);
     }
 }
 
+fn renderGizmo(
+    runtime: ?*jsruntime.JSRuntime,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    class_spec: tailwind.Spec,
+) void {
+    _ = runtime;
+    _ = store;
+    _ = node_id;
+    _ = class_spec;
+    applyGizmoProp(node);
+}
+
 fn renderParagraph(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -204,7 +281,7 @@ fn renderParagraph(
             var options = dvui.Options{
                 .id_extra = nodeIdExtra(node_id),
             };
-            tailwind.applyToOptions(&class_spec, &options);
+            tailwind_dvui.applyToOptions(&class_spec, &options);
             if (font_override) |style_name| {
                 if (options.font_style == null) {
                     options.font_style = style_name;
@@ -217,6 +294,24 @@ fn renderParagraph(
     renderChildElements(runtime, store, node, allocator);
 }
 
+fn applyGizmoProp(node: *types.SolidNode) void {
+    const override = gizmo_override_rect;
+    const attr_rect = node.gizmoRect();
+    const has_new_attr = attr_rect != null and node.lastAppliedGizmoRectSerial() != node.gizmoRectSerial();
+
+    const prop = if (has_new_attr)
+        attr_rect.?
+    else
+        override orelse attr_rect orelse return;
+
+    node.setGizmoRuntimeRect(prop);
+
+    if (has_new_attr) {
+        node.markGizmoRectApplied();
+        gizmo_rect_pending = prop;
+    }
+}
+
 fn renderText(node: *types.SolidNode) void {
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
@@ -226,7 +321,7 @@ fn renderText(node: *types.SolidNode) void {
 }
 
 fn renderButton(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -241,20 +336,22 @@ fn renderButton(
         .id_extra = nodeIdExtra(node_id),
         .padding = dvui.Rect.all(6),
     };
-    tailwind.applyToOptions(&class_spec, &options);
+    tailwind_dvui.applyToOptions(&class_spec, &options);
 
     const pressed = dvui.button(@src(), caption, .{}, options);
     if (pressed and node.hasListener("click")) {
-        quickjs_bridge.dispatchEvent(runtime, node_id, "click", null) catch |err| {
-            log.err("Solid click dispatch failed: {s}", .{@errorName(err)});
-        };
+        if (runtime) |rt| {
+            jsc_bridge.dispatchEvent(rt, node_id, "click", null) catch |err| {
+                log.err("Solid click dispatch failed: {s}", .{@errorName(err)});
+            };
+        }
     }
 
     renderChildElements(runtime, store, node, allocator);
 }
 
 fn renderImage(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     node_id: u32,
     node: *types.SolidNode,
     class_spec: tailwind.Spec,
@@ -275,14 +372,14 @@ fn renderImage(
         .name = "solid-image",
         .id_extra = nodeIdExtra(node_id),
     };
-    tailwind.applyToOptions(&class_spec, &options);
+    tailwind_dvui.applyToOptions(&class_spec, &options);
 
     const image_source = image_loader.imageSource(resource);
     _ = dvui.image(@src(), .{ .source = image_source }, options);
 }
 
 fn renderInput(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -293,11 +390,7 @@ fn renderInput(
         .id_extra = nodeIdExtra(node_id),
         .background = false,
     };
-    tailwind.applyToOptions(&class_spec, &options);
-
-    if (class_spec.text) |color_value| {
-        options.color_text = color_value;
-    }
+    tailwind_dvui.applyToOptions(&class_spec, &options);
 
     var state = node.ensureInputState(store.allocator) catch |err| {
         log.err("Solid input state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
@@ -330,15 +423,17 @@ fn renderInput(
             return;
         };
         if (node.hasListener("input")) {
-            quickjs_bridge.dispatchEvent(runtime, node_id, "input", current_text) catch |err| {
-                log.err("Solid input dispatch failed: {s}", .{@errorName(err)});
-            };
+            if (runtime) |rt| {
+                jsc_bridge.dispatchEvent(rt, node_id, "input", current_text) catch |err| {
+                    log.err("Solid input dispatch failed: {s}", .{@errorName(err)});
+                };
+            }
         }
     }
 }
 
 fn renderChildElements(
-    runtime: *jsruntime.JSRuntime,
+    runtime: ?*jsruntime.JSRuntime,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
@@ -398,39 +493,4 @@ fn nodeIdExtra(id: u32) usize {
 fn nodeCacheKey(id: u32) usize {
     const salt: u32 = 0x9e3779b1;
     return nodeIdExtra(id ^ salt);
-}
-
-fn renderCachedSubtree(
-    runtime: *jsruntime.JSRuntime,
-    store: *types.NodeStore,
-    node: *types.SolidNode,
-    allocator: std.mem.Allocator,
-) bool {
-    if (!shouldCacheNode(node)) return false;
-
-    var cache = dvui.cache(
-        @src(),
-        .{ .invalidate = node.hasDirtySubtree() },
-        .{ .id_extra = nodeCacheKey(node.id), .expand = .both },
-    );
-    defer cache.deinit();
-
-    if (!cache.uncached()) {
-        return true;
-    }
-
-    for (node.children.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator);
-    }
-    return true;
-}
-
-fn shouldCacheNode(node: *types.SolidNode) bool {
-    if (node.kind != .element) return false;
-    if (node.children.items.len == 0) return false;
-    if (node.interactive_self) return false;
-    if (node.interactiveChildCount() > 0) return false;
-    const spec = node.prepareClassSpec();
-    if (spec.is_flex) return false;
-    return true;
 }

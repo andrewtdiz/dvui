@@ -1,0 +1,67 @@
+import { NativeRenderer } from "./solid/native-renderer";
+import { createSolidTextApp } from "./solid/solid-entry";
+import { createFrameScheduler } from "./solid/frame-scheduler";
+import { setTime } from "./solid/state/time";
+
+const screenWidth = 800;
+const screenHeight = 450;
+
+const renderer = new NativeRenderer({
+  callbacks: {
+    onLog(level, message) {
+      console.log(`[native:${level}] ${message}`);
+    },
+    onEvent(name) {
+      if (name === "window_closed") {
+        shutdown();
+      }
+    },
+  },
+});
+
+renderer.resize(screenWidth, screenHeight);
+
+const { host, setMessage, dispose } = createSolidTextApp(renderer);
+const scheduler = createFrameScheduler();
+
+let running = true;
+let frame = 0;
+let startTime = performance.now();
+let lastTime = startTime;
+
+const shutdown = () => {
+  if (!running) return;
+  running = false;
+  scheduler.stop();
+  dispose();
+  renderer.close();
+};
+
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+process.once("exit", shutdown);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    shutdown();
+  });
+}
+
+const loop = () => {
+  if (!running) return false;
+
+  const now = performance.now();
+  const dt = (now - lastTime) / 1000;
+  const elapsed = (now - startTime) / 1000;
+  lastTime = now;
+
+  setTime(elapsed, dt);
+
+  host.flush();
+  renderer.present();
+
+  frame += 1;
+  return true;
+};
+
+scheduler.start(loop);

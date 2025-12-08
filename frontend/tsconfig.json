@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "allowImportingTsExtensions": true,
+    "types": ["bun-types"],
+    "paths": {
+      "#solid-runtime": ["./solid/runtime.ts"]
+    }
+  }
+}

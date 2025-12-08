@@ -25,6 +25,9 @@ pub const Spec = struct {
     corner_radius: ?f32 = null,
 };
 
+// Compatibility alias for callers expecting ClassSpec.
+pub const ClassSpec = Spec;
+
 pub const Width = union(enum) {
     full,
     pixels: f32,

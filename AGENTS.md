@@ -104,7 +104,7 @@ Unlike some other languages, there is no `std.math.float` function; use the buil
 
 ### ArrayList syntax
 
-For detailed `std.ArrayList` usage, see `@agents/Zig_ArrayList.md`.
+For detailed `std.ArrayList` usage, see `Zig_ArrayList.md`.
 
 ```zig
 const std = @import("std");

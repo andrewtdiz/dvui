@@ -8,7 +8,8 @@ const RaylibBackend = @import("raylib-backend");
 comptime {
     std.debug.assert(@hasDecl(RaylibBackend, "RaylibBackend"));
 }
-const ray = RaylibBackend.c;
+const ray = RaylibBackend.raylib;
+const raygui = RaylibBackend.raygui;
 
 var last_mouse: dvui.Point.Natural = .{ .x = 0, .y = 0 };
 var has_mouse = false;
@@ -16,7 +17,7 @@ var mouse_down = false;
 
 pub fn main() !void {
     if (@import("builtin").os.tag == .windows) { // optional
-        try dvui.Backend.Common.windowsAttachConsole();
+        dvui.Backend.Common.windowsAttachConsole() catch {};
     }
     RaylibBackend.enableRaylibLogging();
     var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,10 +26,12 @@ pub fn main() !void {
     defer _ = gpa_instance.deinit();
 
     // create OS window directly with raylib
-    ray.SetConfigFlags(ray.FLAG_WINDOW_RESIZABLE);
-    ray.SetConfigFlags(ray.FLAG_VSYNC_HINT);
-    ray.InitWindow(1400, 900, "DVUI Raylib Ontop Example");
-    defer ray.CloseWindow();
+    ray.setConfigFlags(ray.ConfigFlags{
+        .window_resizable = true,
+        .vsync_hint = true,
+    });
+    ray.initWindow(1400, 900, "DVUI Raylib Ontop Example");
+    defer ray.closeWindow();
 
     var backend = RaylibBackend.init(gpa);
     defer backend.deinit();
@@ -38,20 +41,20 @@ pub fn main() !void {
     win.theme = dvui.Theme.builtin.shadcn;
     defer win.deinit();
 
-    while (!ray.WindowShouldClose()) {
-        ray.BeginDrawing();
+    while (!ray.windowShouldClose()) {
+        ray.beginDrawing();
 
         try win.begin(std.time.nanoTimestamp());
 
-        _ = try backend.addAllEvents(&win);
+        try backend.addAllEvents(&win);
         trackMousePosition();
 
         if (backend.shouldBlockRaylibInput()) {
-            ray.GuiLock();
+            raygui.lock();
         } else {
-            ray.GuiUnlock();
+            raygui.unlock();
         }
-        ray.ClearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
+        ray.clearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
         // Absolute positioned demo box centered in the window.
         {
@@ -75,7 +78,7 @@ pub fn main() !void {
 
             var center_box = dvui.box(@src(), .{ .dir = .vertical }, .{
                 .rect = box_rect,
-                .padding = dvui.Rect.all(16),
+                .padding = dvui.Rect.all(12),
                 .min_size_content = box_size,
                 .background = true,
                 .border = dvui.Rect.all(1),
@@ -83,9 +86,9 @@ pub fn main() !void {
             });
             defer center_box.deinit();
 
-            dvui.labelNoFmt(@src(), "Centered Box", .{}, .{ .gravity_x = 0.5 });
+            dvui.label(@src(), "Centered Box", .{}, .{ .gravity_x = 0.5 });
             _ = dvui.spacer(@src(), .{ .min_size_content = dvui.Size{ .w = 0, .h = 12 } });
-            dvui.labelNoFmt(@src(), "Anchored in the middle of the window.", .{}, .{ .gravity_x = 0.5 });
+            dvui.label(@src(), "Anchored in the middle of the window.", .{}, .{ .gravity_x = 0.5 });
             _ = dvui.spacer(@src(), .{ .min_size_content = dvui.Size{ .w = 0, .h = 8 } });
             _ = dvui.button(@src(), "Action", .{}, .{ .gravity_x = 0.5 });
         }
@@ -98,7 +101,7 @@ pub fn main() !void {
             backend.setCursor(win.cursorRequested());
         }
 
-        ray.EndDrawing();
+        ray.endDrawing();
     }
 }
 
