@@ -56,6 +56,7 @@ const loop = () => {
   lastTime = now;
 
   setTime(elapsed, dt);
+  setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
 
   host.flush();
   renderer.present();

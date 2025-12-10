@@ -9,21 +9,25 @@ const tailwind = @import("tailwind.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
-pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) void {
-    const root = store.node(0) orelse return;
+pub fn render(runtime: *jsruntime.JSRuntime, store: *types.NodeStore) bool {
+    const root = store.node(0) orelse return false;
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
 
     if (root.children.items.len == 0) {
-        log.debug("Solid renderer: root has no children", .{});
-        return;
+        log.debug("Solid renderer: root has no children (nodes={d})", .{store.nodes.count()});
+        return false;
     }
 
+    log.debug("Solid renderer: rendering root with {d} children", .{root.children.items.len});
+
+    var rendered: bool = false;
     for (root.children.items) |child_id| {
-        renderNode(runtime, store, child_id, scratch);
+        rendered = renderNode(runtime, store, child_id, scratch) or rendered;
     }
+    return rendered;
 }
 
 fn renderNode(
@@ -31,23 +35,27 @@ fn renderNode(
     store: *types.NodeStore,
     node_id: u32,
     allocator: std.mem.Allocator,
-) void {
-    const node = store.node(node_id) orelse return;
+) bool {
+    const node = store.node(node_id) orelse return false;
     switch (node.kind) {
         .root => {
+            var any = false;
             for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator);
+                any = renderNode(runtime, store, child_id, allocator) or any;
             }
             node.markRendered();
+            return any;
         },
         .slot => {
+            var any = false;
             for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator);
+                any = renderNode(runtime, store, child_id, allocator) or any;
             }
             node.markRendered();
+            return any;
         },
-        .text => renderText(node),
-        .element => renderElement(runtime, store, node_id, node, allocator),
+        .text => return renderText(node),
+        .element => return renderElement(runtime, store, node_id, node, allocator),
     }
 }
 
@@ -57,50 +65,51 @@ fn renderElement(
     node_id: u32,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
-) void {
+) bool {
     const class_spec = node.prepareClassSpec();
     if (std.mem.eql(u8, node.tag, "div")) {
-        renderContainer(runtime, store, node, allocator, class_spec);
+        const rendered = renderContainer(runtime, store, node, allocator, class_spec);
         node.markRendered();
-        return;
+        return rendered;
     }
     if (std.mem.eql(u8, node.tag, "button")) {
         renderButton(runtime, store, node_id, node, allocator, class_spec);
         node.markRendered();
-        return;
+        return true;
     }
     if (std.mem.eql(u8, node.tag, "input")) {
         renderInput(runtime, store, node_id, node, class_spec);
         node.markRendered();
-        return;
+        return true;
     }
     if (std.mem.eql(u8, node.tag, "image")) {
         renderImage(runtime, node_id, node, class_spec);
         node.markRendered();
-        return;
+        return true;
     }
     if (std.mem.eql(u8, node.tag, "p")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, null);
+        const rendered = renderParagraph(runtime, store, node_id, node, allocator, class_spec, null);
         node.markRendered();
-        return;
+        return rendered;
     }
     if (std.mem.eql(u8, node.tag, "h1")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title);
+        const rendered = renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title);
         node.markRendered();
-        return;
+        return rendered;
     }
     if (std.mem.eql(u8, node.tag, "h2")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_1);
+        const rendered = renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_1);
         node.markRendered();
-        return;
+        return rendered;
     }
     if (std.mem.eql(u8, node.tag, "h3")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_2);
+        const rendered = renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_2);
         node.markRendered();
-        return;
+        return rendered;
     }
-    renderGeneric(runtime, store, node, allocator);
+    const rendered = renderGeneric(runtime, store, node, allocator);
     node.markRendered();
+    return rendered;
 }
 
 fn renderContainer(
@@ -109,7 +118,7 @@ fn renderContainer(
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
     class_spec: tailwind.Spec,
-) void {
+) bool {
     var options = dvui.Options{
         .name = "solid-div",
         .background = false,
@@ -122,17 +131,20 @@ fn renderContainer(
         var flexbox_widget = dvui.flexbox(@src(), flex_init, options);
         defer flexbox_widget.deinit();
         if (!renderCachedSubtree(runtime, store, node, allocator)) {
-            renderFlexChildren(runtime, store, node, allocator, &class_spec);
+            return renderFlexChildren(runtime, store, node, allocator, &class_spec) or options.background;
         }
     } else {
         var box = dvui.box(@src(), .{}, options);
         defer box.deinit();
         if (!renderCachedSubtree(runtime, store, node, allocator)) {
+            var rendered_child = false;
             for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator);
+                rendered_child = renderNode(runtime, store, child_id, allocator) or rendered_child;
             }
+            return rendered_child or options.background;
         }
     }
+    return true;
 }
 
 fn renderFlexChildren(
@@ -141,7 +153,7 @@ fn renderFlexChildren(
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
     class_spec: *const tailwind.Spec,
-) void {
+) bool {
     const direction = class_spec.direction orelse .horizontal;
     const gap_main = switch (direction) {
         .horizontal => class_spec.gap_col,
@@ -149,6 +161,7 @@ fn renderFlexChildren(
     } orelse 0;
 
     var child_index: usize = 0;
+    var rendered: bool = false;
     for (node.children.items) |child_id| {
         if (gap_main > 0 and child_index > 0) {
             var margin = dvui.Rect{};
@@ -163,12 +176,13 @@ fn renderFlexChildren(
                 .{ .margin = margin, .background = false, .name = "solid-gap", .id_extra = nodeIdExtra(node.id ^ _child_index) },
             );
             defer spacer.deinit();
-            renderNode(runtime, store, child_id, allocator);
+            rendered = renderNode(runtime, store, child_id, allocator) or rendered;
         } else {
-            renderNode(runtime, store, child_id, allocator);
+            rendered = renderNode(runtime, store, child_id, allocator) or rendered;
         }
         child_index += 1;
     }
+    return rendered;
 }
 
 fn renderGeneric(
@@ -176,13 +190,15 @@ fn renderGeneric(
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
-) void {
+) bool {
     if (renderCachedSubtree(runtime, store, node, allocator)) {
-        return;
+        return true;
     }
+    var rendered = false;
     for (node.children.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator);
+        rendered = renderNode(runtime, store, child_id, allocator) or rendered;
     }
+    return rendered;
 }
 
 fn renderParagraph(
@@ -193,10 +209,11 @@ fn renderParagraph(
     allocator: std.mem.Allocator,
     class_spec: tailwind.Spec,
     font_override: ?dvui.Options.FontStyle,
-) void {
+) bool {
     var text_buffer: std.ArrayList(u8) = .empty;
     defer text_buffer.deinit(allocator);
 
+    var rendered: bool = false;
     collectText(allocator, store, node, &text_buffer);
     if (text_buffer.items.len > 0) {
         const trimmed = std.mem.trim(u8, text_buffer.items, " \n\r\t");
@@ -211,18 +228,23 @@ fn renderParagraph(
                 }
             }
             dvui.labelNoFmt(@src(), trimmed, .{}, options);
+            rendered = true;
         }
     }
 
-    renderChildElements(runtime, store, node, allocator);
+    rendered = renderChildElements(runtime, store, node, allocator) or rendered;
+    return rendered;
 }
 
-fn renderText(node: *types.SolidNode) void {
+fn renderText(node: *types.SolidNode) bool {
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
         dvui.labelNoFmt(@src(), trimmed, .{}, .{ .id_extra = nodeIdExtra(node.id) });
+        node.markRendered();
+        return true;
     }
     node.markRendered();
+    return false;
 }
 
 fn renderButton(
@@ -342,12 +364,14 @@ fn renderChildElements(
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
-) void {
+) bool {
+    var rendered = false;
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;
         if (child.kind == .text) continue;
-        renderNode(runtime, store, child_id, allocator);
+        rendered = renderNode(runtime, store, child_id, allocator) or rendered;
     }
+    return rendered;
 }
 
 fn buildText(

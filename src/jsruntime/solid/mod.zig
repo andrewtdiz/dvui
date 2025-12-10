@@ -22,5 +22,5 @@ pub fn render(runtime: *jsruntime.JSRuntime) void {
         store_initialized = true;
     }
 
-    renderer.render(runtime, &store);
+    _ = renderer.render(runtime, &store);
 }

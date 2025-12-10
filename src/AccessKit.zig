@@ -1,5 +1,9 @@
 //! Adds accessibility support to widgets via the AccessKit library
+const std = @import("std");
 const builtin = @import("builtin");
+
+const dvui = @import("dvui.zig");
+
 pub const c = @cImport({
     if (dvui.accesskit_enabled) {
         // Workaround for a linker symbol clash on aarch64-windows
@@ -9,8 +13,6 @@ pub const c = @cImport({
 });
 
 pub const AccessKit = @This();
-const std = @import("std");
-const dvui = @import("dvui.zig");
 
 const log = std.log.scoped(.AccessKit);
 
@@ -78,8 +80,7 @@ pub fn initialize(self: *AccessKit) void {
             ) orelse @panic("null");
         }
     } else if (builtin.os.tag.isDarwin()) {
-        // TODO: This results in a null pointer unwrap. I assume the window class is wrong?
-        //ak.accesskit_macos_add_focus_forwarder_to_window_class("SDLWindow");
+        // TODO: Determine the correct window class for focus forwarding.
         self.adapter = c.accesskit_macos_subclassing_adapter_for_window(macOSWinPtr(window), initialTreeUpdate, self, doAction, self) orelse @panic("null");
     } else if (builtin.os.tag == .linux) {
         self.adapter = c.accesskit_unix_adapter_new(initialTreeUpdate, self, doAction, self, deactivateAccessibility, self) orelse @panic("null");
@@ -92,23 +93,6 @@ pub fn initialize(self: *AccessKit) void {
 
 fn windowsHWND(window: *dvui.Window) c.HWND {
     switch (dvui.backend.kind) {
-        .sdl3 => {
-            const SDLBackend = dvui.backend;
-            const properties: SDLBackend.c.SDL_PropertiesID = SDLBackend.c.SDL_GetWindowProperties(window.backend.impl.window);
-            const hwnd = SDLBackend.c.SDL_GetPointerProperty(
-                properties,
-                SDLBackend.c.SDL_PROP_WINDOW_WIN32_HWND_POINTER,
-                null,
-            ) orelse @panic("No HWND");
-            return @intFromPtr(hwnd);
-        },
-        .sdl2 => {
-            const SDLBackend = dvui.backend;
-            var wmInfo: SDLBackend.c.SDL_SysWMinfo = undefined;
-            SDLBackend.c.SDL_GetVersion(&wmInfo.version);
-            _ = SDLBackend.c.SDL_GetWindowWMInfo(window.backend.impl.window, &wmInfo);
-            return @ptrCast(wmInfo.info.win.window);
-        },
         .raylib => {
             return @intFromPtr(dvui.backend.c.GetWindowHandle());
         },
@@ -122,24 +106,8 @@ fn windowsHWND(window: *dvui.Window) c.HWND {
 }
 
 fn macOSWinPtr(window: *dvui.Window) *anyopaque {
-    const SDLBackend = dvui.backend;
-
+    _ = window; // unused for current backend selection
     switch (dvui.backend.kind) {
-        .sdl2 => {
-            var wmInfo: SDLBackend.c.SDL_SysWMinfo = undefined;
-            SDLBackend.c.SDL_GetVersion(&wmInfo.version);
-            _ = SDLBackend.c.SDL_GetWindowWMInfo(window.backend.impl.window, &wmInfo);
-            return wmInfo.info.cocoa.window orelse @panic("No HWND");
-        },
-        .sdl3 => {
-            const properties: SDLBackend.c.SDL_PropertiesID = SDLBackend.c.SDL_GetWindowProperties(window.backend.impl.window);
-            const hwnd = SDLBackend.c.SDL_GetPointerProperty(
-                properties,
-                SDLBackend.c.SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
-                null,
-            ) orelse @panic("No HWND");
-            return hwnd;
-        },
         .raylib => {
             return dvui.backend.c.GetWindowHandle() orelse @panic("No HWND");
         },

@@ -5,8 +5,9 @@ const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
-const solid_renderer = @import("solid_renderer.zig");
+
 const solid_types = @import("jsruntime/solid/types.zig");
+const solid_renderer = @import("solid_renderer.zig");
 
 const LogFn = fn (level: u8, msg_ptr: [*]const u8, msg_len: usize) callconv(.c) void;
 const EventFn = fn (name_ptr: [*]const u8, name_len: usize, data_ptr: [*]const u8, data_len: usize) callconv(.c) void;
@@ -44,9 +45,68 @@ const Renderer = struct {
     destroy_started: bool = false,
     solid_store_ready: bool = false,
     solid_store: solid_types.NodeStore = undefined,
+    solid_seq_last: u64 = 0,
 };
 
 const flag_absolute: u8 = 1;
+
+const SolidOp = struct {
+    op: []const u8,
+    id: u32 = 0,
+    parent: ?u32 = null,
+    before: ?u32 = null,
+    tag: ?[]const u8 = null,
+    text: ?[]const u8 = null,
+    className: ?[]const u8 = null,
+    // Transform fields (optional; last-write-wins)
+    rotation: ?f32 = null,
+    scaleX: ?f32 = null,
+    scaleY: ?f32 = null,
+    anchorX: ?f32 = null,
+    anchorY: ?f32 = null,
+    translateX: ?f32 = null,
+    translateY: ?f32 = null,
+    // Visual fields (optional; last-write-wins)
+    opacity: ?f32 = null,
+    cornerRadius: ?f32 = null,
+    background: ?u32 = null,
+    textColor: ?u32 = null,
+    clipChildren: ?bool = null,
+};
+
+const SolidOpBatch = struct {
+    ops: []const SolidOp = &.{},
+    seq: ?u64 = null,
+};
+
+fn applyTransformFields(store: *solid_types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    if (op.rotation) |v| target.transform.rotation = v;
+    if (op.scaleX) |v| target.transform.scale[0] = v;
+    if (op.scaleY) |v| target.transform.scale[1] = v;
+    if (op.anchorX) |v| target.transform.anchor[0] = v;
+    if (op.anchorY) |v| target.transform.anchor[1] = v;
+    if (op.translateX) |v| target.transform.translation[0] = v;
+    if (op.translateY) |v| target.transform.translation[1] = v;
+}
+
+fn applyVisualFields(store: *solid_types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    if (op.opacity) |v| target.visual.opacity = v;
+    if (op.cornerRadius) |v| target.visual.corner_radius = v;
+    if (op.background) |c| target.visual.background = .{ .value = c };
+    if (op.textColor) |c| target.visual.text_color = .{ .value = c };
+    if (op.clipChildren) |flag| target.visual.clip_children = flag;
+}
+
+const OpError = error{
+    OutOfMemory,
+    UnknownOp,
+    MissingId,
+    MissingParent,
+    MissingChild,
+    MissingTag,
+};
 
 fn colorFromPacked(value: u32) dvui.Color {
     return .{
@@ -64,6 +124,201 @@ fn ensureSolidStore(renderer: *Renderer) !void {
         return err;
     };
     renderer.solid_store_ready = true;
+}
+
+fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
+    // Ensure the store exists, then rebuild it from scratch based on the JSON payload.
+    ensureSolidStore(renderer) catch return;
+
+    if (renderer.solid_store_ready) {
+        renderer.solid_store.deinit();
+        renderer.solid_store_ready = false;
+    }
+
+    renderer.solid_store.init(renderer.allocator) catch |err| {
+        logMessage(renderer, 3, "solid store reset failed: {s}", .{@errorName(err)});
+        return;
+    };
+    renderer.solid_store_ready = true;
+
+    const NodeEntry = struct {
+        id: u32,
+        tag: []const u8,
+        parent: ?u32 = null,
+        text: ?[]const u8 = null,
+        className: ?[]const u8 = null,
+    };
+
+    const Payload = struct {
+        nodes: []const NodeEntry = &.{},
+    };
+
+    var parsed = std.json.parseFromSlice(Payload, renderer.allocator, json_bytes, .{
+        .ignore_unknown_fields = true,
+    }) catch |err| {
+        logMessage(renderer, 3, "solid tree parse failed: {s}", .{@errorName(err)});
+        return;
+    };
+    defer parsed.deinit();
+
+    const payload = parsed.value;
+    logMessage(renderer, 2, "solid snapshot nodes={d}", .{payload.nodes.len});
+
+    // First pass: create/upsert nodes.
+    for (payload.nodes) |node| {
+        if (node.id == 0) continue; // 0 is reserved for root
+        if (std.mem.eql(u8, node.tag, "text")) {
+            renderer.solid_store.setTextNode(node.id, node.text orelse "") catch |err| {
+                logMessage(renderer, 3, "setTextNode failed for {d}: {s}", .{ node.id, @errorName(err) });
+            };
+            continue;
+        }
+        if (std.mem.eql(u8, node.tag, "slot")) {
+            renderer.solid_store.upsertSlot(node.id) catch |err| {
+                logMessage(renderer, 3, "upsertSlot failed for {d}: {s}", .{ node.id, @errorName(err) });
+            };
+        } else {
+            renderer.solid_store.upsertElement(node.id, node.tag) catch |err| {
+                logMessage(renderer, 3, "upsertElement failed for {d}: {s}", .{ node.id, @errorName(err) });
+                return;
+            };
+        }
+        if (node.className) |cls| {
+            renderer.solid_store.setClassName(node.id, cls) catch |err| {
+                logMessage(renderer, 3, "setClassName failed for {d}: {s}", .{ node.id, @errorName(err) });
+            };
+        }
+    }
+
+    // Second pass: wire parent/child relationships in order.
+    for (payload.nodes) |node| {
+        if (node.id == 0) continue;
+        const parent_id: u32 = node.parent orelse 0;
+        renderer.solid_store.insert(parent_id, node.id, null) catch |err| {
+            logMessage(renderer, 3, "insert failed for {d} -> {d}: {s}", .{ parent_id, node.id, @errorName(err) });
+        };
+    }
+
+    if (renderer.solid_store.node(0)) |root| {
+        logMessage(renderer, 2, "solid snapshot root children={d}", .{root.children.items.len});
+        if (root.children.items.len == 0) {
+            renderer.solid_store_ready = false;
+        }
+    }
+}
+
+fn applySolidOp(renderer: *Renderer, op: SolidOp) OpError!void {
+    if (op.op.len == 0) return error.UnknownOp;
+    const store = &renderer.solid_store;
+
+    if (std.mem.eql(u8, op.op, "create")) {
+        const tag = op.tag orelse return error.MissingTag;
+        if (std.mem.eql(u8, tag, "text")) {
+            try store.setTextNode(op.id, op.text orelse "");
+        } else if (std.mem.eql(u8, tag, "slot")) {
+            try store.upsertSlot(op.id);
+        } else {
+            try store.upsertElement(op.id, tag);
+        }
+        if (op.className) |cls| {
+            try store.setClassName(op.id, cls);
+        }
+        const parent_id: u32 = op.parent orelse 0;
+        try store.insert(parent_id, op.id, op.before);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "remove")) {
+        if (op.id == 0) return error.MissingId;
+        store.remove(op.id);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "move") or std.mem.eql(u8, op.op, "insert")) {
+        if (op.id == 0) return error.MissingId;
+        const parent_id = op.parent orelse return error.MissingParent;
+        if (store.node(op.id) == null) return error.MissingChild;
+        if (store.node(parent_id) == null) return error.MissingParent;
+        try store.insert(parent_id, op.id, op.before);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_text")) {
+        if (op.id == 0) return error.MissingId;
+        try store.setTextNode(op.id, op.text orelse "");
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_class")) {
+        if (op.id == 0) return error.MissingId;
+        const cls = op.className orelse return error.MissingTag;
+        try store.setClassName(op.id, cls);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_transform")) {
+        if (op.id == 0) return error.MissingId;
+        try applyTransformFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_visual")) {
+        if (op.id == 0) return error.MissingId;
+        try applyVisualFields(store, op.id, op);
+        return;
+    }
+
+    return error.UnknownOp;
+}
+
+fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
+    ensureSolidStore(renderer) catch return false;
+
+    var parsed = std.json.parseFromSlice(SolidOpBatch, renderer.allocator, json_bytes, .{
+        .ignore_unknown_fields = true,
+    }) catch |err| {
+        logMessage(renderer, 3, "solid ops parse failed: {s}", .{@errorName(err)});
+        return false;
+    };
+    defer parsed.deinit();
+
+    const batch = parsed.value;
+    const seq = batch.seq orelse renderer.solid_seq_last + 1;
+    if (seq <= renderer.solid_seq_last) {
+        logMessage(renderer, 2, "solid ops dropped stale batch seq={d} last={d}", .{ seq, renderer.solid_seq_last });
+        return false;
+    }
+    logMessage(renderer, 1, "solid ops seq={d} count={d}", .{ seq, batch.ops.len });
+    for (batch.ops) |op| {
+        applySolidOp(renderer, op) catch |err| {
+            logMessage(renderer, 3, "solid op failed: {s} op={s} id={d} parent={?d} before={?d}", .{
+                @errorName(err),
+                op.op,
+                op.id,
+                op.parent,
+                op.before,
+            });
+            return false;
+        };
+    }
+    renderer.solid_seq_last = seq;
+
+    const root = renderer.solid_store.node(0) orelse {
+        logMessage(renderer, 3, "solid store missing root after ops", .{});
+        renderer.solid_store_ready = false;
+        return false;
+    };
+    logMessage(renderer, 1, "solid store nodes={d}", .{renderer.solid_store.nodes.count()});
+    logMessage(renderer, 1, "solid ops root children={d}", .{root.children.items.len});
+
+    if (root.children.items.len == 0) {
+        logMessage(renderer, 2, "solid ops produced empty root; requesting resync", .{});
+        renderer.solid_store_ready = false;
+        return false;
+    }
+
+    renderer.solid_store_ready = true;
+    return true;
 }
 
 fn logMessage(renderer: *Renderer, level: u8, comptime fmt: []const u8, args: anytype) void {
@@ -113,11 +368,13 @@ fn ensureWindow(renderer: *Renderer) !void {
     if (renderer.window_ready or renderer.size[0] == 0 or renderer.size[1] == 0) return;
 
     logMessage(renderer, 1, "ensureWindow size={d}x{d}", .{ renderer.size[0], renderer.size[1] });
-    RaylibBackend.enableRaylibLogging();
 
     if (builtin.os.tag == .windows) {
         dvui.Backend.Common.windowsAttachConsole() catch {};
     }
+
+    // Reduce Raylib info spam (texture/FBO load logs) — keep warnings/errors.
+    ray.setTraceLogLevel(ray.TraceLogLevel.warning);
 
     var title_buffer: [64]u8 = undefined;
     const title = std.fmt.bufPrintZ(&title_buffer, "DVUI Native Renderer", .{}) catch "DVUI";
@@ -416,9 +673,10 @@ fn renderFrame(renderer: *Renderer) void {
             }
         }
 
-        if (renderer.solid_store_ready) {
-            solid_renderer.render(null, &renderer.solid_store);
-        } else {
+        const frame_start = std.time.nanoTimestamp();
+
+        const drew_solid = renderer.solid_store_ready and solid_renderer.render(null, &renderer.solid_store);
+        if (!drew_solid) {
             renderCommandsDvui(renderer, win);
         }
 
@@ -429,10 +687,14 @@ fn renderFrame(renderer: *Renderer) void {
                 backend.setCursor(win.cursorRequested());
             }
         }
+
+        // Temporarily disable per-frame logging to diagnose FFI crash
+        _ = frame_start;
     }
 
     ray.drawFPS(10, 10);
-    sendFrameEvent(renderer);
+    // Temporarily disable frame event callback to diagnose FFI crash
+    // sendFrameEvent(renderer);
 }
 
 fn deinitRenderer(renderer: *Renderer) void {
@@ -552,6 +814,43 @@ pub export fn setRendererText(renderer: ?*Renderer, text_ptr: [*]const u8, text_
             };
         }
     }
+}
+
+pub export fn setRendererSolidTree(
+    renderer: ?*Renderer,
+    json_ptr: [*]const u8,
+    json_len: usize,
+) callconv(.c) void {
+    if (renderer) |ptr| {
+        if (ptr.destroy_started or ptr.pending_destroy) return;
+        if (ptr.busy) return;
+        ptr.busy = true;
+        defer {
+            ptr.busy = false;
+            tryFinalize(ptr);
+        }
+        const data = json_ptr[0..json_len];
+        rebuildSolidStoreFromJson(ptr, data);
+    }
+}
+
+pub export fn applyRendererSolidOps(
+    renderer: ?*Renderer,
+    json_ptr: [*]const u8,
+    json_len: usize,
+) callconv(.c) bool {
+    if (renderer) |ptr| {
+        if (ptr.destroy_started or ptr.pending_destroy) return false;
+        if (ptr.busy) return false;
+        ptr.busy = true;
+        defer {
+            ptr.busy = false;
+            tryFinalize(ptr);
+        }
+        const data = json_ptr[0..json_len];
+        return applySolidOps(ptr, data);
+    }
+    return false;
 }
 
 pub export fn commitCommands(

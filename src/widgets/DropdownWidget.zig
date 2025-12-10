@@ -83,10 +83,9 @@ pub fn install(self: *DropdownWidget) void {
         lw.draw();
         lw.deinit();
         _ = dvui.spacer(@src(), .{ .min_size_content = .width(6) });
-        dvui.icon(
+        dvui.labelNoFmt(
             @src(),
-            "dropdown_triangle",
-            dvui.entypo.chevron_small_down,
+            "v",
             .{},
             self.options.strip().override(.{ .gravity_y = 0.5, .gravity_x = 1.0, .role = .none }),
         );

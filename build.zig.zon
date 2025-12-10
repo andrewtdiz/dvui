@@ -5,16 +5,6 @@
     .minimum_zig_version = "0.15.1",
     .paths = .{""},
     .dependencies = .{
-        .sdl = .{
-            .url = "git+https://github.com/allyourcodebase/SDL#d29847ebcb6da34dec466a06163431982500a092",
-            .hash = "SDL-2.32.6-JToi38aTEgECY2mV9iUG7dNouCbarfJ1mkzjjm53gC80",
-            .lazy = true,
-        },
-        .sdl3 = .{
-            .url = "git+https://github.com/david-vanderson/SDL#81ea86c805f69edc32795c6c83f5be020335ca96",
-            .hash = "sdl-0.2.6+3.2.20-7uIn9CEjfwEuULkL_SE91eY6mMfM8KBoFolexyZHWr76",
-            .lazy = true,
-        },
         .freetype = .{
             .url = "git+https://github.com/david-vanderson/freetype#153f45bf550d54c902c2e6233c1c0554f067028c",
             .hash = "freetype-2.14.1-alzUkTaBqgBs62EIZtayIBpFnCaZmSh8Qy6QNF2BUE3E",
@@ -58,9 +48,6 @@
             .url = "git+https://github.com/zig-gamedev/zglfw.git#6034a5623312c58bf5e64c1a2b686691c28575f4",
             .hash = "zglfw-0.10.0-dev-zgVDNPKyIQCBi-wv_vxkvIQq1u0bP4D56Wszx_2mszc7",
             .lazy = true,
-        },
-        .zig_quickjs = .{
-            .path = "./deps/zig-quickjs",
         },
     },
 }

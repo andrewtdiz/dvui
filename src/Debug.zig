@@ -321,7 +321,7 @@ pub fn show(self: *Debug) void {
             defer row.deinit();
 
             var reset_wd: dvui.WidgetData = undefined;
-            if (dvui.buttonIcon(@src(), "Reset Option Override", dvui.entypo.back, .{}, .{}, .{
+            if (dvui.button(@src(), "Reset Option Override", .{}, .{
                 .gravity_y = 0.5,
                 .data_out = &reset_wd,
             })) {
@@ -333,7 +333,7 @@ pub fn show(self: *Debug) void {
             }, "Remove the override", .{}, .{});
 
             var copy_wd: dvui.WidgetData = undefined;
-            if (dvui.buttonIcon(@src(), "Copy Option Override", dvui.entypo.copy, .{}, .{}, .{
+            if (dvui.button(@src(), "Copy Option Override", .{}, .{
                 .gravity_y = 0.5,
                 .data_out = &copy_wd,
             })) {
@@ -376,7 +376,7 @@ pub fn show(self: *Debug) void {
         var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{ .id_extra = i });
         defer hbox.deinit();
 
-        if (dvui.buttonIcon(@src(), "find", dvui.entypo.magnifying_glass, .{}, .{}, .{})) {
+        if (dvui.button(@src(), "find", .{}, .{})) {
             self.widget_id = item.id;
         }
 
@@ -449,7 +449,7 @@ pub fn optionsEditor(self: *Options, wd: *const dvui.WidgetData) bool {
         defer tabs.deinit();
 
         var button_wd: dvui.WidgetData = undefined;
-        if (dvui.buttonIcon(@src(), "Copy Options", dvui.entypo.copy, .{}, .{}, .{ .gravity_x = 1, .data_out = &button_wd })) {
+        if (dvui.button(@src(), "Copy Options", .{}, .{ .gravity_x = 1, .data_out = &button_wd })) {
             copyOptionsToClipboard(wd.src, wd.id, self.*);
         }
         dvui.tooltip(@src(), .{

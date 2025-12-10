@@ -11,22 +11,24 @@
 //! A complete list of available widgets can be found under `dvui.widgets`.
 //!
 //! ## Backends
-//! - [SDL](#dvui.backends.sdl)
 //! - [Web](#dvui.backends.web)
 //! - [rayLib](#dvui.backends.raylib)
 //! - [Dx11](#dvui.backends.dx11)
 //! - [WGPU](#dvui.backends.wgpu)
 //! - [Testing](#dvui.backends.testing)
 //!
-const builtin = @import("builtin");
 const std = @import("std");
+pub const math = std.math;
+pub const fnv = std.hash.Fnv1a_64;
+const builtin = @import("builtin");
+
 /// Using this in application code will hinder ZLS from referencing the correct backend.
 /// To avoid this import the backend directly from the applications build.zig
 ///
 /// ```zig
-/// // build.zig
-/// mod.addImport("dvui", dvui_dep.module("dvui_sdl3"));
-/// mod.addImport("backend", dvui_dep.module("sdl3"));
+/// // build.zig (example with the raylib backend)
+/// mod.addImport("dvui", dvui_mod);
+/// mod.addImport("backend", raylib_mod);
 ///
 /// // src/main.zig
 /// const dvui = @import("dvui");
@@ -34,90 +36,129 @@ const std = @import("std");
 /// ```
 pub const backend = @import("backend");
 const tvg = @import("svg2tvg");
-const io_compat = @import("io_compat.zig");
 
-pub const math = std.math;
-pub const fnv = std.hash.Fnv1a_64;
-
+pub const AccessKit = @import("AccessKit.zig");
 pub const App = @import("App.zig");
 pub const Backend = @import("Backend.zig");
-pub const Window = @import("Window.zig");
-pub const Subwindows = @import("Subwindows.zig");
-
 pub const Color = @import("Color.zig");
-pub const Event = @import("Event.zig");
-pub const Font = @import("Font.zig");
-pub const Options = @import("Options.zig");
-pub const Point = @import("Point.zig").Point;
-pub const Path = @import("Path.zig");
-pub const Rect = @import("Rect.zig").Rect;
-pub const RectScale = @import("RectScale.zig");
-pub const ScrollInfo = @import("ScrollInfo.zig");
-pub const Size = @import("Size.zig").Size;
-pub const Theme = @import("Theme.zig");
-pub const Triangles = @import("Triangles.zig");
-pub const Vertex = @import("Vertex.zig");
-pub const Widget = @import("Widget.zig");
-pub const WidgetData = @import("WidgetData.zig");
-
-pub const entypo = @import("icons/entypo.zig");
-
-// Note : Import widgets this way (i.e. importing them via `src/import_widgets.zig`
-// so they are nicely referenced in docs.
-// Having `pub const widgets = ` allow to refer the page with `dvui.widgets` in doccoment
-pub const widgets = @import("import_widgets.zig");
-pub const AnimateWidget = widgets.AnimateWidget;
-pub const BoxWidget = widgets.BoxWidget;
-pub const CacheWidget = widgets.CacheWidget;
-pub const ColorPickerWidget = widgets.ColorPickerWidget;
-pub const FlexBoxWidget = widgets.FlexBoxWidget;
-pub const ReorderWidget = widgets.ReorderWidget;
-pub const Reorderable = ReorderWidget.Reorderable;
-pub const ButtonWidget = widgets.ButtonWidget;
-pub const ContextWidget = widgets.ContextWidget;
-pub const DropdownWidget = widgets.DropdownWidget;
-pub const FloatingWindowWidget = widgets.FloatingWindowWidget;
-pub const FloatingWidget = widgets.FloatingWidget;
-pub const FloatingTooltipWidget = widgets.FloatingTooltipWidget;
-pub const FloatingMenuWidget = widgets.FloatingMenuWidget;
-pub const FocusGroupWidget = widgets.FocusGroupWidget;
-pub const GizmoWidget = widgets.GizmoWidget;
-pub const IconWidget = widgets.IconWidget;
-pub const LabelWidget = widgets.LabelWidget;
-pub const MenuWidget = widgets.MenuWidget;
-pub const MenuItemWidget = widgets.MenuItemWidget;
-pub const OverlayWidget = widgets.OverlayWidget;
-pub const PanedWidget = widgets.PanedWidget;
-pub const PlotWidget = widgets.PlotWidget;
-pub const ScaleWidget = widgets.ScaleWidget;
-pub const ScrollAreaWidget = widgets.ScrollAreaWidget;
-pub const ScrollBarWidget = widgets.ScrollBarWidget;
-pub const ScrollContainerWidget = widgets.ScrollContainerWidget;
-pub const SuggestionWidget = widgets.SuggestionWidget;
-pub const SelectionWidget = widgets.SelectionWidget;
-pub const TabsWidget = widgets.TabsWidget;
-pub const TextEntryWidget = widgets.TextEntryWidget;
-pub const TextLayoutWidget = widgets.TextLayoutWidget;
-pub const TreeWidget = widgets.TreeWidget;
-pub const VirtualParentWidget = widgets.VirtualParentWidget;
-pub const GridWidget = widgets.GridWidget;
-pub const struct_ui = @import("struct_ui.zig");
-pub const enums = @import("enums.zig");
-pub const easing = @import("easing.zig");
-pub const selection = @import("selection.zig");
-pub const testing = @import("testing.zig");
-pub const TrackingAutoHashMap = @import("tracking_hash_map.zig").TrackingAutoHashMap;
-pub const PNGEncoder = @import("PNGEncoder.zig");
-pub const JPGEncoder = @import("JPGEncoder.zig");
-
+pub const Data = @import("Data.zig");
 pub const Dialogs = @import("Dialogs.zig");
 pub const Dialog = Dialogs.Dialog;
 /// Toasts are just specialized dialogs
 pub const Toast = Dialog;
+pub const ToastIterator = Dialogs.Iterator;
+pub const Dragging = @import("Dragging.zig");
+pub const easing = @import("easing.zig");
+pub const enums = @import("enums.zig");
+pub const Event = @import("Event.zig");
+pub const Font = @import("Font.zig");
+pub const FontError = Font.Error;
+/// DEPRECATED: Use `Font.Cache.TTFEntry` directly
+///
+/// The bytes of a truetype font file and whether to free it.
+pub const FontBytesEntry = Font.Cache.TTFEntry;
+/// DEPRECATED: Use `Font.Cache.Entry` directly
+pub const FontCacheEntry = Font.Cache.Entry;
+const io_compat = @import("io_compat.zig");
+pub const JPGEncoder = @import("JPGEncoder.zig");
+pub const layout = @import("layout.zig");
+pub const BasicLayout = layout.BasicLayout;
+pub const Alignment = layout.Alignment;
+pub const PlaceOnScreenAvoid = layout.PlaceOnScreenAvoid;
+pub const placeOnScreen = layout.placeOnScreen;
+pub const native_dialogs = @import("native_dialogs.zig");
+pub const dialogWasmFileOpen = native_dialogs.Wasm.open;
+pub const wasmFileUploaded = native_dialogs.Wasm.uploaded;
+pub const dialogWasmFileOpenMultiple = native_dialogs.Wasm.openMultiple;
+pub const wasmFileUploadedMultiple = native_dialogs.Wasm.uploadedMultiple;
+pub const dialogNativeFileOpen = native_dialogs.Native.open;
+pub const dialogNativeFileOpenMultiple = native_dialogs.Native.openMultiple;
+pub const dialogNativeFileSave = native_dialogs.Native.save;
+pub const dialogNativeFolderSelect = native_dialogs.Native.folderSelect;
+pub const Options = @import("Options.zig");
+pub const Path = @import("Path.zig");
+pub const PNGEncoder = @import("PNGEncoder.zig");
+pub const Point = @import("Point.zig").Point;
+pub const Rect = @import("Rect.zig").Rect;
+pub const RectScale = @import("RectScale.zig");
+pub const render = @import("render.zig");
+pub const RenderCommand = render.RenderCommand;
+pub const RenderTarget = render.Target;
+pub const renderTarget = render.Target.setAsCurrent;
+pub const renderTriangles = render.renderTriangles;
+pub const renderTextOptions = render.TextOptions;
+pub const renderText = render.renderText;
+pub const RenderTextureOptions = render.TextureOptions;
+pub const renderTexture = render.renderTexture;
+pub const renderIcon = render.renderIcon;
+pub const renderImage = render.renderImage;
+pub const ScrollInfo = @import("ScrollInfo.zig");
+pub const selection = @import("selection.zig");
+pub const Size = @import("Size.zig").Size;
+pub const struct_ui = @import("struct_ui.zig");
+pub const Subwindows = @import("Subwindows.zig");
+pub const testing = @import("testing.zig");
+pub const Texture = @import("Texture.zig");
+pub const TextureTarget = Texture.Target;
+/// Source data for `image()` and `imageSize()`.
+pub const ImageSource = Texture.ImageSource;
+pub const imageSize = Texture.ImageSource.size;
+pub const textureCreate = Texture.create;
+pub const textureUpdate = Texture.update;
+pub const textureCreateTarget = Texture.Target.create;
+pub const textureReadTarget = Texture.readTarget;
+pub const textureFromTarget = Texture.fromTarget;
+pub const textureDestroyLater = Texture.destroyLater;
+pub const Theme = @import("Theme.zig");
+pub const TrackingAutoHashMap = @import("tracking_hash_map.zig").TrackingAutoHashMap;
+pub const Triangles = @import("Triangles.zig");
+pub const Vertex = @import("Vertex.zig");
+pub const Widget = @import("Widget.zig");
+pub const WidgetData = @import("WidgetData.zig");
+pub const widgets = @import("import_widgets.zig");
+pub const AnimateWidget = widgets.AnimateWidget;
+pub const BoxWidget = widgets.BoxWidget;
+pub const CacheWidget = widgets.CacheWidget;
+pub const FlexBoxWidget = widgets.FlexBoxWidget;
+pub const ButtonWidget = widgets.ButtonWidget;
+pub const FloatingWidget = widgets.FloatingWidget;
+pub const FloatingTooltipWidget = widgets.FloatingTooltipWidget;
+pub const FocusGroupWidget = widgets.FocusGroupWidget;
+pub const IconWidget = widgets.IconWidget;
+pub const LabelWidget = widgets.LabelWidget;
+pub const OverlayWidget = widgets.OverlayWidget;
+pub const ScrollAreaWidget = widgets.ScrollAreaWidget;
+pub const ScrollBarWidget = widgets.ScrollBarWidget;
+pub const ScrollContainerWidget = widgets.ScrollContainerWidget;
+pub const SelectionWidget = widgets.SelectionWidget;
+pub const TextEntryWidget = widgets.TextEntryWidget;
+pub const TextLayoutWidget = widgets.TextLayoutWidget;
+pub const VirtualParentWidget = widgets.VirtualParentWidget;
+pub const GridWidget = widgets.GridWidget;
+pub const ColorPickerWidget = widgets.ColorPickerWidget;
+pub const ContextWidget = widgets.ContextWidget;
+pub const DropdownWidget = widgets.DropdownWidget;
+pub const FloatingMenuWidget = widgets.FloatingMenuWidget;
+pub const FloatingWindowWidget = widgets.FloatingWindowWidget;
+pub const GizmoWidget = widgets.GizmoWidget;
+pub const MenuWidget = widgets.MenuWidget;
+pub const MenuItemWidget = widgets.MenuItemWidget;
+pub const PanedWidget = widgets.PanedWidget;
+pub const PlotWidget = widgets.PlotWidget;
+pub const ReorderWidget = widgets.ReorderWidget;
+pub const Reorderable = ReorderWidget.Reorderable;
+pub const ScaleWidget = widgets.ScaleWidget;
+pub const SuggestionWidget = widgets.SuggestionWidget;
+pub const TabsWidget = widgets.TabsWidget;
+pub const TreeWidget = widgets.TreeWidget;
+pub const Window = @import("Window.zig");
+
+// Note : Import widgets this way (i.e. importing them via `src/import_widgets.zig`
+// so they are nicely referenced in docs.
+// Having `pub const widgets = ` allow to refer the page with `dvui.widgets` in doccoment
 
 /// Accessibility
 pub const accesskit_enabled = @import("build_options").accesskit != .off and backend.kind != .testing and backend.kind != .web;
-pub const AccessKit = @import("AccessKit.zig");
 
 // When linking to accesskit for non-msvc builds, the _fltuser symbol is
 // undefined. Zig only defines this symbol for abi = .mscv and abi = .none,
@@ -130,18 +171,6 @@ comptime {
     }
 }
 var _fltused: c_int = 1;
-
-pub const Texture = @import("Texture.zig");
-pub const TextureTarget = Texture.Target;
-/// Source data for `image()` and `imageSize()`.
-pub const ImageSource = Texture.ImageSource;
-pub const imageSize = Texture.ImageSource.size;
-pub const textureCreate = Texture.create;
-pub const textureUpdate = Texture.update;
-pub const textureCreateTarget = Texture.Target.create;
-pub const textureReadTarget = Texture.readTarget;
-pub const textureFromTarget = Texture.fromTarget;
-pub const textureDestroyLater = Texture.destroyLater;
 
 /// Gets a texture from the internal texture cache. If a texture
 /// isn't used for one frame it gets removed from the cache and
@@ -173,7 +202,6 @@ pub fn textureInvalidateCache(key: Texture.Cache.Key) void {
     };
 }
 
-pub const Dragging = @import("Dragging.zig");
 /// See `Dragging.preStart`
 ///
 /// Only valid between `Window.begin`and `Window.end`.
@@ -219,36 +247,6 @@ pub fn dragName(name: ?[]const u8) bool {
 pub fn dragEnd() void {
     currentWindow().dragging.end();
 }
-
-pub const render = @import("render.zig");
-pub const RenderCommand = render.RenderCommand;
-pub const RenderTarget = render.Target;
-pub const renderTarget = render.Target.setAsCurrent;
-pub const renderTriangles = render.renderTriangles;
-pub const renderTextOptions = render.TextOptions;
-pub const renderText = render.renderText;
-pub const RenderTextureOptions = render.TextureOptions;
-pub const renderTexture = render.renderTexture;
-pub const renderIcon = render.renderIcon;
-pub const renderImage = render.renderImage;
-
-pub const layout = @import("layout.zig");
-pub const BasicLayout = layout.BasicLayout;
-pub const Alignment = layout.Alignment;
-pub const PlaceOnScreenAvoid = layout.PlaceOnScreenAvoid;
-pub const placeOnScreen = layout.placeOnScreen;
-
-pub const Data = @import("Data.zig");
-
-pub const native_dialogs = @import("native_dialogs.zig");
-pub const dialogWasmFileOpen = native_dialogs.Wasm.open;
-pub const wasmFileUploaded = native_dialogs.Wasm.uploaded;
-pub const dialogWasmFileOpenMultiple = native_dialogs.Wasm.openMultiple;
-pub const wasmFileUploadedMultiple = native_dialogs.Wasm.uploadedMultiple;
-pub const dialogNativeFileOpen = native_dialogs.Native.open;
-pub const dialogNativeFileOpenMultiple = native_dialogs.Native.openMultiple;
-pub const dialogNativeFileSave = native_dialogs.Native.save;
-pub const dialogNativeFolderSelect = native_dialogs.Native.folderSelect;
 
 pub const wasm = (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64);
 pub const useFreeType = !wasm;
@@ -306,7 +304,6 @@ pub var ft2lib: if (useFreeType) c.FT_Library else void = undefined;
 pub const Error = std.mem.Allocator.Error || StbImageError || TvgError || FontError;
 pub const TvgError = error{tvgError};
 pub const StbImageError = error{stbImageError};
-pub const FontError = Font.Error;
 
 pub const log = std.log.scoped(.dvui);
 const dvui = @This();
@@ -506,11 +503,6 @@ pub fn frameTimeNS() i128 {
     return currentWindow().frame_time_ns;
 }
 
-/// DEPRECATED: Use `Font.Cache.TTFEntry` directly
-///
-/// The bytes of a truetype font file and whether to free it.
-pub const FontBytesEntry = Font.Cache.TTFEntry;
-
 /// Add font to be referenced later by name.
 ///
 /// ttf_bytes are the bytes of the ttf file
@@ -534,9 +526,6 @@ pub fn addFont(name: []const u8, ttf_bytes: []const u8, ttf_bytes_allocator: ?st
         .allocator = ttf_bytes_allocator,
     });
 }
-
-/// DEPRECATED: Use `Font.Cache.Entry` directly
-pub const FontCacheEntry = Font.Cache.Entry;
 
 // Get or load the underlying font at an integer size <= font.size (guaranteed to have a minimum pixel size of 1)
 pub fn fontCacheGet(font: Font) std.mem.Allocator.Error!*Font.Cache.Entry {
@@ -936,7 +925,7 @@ pub fn kerningSet(kern: bool) bool {
 ///
 /// This only matters if you are using dvui to manage the framerate (by calling
 /// `Window.waitTime` and using the return value to wait with event
-/// interruption - for example `sdl_backend.waitEventTimeout` at the end of each
+/// interruption - for example `backend.waitEventTimeout` at the end of each
 /// frame).
 ///
 /// src and id are for debugging, which is enabled by calling
@@ -1982,33 +1971,12 @@ pub fn wantTextInput(r: Rect.Natural) void {
     cw.text_input_rect = r;
 }
 
-/// Temporary menu that floats above current layer.  Usually contains multiple
-/// `menuItemLabel`, `menuItemIcon`, or `menuItem`, but can contain any
-/// widgets.
-///
-/// Clicking outside of the menu or any child menus closes it.
-///
-/// Only valid between `Window.begin`and `Window.end`.
-pub fn floatingMenu(src: std.builtin.SourceLocation, init_opts: FloatingMenuWidget.InitOptions, opts: Options) *FloatingMenuWidget {
-    var ret = widgetAlloc(FloatingMenuWidget);
-    ret.* = FloatingMenuWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    return ret;
-}
-
-/// Subwindow that the user can generally resize and move around.
-///
-/// Usually you want to add `windowHeader` as the first child.
-///
-/// Only valid between `Window.begin`and `Window.end`.
+/// Minimal floating window stub used by dialogs. Does not draw extras.
 pub fn floatingWindow(src: std.builtin.SourceLocation, floating_opts: FloatingWindowWidget.InitOptions, opts: Options) *FloatingWindowWidget {
     var ret = widgetAlloc(FloatingWindowWidget);
     ret.* = FloatingWindowWidget.init(src, floating_opts, opts);
     ret.data().was_allocated_on_widget_stack = true;
     ret.install();
-    ret.processEventsBefore();
-    ret.drawBackground();
     return ret;
 }
 
@@ -2032,11 +2000,9 @@ pub fn windowHeader(str: []const u8, right_str: []const u8, openflag: ?*bool) Re
     });
 
     if (openflag) |of| {
-        if (dvui.buttonIcon(
+        if (dvui.button(
             @src(),
             "close",
-            entypo.cross,
-            .{},
             .{},
             .{ .font_style = .heading, .corner_radius = Rect.all(1000), .padding = Rect.all(2), .margin = Rect.all(2), .gravity_y = 0.5, .expand = .ratio },
         )) {
@@ -2321,8 +2287,6 @@ pub fn toastsFor(subwindow_id: ?Id) ?ToastIterator {
     return it;
 }
 
-pub const ToastIterator = Dialogs.Iterator;
-
 pub const ToastOptions = struct {
     id_extra: usize = 0,
     window: ?*Window = null,
@@ -2402,220 +2366,25 @@ pub fn animate(src: std.builtin.SourceLocation, init_opts: AnimateWidget.InitOpt
 ///
 /// Returns true if any entry was selected (even the already chosen one).
 ///
-/// See `DropdownWidget` for more advanced usage.
-///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn dropdown(src: std.builtin.SourceLocation, entries: []const []const u8, choice: *usize, opts: Options) bool {
-    var dd = dvui.DropdownWidget.init(src, .{ .selected_index = choice.*, .label = entries[choice.*] }, opts);
-    dd.install();
-
-    var ret = false;
-    if (dd.dropped()) {
-        for (entries, 0..) |e, i| {
-            if (dd.addChoiceLabel(e)) {
-                choice.* = i;
-                ret = true;
-            }
-        }
-    }
-
-    dd.deinit();
-    return ret;
+    _ = src;
+    _ = entries;
+    _ = choice;
+    _ = opts;
+    return false;
 }
 
 /// Show @tagName of choice, and click to display all tags in that enum in a floating menu.
 ///
 /// Returns true if any enum value was selected (even the already chosen one).
 ///
-/// See `DropdownWidget` for more advanced usage.
-///
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn dropdownEnum(src: std.builtin.SourceLocation, T: type, choice: *T, opts: Options) bool {
-    if (@typeInfo(T) != .@"enum") @compileError("Expected enum, found '" ++ @typeName(T) ++ "'");
-
-    var dd = dvui.DropdownWidget.init(src, .{ .selected_index = @intFromEnum(choice.*), .label = @tagName(choice.*) }, opts);
-    dd.install();
-
-    var ret = false;
-    if (dd.dropped()) {
-        inline for (@typeInfo(T).@"enum".fields) |e| {
-            if (dd.addChoiceLabel(e.name)) {
-                choice.* = @field(T, e.name);
-                ret = true;
-            }
-        }
-    }
-
-    dd.deinit();
-    return ret;
-}
-
-pub const SuggestionInitOptions = struct {
-    button: bool = false,
-    opened: bool = false,
-    open_on_text_change: bool = true,
-    open_on_focus: bool = true,
-    label: ?Options.LabelOpts = null,
-};
-
-/// Wraps a textEntry to provide an attached menu (dropdown) of choices.
-///
-/// Use after TextEntryWidget.install(), and handles events, so don't call
-/// TextEntryWidget.processEvents().
-///
-/// Only valid between `Window.begin`and `Window.end`.
-pub fn suggestion(te: *TextEntryWidget, init_opts: SuggestionInitOptions) *SuggestionWidget {
-    var open_sug = init_opts.opened;
-
-    if (init_opts.button) {
-        if (dvui.buttonIcon(
-            @src(),
-            "combobox_triangle",
-            entypo.chevron_small_down,
-            .{},
-            .{},
-            .{ .expand = .ratio, .margin = dvui.Rect.all(2), .gravity_x = 1.0, .tab_index = 0 },
-        )) {
-            open_sug = true;
-            dvui.focusWidget(te.data().id, null, null);
-        }
-    }
-
-    const min_width = te.textLayout.data().backgroundRect().w;
-
-    var sug = widgetAlloc(SuggestionWidget);
-    sug.* = dvui.SuggestionWidget.init(@src(), .{
-        .was_allocated_on_widget_stack = true,
-        .rs = te.data().borderRectScale(),
-        .text_entry_id = te.data().id,
-    }, .{ .label = .{ .text = te.getText() }, .min_size_content = .{ .w = min_width }, .padding = .{}, .border = te.data().options.borderGet() });
-    sug.install();
-    if (open_sug) {
-        sug.open();
-    }
-
-    // process events from textEntry
-    const evts = dvui.events();
-    for (evts) |*e| {
-        if (!te.matchEvent(e)) {
-            continue;
-        }
-
-        if (e.evt == .key and (e.evt.key.action == .down or e.evt.key.action == .repeat)) {
-            switch (e.evt.key.code) {
-                .up => {
-                    e.handle(@src(), sug.menu.data());
-                    if (sug.willOpen()) {
-                        sug.selected_index -|= 1;
-                    } else {
-                        sug.open();
-                    }
-                },
-                .down => {
-                    e.handle(@src(), sug.menu.data());
-                    if (sug.willOpen()) {
-                        sug.selected_index += 1;
-                    } else {
-                        sug.open();
-                    }
-                },
-                .escape => {
-                    e.handle(@src(), sug.menu.data());
-                    sug.close();
-                },
-                .enter => {
-                    if (sug.willOpen()) {
-                        e.handle(@src(), sug.menu.data());
-                        sug.activate_selected = true;
-                    }
-                },
-                else => {
-                    if (sug.willOpen() and e.evt.key.action == .down) {
-                        if (e.evt.key.matchBind("next_widget")) {
-                            e.handle(@src(), sug.menu.data());
-                            sug.close();
-                        } else if (e.evt.key.matchBind("prev_widget")) {
-                            e.handle(@src(), sug.menu.data());
-                            sug.close();
-                        }
-                    }
-                },
-            }
-        }
-
-        if (!e.handled) {
-            te.processEvent(e);
-        }
-    }
-
-    if (init_opts.open_on_text_change and te.text_changed) {
-        sug.open();
-    }
-
-    if (init_opts.open_on_focus) {
-        const focused_last_frame = dvui.dataGet(null, te.data().id, "_focused_last_frame", bool) orelse false;
-        const focused_now = dvui.focusedWidgetIdInCurrentSubwindow() == te.data().id;
-
-        if (!focused_last_frame and focused_now) {
-            sug.open();
-        }
-
-        dvui.dataSet(null, te.data().id, "_focused_last_frame", focused_now);
-    }
-
-    return sug;
-}
-
-pub const ComboBox = struct {
-    te: *TextEntryWidget = undefined,
-    sug: *SuggestionWidget = undefined,
-    was_allocated_on_widget_stack: bool = false,
-
-    /// Returns index of entry if one was selected
-    pub fn entries(self: *ComboBox, items: []const []const u8) ?usize {
-        if (self.sug.dropped()) {
-            for (items, 0..) |entry, i| {
-                if (self.sug.addChoiceLabel(entry)) {
-                    self.te.textSet(entry, false);
-                    return i;
-                }
-            }
-        }
-        return null;
-    }
-
-    pub fn deinit(self: *ComboBox) void {
-        const should_free = self.was_allocated_on_widget_stack;
-        defer if (should_free) dvui.widgetFree(self);
-        defer self.* = undefined;
-        self.sug.deinit();
-        self.te.deinit();
-    }
-};
-
-/// Text entry widget with dropdown choices.
-///
-/// Call `ComboBox.entries` after this with the choices.
-///
-/// Only valid between `Window.begin`and `Window.end`.
-pub fn comboBox(src: std.builtin.SourceLocation, init_opts: TextEntryWidget.InitOptions, opts: Options) *ComboBox {
-    const combo = widgetAlloc(ComboBox);
-    combo.was_allocated_on_widget_stack = true;
-    combo.te = widgetAlloc(TextEntryWidget);
-    combo.te.* = dvui.TextEntryWidget.init(src, init_opts, opts);
-    combo.te.data().was_allocated_on_widget_stack = true;
-    combo.te.install();
-
-    if (combo.te.data().accesskit_node()) |ak_node| {
-        AccessKit.nodeSetRole(ak_node, AccessKit.Role.editable_combo_box.asU8());
-        // Accessibility TODO: Expand and collapse
-    }
-
-    combo.sug = dvui.suggestion(combo.te, .{ .button = true, .open_on_focus = false, .open_on_text_change = false, .label = .{ .text = combo.te.getText() } });
-    // suggestion forwards events to textEntry, so don't call te.processEvents()
-    combo.te.draw();
-
-    return combo;
+    _ = src;
+    _ = choice;
+    _ = opts;
+    return false;
 }
 
 pub var expander_defaults: Options = .{
@@ -2662,38 +2431,12 @@ pub fn expander(src: std.builtin.SourceLocation, label_str: []const u8, init_opt
         b.data().focusBorder();
     }
 
-    // if (expanded) {
-    //     icon(@src(), "down_arrow", entypo.triangle_down, .{}, .{ .gravity_y = 0.5, .role = .none });
-    // } else {
-    //     icon(
-    //         @src(),
-    //         "right_arrow",
-    //         entypo.triangle_right,
-    //         .{},
-    //         .{ .gravity_y = 0.5, .role = .none },
-    //     );
-    // }
     labelNoFmt(@src(), label_str, .{}, options.strip().override(.{ .label = .{ .for_id = b.data().id } }));
 
     dvui.dataSet(null, b.data().id, "_expand", expanded);
     // Accessibility TODO: Support expand and collapse actions, but can;t find a way to get it to work.
 
     return expanded;
-}
-
-/// Splits area in two with a user-moveable sash between.
-///
-/// Automatically collapses (only shows one of the two sides) when it has less
-/// than init_opts.collapsed_size space.
-///
-/// Only valid between `Window.begin`and `Window.end`.
-pub fn paned(src: std.builtin.SourceLocation, init_opts: PanedWidget.InitOptions, opts: Options) *PanedWidget {
-    var ret = widgetAlloc(PanedWidget);
-    ret.* = PanedWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    ret.processEvents();
-    return ret;
 }
 
 /// Show text with wrapping (optional).  Supports mouse and touch selection.
@@ -2731,15 +2474,6 @@ pub fn textLayout(src: std.builtin.SourceLocation, init_opts: TextLayoutWidget.I
 /// directly inside Context.
 ///
 /// Only valid between `Window.begin`and `Window.end`.
-pub fn context(src: std.builtin.SourceLocation, init_opts: ContextWidget.InitOptions, opts: Options) *ContextWidget {
-    var ret = widgetAlloc(ContextWidget);
-    ret.* = ContextWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    ret.processEvents();
-    return ret;
-}
-
 /// Show a floating text tooltip as long as the mouse is inside init_opts.active_rect.
 ///
 /// Use init_opts.interactive = true to allow mouse interaction with the
@@ -2802,13 +2536,9 @@ pub fn selectionBox(src: std.builtin.SourceLocation, init_opts: SelectionWidget.
 /// Render a draggable 2D gizmo with horizontal (blue) and vertical (green) vectors.
 /// Only valid between `Window.begin` and `Window.end`.
 pub fn gizmo2d(src: std.builtin.SourceLocation, init_opts: GizmoWidget.InitOptions, opts: Options) void {
-    var gizmo = widgetAlloc(GizmoWidget);
-    defer gizmo.deinit();
-    gizmo.* = GizmoWidget.init(src, init_opts, opts);
-    gizmo.data().was_allocated_on_widget_stack = true;
-    gizmo.install();
-    gizmo.processEvents();
-    gizmo.draw();
+    _ = src;
+    _ = init_opts;
+    _ = opts;
 }
 
 /// Box that packs children with gravity 0 or 1, or anywhere with gravity
@@ -2856,15 +2586,6 @@ pub fn cache(src: std.builtin.SourceLocation, init_opts: CacheWidget.InitOptions
     ret.* = CacheWidget.init(src, init_opts, opts);
     ret.data().was_allocated_on_widget_stack = true;
     ret.install();
-    return ret;
-}
-
-pub fn reorder(src: std.builtin.SourceLocation, init_opts: ReorderWidget.InitOptions, opts: Options) *ReorderWidget {
-    var ret = widgetAlloc(ReorderWidget);
-    ret.* = ReorderWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    ret.processEvents();
     return ret;
 }
 
@@ -2941,8 +2662,12 @@ pub fn gridHeadingSortable(
     resize_opts: ?GridWidget.HeaderResizeWidget.InitOptions,
     cell_style: anytype, // GridWidget.CellStyle
 ) bool {
-    const icon_ascending = dvui.entypo.chevron_small_up;
-    const icon_descending = dvui.entypo.chevron_small_down;
+    var heading_buf: [128]u8 = undefined;
+    const heading_with_sort = switch (g.colSortOrder(col_num)) {
+        .unsorted => heading,
+        .ascending => std.fmt.bufPrint(&heading_buf, "{s} (asc)", .{heading}) catch heading,
+        .descending => std.fmt.bufPrint(&heading_buf, "{s} (desc)", .{heading}) catch heading,
+    };
 
     // Pad buttons with extra space if there is no sort indicator.
     const heading_defaults: Options = .{
@@ -2964,11 +2689,7 @@ pub fn gridHeadingSortable(
 
     gridHeadingSeparator(resize_opts);
 
-    const sort_changed = switch (g.colSortOrder(col_num)) {
-        .unsorted => button(@src(), heading, .{ .draw_focus = false }, heading_opts),
-        .ascending => buttonLabelAndIcon(@src(), heading, icon_ascending, .{ .draw_focus = false }, heading_opts),
-        .descending => buttonLabelAndIcon(@src(), heading, icon_descending, .{ .draw_focus = false }, heading_opts),
-    };
+    const sort_changed = button(@src(), heading_with_sort, .{ .draw_focus = false }, heading_opts);
 
     if (sort_changed) {
         g.sortChanged(col_num);
@@ -3166,74 +2887,41 @@ pub fn spinner(src: std.builtin.SourceLocation, opts: Options) void {
 }
 
 pub fn scale(src: std.builtin.SourceLocation, init_opts: ScaleWidget.InitOptions, opts: Options) *ScaleWidget {
-    var ret = widgetAlloc(ScaleWidget);
-    ret.* = ScaleWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    ret.processEvents();
-    return ret;
+    _ = src;
+    _ = init_opts;
+    _ = opts;
+    return widgetAlloc(ScaleWidget);
 }
 
 pub fn menu(src: std.builtin.SourceLocation, dir: enums.Direction, opts: Options) *MenuWidget {
-    var ret = widgetAlloc(MenuWidget);
-    ret.* = MenuWidget.init(src, .{ .dir = dir }, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    return ret;
+    _ = src;
+    _ = dir;
+    _ = opts;
+    return widgetAlloc(MenuWidget);
 }
 
 pub fn menuItemLabel(src: std.builtin.SourceLocation, label_str: []const u8, init_opts: MenuItemWidget.InitOptions, opts: Options) ?Rect.Natural {
-    var mi = menuItem(src, init_opts, opts);
-
-    var labelopts = opts.strip().override(.{ .label = .{ .for_id = mi.data().id } });
-
-    var ret: ?Rect.Natural = null;
-    if (mi.activeRect()) |r| {
-        ret = r;
-    }
-
-    if (mi.show_active) {
-        labelopts.style = .highlight;
-    }
-
-    labelNoFmt(@src(), label_str, .{}, labelopts);
-
-    mi.deinit();
-
-    return ret;
+    _ = src;
+    _ = label_str;
+    _ = init_opts;
+    _ = opts;
+    return null;
 }
 
 pub fn menuItemIcon(src: std.builtin.SourceLocation, name: []const u8, tvg_bytes: []const u8, init_opts: MenuItemWidget.InitOptions, opts: Options) ?Rect.Natural {
-    var mi = menuItem(src, init_opts, opts);
-
-    // pass min_size_content through to the icon so that it will figure out the
-    // min width based on the height
-    var iconopts = opts.strip().override(.{ .gravity_x = 0.5, .gravity_y = 0.5, .min_size_content = opts.min_size_content, .expand = .ratio, .color_text = opts.color_text });
-
-    var ret: ?Rect.Natural = null;
-    if (mi.activeRect()) |r| {
-        ret = r;
-    }
-
-    if (mi.show_active) {
-        iconopts.style = .highlight;
-    }
-
-    icon(@src(), name, tvg_bytes, .{}, iconopts);
-
-    mi.deinit();
-
-    return ret;
+    _ = src;
+    _ = name;
+    _ = tvg_bytes;
+    _ = init_opts;
+    _ = opts;
+    return null;
 }
 
 pub fn menuItem(src: std.builtin.SourceLocation, init_opts: MenuItemWidget.InitOptions, opts: Options) *MenuItemWidget {
-    var ret = widgetAlloc(MenuItemWidget);
-    ret.* = MenuItemWidget.init(src, init_opts, opts);
-    ret.data().was_allocated_on_widget_stack = true;
-    ret.install();
-    ret.processEvents();
-    ret.drawBackground();
-    return ret;
+    _ = src;
+    _ = init_opts;
+    _ = opts;
+    return widgetAlloc(MenuItemWidget);
 }
 
 /// A clickable label.  Good for hyperlinks.
@@ -4727,67 +4415,10 @@ pub const ColorPickerInitOptions = struct {
 ///
 /// Returns true of the color was changed
 pub fn colorPicker(src: std.builtin.SourceLocation, init_opts: ColorPickerInitOptions, opts: Options) bool {
-    var picker = ColorPickerWidget.init(src, .{ .dir = init_opts.dir, .hsv = init_opts.hsv }, opts);
-    picker.install();
-    defer picker.deinit();
-
-    var changed = picker.color_changed;
-    var rgb = init_opts.hsv.toColor();
-
-    var side_box = dvui.box(@src(), .{}, .{});
-    defer side_box.deinit();
-
-    const slider_expand = Options.Expand.fromDirection(.horizontal);
-    switch (init_opts.sliders) {
-        .rgb => {
-            var r = @as(f32, @floatFromInt(rgb.r));
-            var g = @as(f32, @floatFromInt(rgb.g));
-            var b = @as(f32, @floatFromInt(rgb.b));
-            var a = @as(f32, @floatFromInt(rgb.a));
-
-            var slider_changed = false;
-            if (dvui.sliderEntry(@src(), "R: {d:0.0}", .{ .value = &r, .min = 0, .max = 255, .interval = 1 }, .{ .expand = slider_expand })) {
-                slider_changed = true;
-            }
-            if (dvui.sliderEntry(@src(), "G: {d:0.0}", .{ .value = &g, .min = 0, .max = 255, .interval = 1 }, .{ .expand = slider_expand })) {
-                slider_changed = true;
-            }
-            if (dvui.sliderEntry(@src(), "B: {d:0.0}", .{ .value = &b, .min = 0, .max = 255, .interval = 1 }, .{ .expand = slider_expand })) {
-                slider_changed = true;
-            }
-            if (init_opts.alpha and dvui.sliderEntry(@src(), "A: {d:0.0}", .{ .value = &a, .min = 0, .max = 255, .interval = 1 }, .{ .expand = slider_expand })) {
-                slider_changed = true;
-            }
-            if (slider_changed) {
-                init_opts.hsv.* = .fromColor(.{ .r = @intFromFloat(r), .g = @intFromFloat(g), .b = @intFromFloat(b), .a = @intFromFloat(a) });
-                changed = true;
-            }
-        },
-        .hsv => {
-            if (dvui.sliderEntry(@src(), "H: {d:0.0}", .{ .value = &init_opts.hsv.h, .min = 0, .max = 359.99, .interval = 1 }, .{ .expand = slider_expand })) {
-                changed = true;
-            }
-            if (dvui.sliderEntry(@src(), "S: {d:0.2}", .{ .value = &init_opts.hsv.s, .min = 0, .max = 1, .interval = 0.01 }, .{ .expand = slider_expand })) {
-                changed = true;
-            }
-            if (dvui.sliderEntry(@src(), "V: {d:0.2}", .{ .value = &init_opts.hsv.v, .min = 0, .max = 1, .interval = 0.01 }, .{ .expand = slider_expand })) {
-                changed = true;
-            }
-            if (init_opts.alpha and dvui.sliderEntry(@src(), "A: {d:0.2}", .{ .value = &init_opts.hsv.a, .min = 0, .max = 1, .interval = 0.01 }, .{ .expand = slider_expand })) {
-                changed = true;
-            }
-        },
-    }
-
-    if (init_opts.hex_text_entry) {
-        const res = textEntryColor(@src(), .{ .allow_alpha = init_opts.alpha, .value = &rgb }, .{ .expand = slider_expand });
-        if (res.changed) {
-            init_opts.hsv.* = .fromColor(rgb);
-            changed = true;
-        }
-    }
-
-    return changed;
+    _ = src;
+    _ = init_opts;
+    _ = opts;
+    return false;
 }
 
 /// Captures dvui drawing to part of the screen in a `Texture`.
@@ -4863,11 +4494,10 @@ pub const Picture = struct {
 };
 
 pub fn plot(src: std.builtin.SourceLocation, plot_opts: PlotWidget.InitOptions, opts: Options) *PlotWidget {
-    var ret = widgetAlloc(PlotWidget);
-    ret.* = PlotWidget.init(src, plot_opts, opts);
-    ret.init_options.was_allocated_on_widget_stack = true;
-    ret.install();
-    return ret;
+    _ = src;
+    _ = plot_opts;
+    _ = opts;
+    return widgetAlloc(PlotWidget);
 }
 
 pub const PlotXYOptions = struct {

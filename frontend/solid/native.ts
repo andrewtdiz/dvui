@@ -51,6 +51,14 @@ const nativeSymbols = {
     args: ["ptr", "ptr", "usize"],
     returns: "void",
   },
+  setRendererSolidTree: {
+    args: ["ptr", "ptr", "usize"],
+    returns: "void",
+  },
+  applyRendererSolidOps: {
+    args: ["ptr", "ptr", "usize"],
+    returns: "bool",
+  },
 } as const;
 
 export type NativeLibrary = ReturnType<typeof loadNativeLibrary>;

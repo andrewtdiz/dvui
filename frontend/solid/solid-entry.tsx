@@ -1,8 +1,8 @@
+// @ts-nocheck
 import { type RendererAdapter } from "./native-renderer";
 import { createSolidNativeHost } from "./solid-host";
 import { TextDisplay } from "./components/TextDisplay";
 import { createSignal } from "solid-js";
-import { rgba } from "./color";
 
 type SolidTextApp = {
   host: ReturnType<typeof createSolidNativeHost>;
@@ -15,21 +15,18 @@ export const createSolidTextApp = (renderer: RendererAdapter): SolidTextApp => {
   const [message, setMessage] = createSignal("Solid to Zig text");
 
   const screen = { w: 800, h: 450 };
-  const container = { w: 360, h: 200 };
-  const containerPos = {
-    x: (screen.w - container.w) / 2,
-    y: (screen.h - container.h) / 2,
-  };
+  const flexBox = { size: 240 };
+  const anchorPad = 24;
+  const textRowPad = 16;
+  const textRowHeight = 28;
+  const textSegmentWidth = (flexBox.size - textRowPad * 2) / 3;
 
   const dispose = host.render(() => (
-    <div
-      class="absolute bg-white"
-      x={containerPos.x}
-      y={containerPos.y}
-      width={container.w}
-      height={container.h}
-      color={rgba(59, 130, 246, 255)}
-    />
+    <div class="flex justify-center items-center w-full h-full bg-gray-700">
+      <div class="flex items-center justify-start bg-gray-600 w-60 h-60">
+        <p class="bg-blue-500">Left anchor</p>
+      </div>
+    </div>
   ));
 
   host.flush();

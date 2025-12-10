@@ -186,39 +186,76 @@ pub const draggableInitOptions = struct {
 };
 
 pub fn draggable(src: std.builtin.SourceLocation, init_opts: draggableInitOptions, opts: dvui.Options) ?dvui.Point.Physical {
-    var iw = dvui.IconWidget.init(src, "reorder_drag_icon", init_opts.tvg_bytes orelse dvui.entypo.menu, .{}, opts);
-    iw.install();
+    if (init_opts.tvg_bytes) |tvg_bytes| {
+        var iw = dvui.IconWidget.init(src, "reorder_drag_icon", tvg_bytes, .{}, opts);
+        iw.install();
+        var ret: ?dvui.Point.Physical = null;
+        loop: for (dvui.events()) |*e| {
+            if (!iw.matchEvent(e))
+                continue;
+
+            switch (e.evt) {
+                .mouse => |me| {
+                    if (me.action == .press and me.button.pointer()) {
+                        e.handle(@src(), iw.data());
+                        dvui.captureMouse(iw.data(), e.num);
+                        const reo_rect: ?dvui.Rect.Physical = if (init_opts.reorderable) |reo| reo.data().rectScale().r else null;
+                        const rect: dvui.Rect.Physical = init_opts.rect orelse reo_rect orelse iw.data().rectScale().r;
+                        dvui.dragPreStart(me.p, .{ .offset = rect.topLeft().diff(me.p), .size = rect.size() });
+                    } else if (me.action == .motion) {
+                        if (dvui.captured(iw.data().id)) {
+                            e.handle(@src(), iw.data());
+                            if (dvui.dragging(me.p, null)) |_| {
+                                ret = me.p;
+                                if (init_opts.reorderable) |reo| {
+                                    reo.reorder.dragStart(reo.data().id.asUsize(), me.p, e.num); // reorder grabs capture
+                                }
+                                break :loop;
+                            }
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+        iw.draw();
+        iw.deinit();
+        return ret;
+    }
+
+    var bw = dvui.ButtonWidget.init(src, .{ .draw_focus = false }, opts.override(.{ .name = "reorder_drag_icon" }));
+    bw.install();
     var ret: ?dvui.Point.Physical = null;
     loop: for (dvui.events()) |*e| {
-        if (!iw.matchEvent(e))
+        if (!bw.matchEvent(e))
             continue;
 
         switch (e.evt) {
             .mouse => |me| {
                 if (me.action == .press and me.button.pointer()) {
-                    e.handle(@src(), iw.data());
-                    dvui.captureMouse(iw.data(), e.num);
+                    e.handle(@src(), bw.data());
+                    dvui.captureMouse(bw.data(), e.num);
                     const reo_rect: ?dvui.Rect.Physical = if (init_opts.reorderable) |reo| reo.data().rectScale().r else null;
-                    const rect: dvui.Rect.Physical = init_opts.rect orelse reo_rect orelse iw.data().rectScale().r;
+                    const rect: dvui.Rect.Physical = init_opts.rect orelse reo_rect orelse bw.data().rectScale().r;
                     dvui.dragPreStart(me.p, .{ .offset = rect.topLeft().diff(me.p), .size = rect.size() });
-                } else if (me.action == .motion) {
-                    if (dvui.captured(iw.data().id)) {
-                        e.handle(@src(), iw.data());
-                        if (dvui.dragging(me.p, null)) |_| {
-                            ret = me.p;
-                            if (init_opts.reorderable) |reo| {
-                                reo.reorder.dragStart(reo.data().id.asUsize(), me.p, e.num); // reorder grabs capture
-                            }
-                            break :loop;
+                } else if (me.action == .motion and dvui.captured(bw.data().id)) {
+                    e.handle(@src(), bw.data());
+                    if (dvui.dragging(me.p, null)) |_| {
+                        ret = me.p;
+                        if (init_opts.reorderable) |reo| {
+                            reo.reorder.dragStart(reo.data().id.asUsize(), me.p, e.num); // reorder grabs capture
                         }
+                        break :loop;
                     }
                 }
             },
             else => {},
         }
     }
-    iw.draw();
-    iw.deinit();
+    bw.drawBackground();
+    dvui.labelNoFmt(@src(), "::", .{ .align_x = 0.5, .align_y = 0.5 }, opts.strip().override(bw.style()).override(.{ .gravity_x = 0.5, .gravity_y = 0.5 }));
+    bw.drawFocus();
+    bw.deinit();
     return ret;
 }
 

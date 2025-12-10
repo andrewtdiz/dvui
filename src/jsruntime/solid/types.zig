@@ -86,6 +86,52 @@ pub const InputState = struct {
     }
 };
 
+pub const Rect = struct {
+    x: f32 = 0,
+    y: f32 = 0,
+    w: f32 = 0,
+    h: f32 = 0,
+};
+
+pub const Size = struct {
+    w: f32 = 0,
+    h: f32 = 0,
+};
+
+pub const PackedColor = struct {
+    value: u32 = 0,
+};
+
+pub const Gradient = struct {
+    colors: []PackedColor = &.{},
+    stops: []f32 = &.{},
+    angle_radians: f32 = 0,
+};
+
+pub const LayoutCache = struct {
+    rect: ?Rect = null,
+    version: u64 = 0,
+    intrinsic_size: ?Size = null,
+    text_hash: u64 = 0,
+};
+
+pub const Transform = struct {
+    anchor: [2]f32 = .{ 0.5, 0.5 },
+    scale: [2]f32 = .{ 1, 1 },
+    rotation: f32 = 0,
+    translation: [2]f32 = .{ 0, 0 },
+};
+
+pub const VisualProps = struct {
+    background: ?PackedColor = null,
+    text_color: ?PackedColor = null,
+    opacity: f32 = 1.0,
+    corner_radius: f32 = 0,
+    clip_children: bool = false,
+    gradient: ?Gradient = null,
+    z_index: i16 = 0,
+};
+
 const ListenerSet = struct {
     allocator: std.mem.Allocator,
     names: std.ArrayList([]u8),
@@ -132,6 +178,9 @@ pub const SolidNode = struct {
     version: u64 = 0,
     subtree_version: u64 = 0,
     last_render_version: u64 = 0,
+    layout: LayoutCache = .{},
+    transform: Transform = .{},
+    visual: VisualProps = .{},
     interactive_self: bool = false,
     total_interactive: u32 = 0,
     class_spec: tailwind.Spec = .{},
@@ -297,6 +346,15 @@ pub const SolidNode = struct {
         }
         return self.class_spec;
     }
+
+    pub fn isInteractive(self: *const SolidNode) bool {
+        return self.interactive_self or self.listeners.names.items.len > 0;
+    }
+};
+
+const InsertError = error{
+    MissingParent,
+    MissingChild,
 };
 
 pub const NodeStore = struct {
@@ -363,8 +421,8 @@ pub const NodeStore = struct {
     }
 
     pub fn insert(self: *NodeStore, parent_id: u32, child_id: u32, before_id: ?u32) !void {
-        const parent = self.nodes.getPtr(parent_id) orelse return;
-        const child = self.nodes.getPtr(child_id) orelse return;
+        const parent = self.nodes.getPtr(parent_id) orelse return error.MissingParent;
+        const child = self.nodes.getPtr(child_id) orelse return error.MissingChild;
 
         self.detachFromParent(child);
         child.parent = parent_id;

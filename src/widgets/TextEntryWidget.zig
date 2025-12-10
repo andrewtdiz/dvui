@@ -204,28 +204,28 @@ pub fn install(self: *TextEntryWidget) void {
         });
         defer hbox.deinit();
 
-        if (dvui.buttonIcon(@src(), "paste", dvui.entypo.clipboard, .{}, .{}, .{
+        if (dvui.button(@src(), "paste", .{}, .{
             .min_size_content = .{ .h = 20 },
             .margin = Rect.all(2),
         })) {
             self.paste();
         }
 
-        if (dvui.buttonIcon(@src(), "select all", dvui.entypo.swap, .{}, .{}, .{
+        if (dvui.button(@src(), "select all", .{}, .{
             .min_size_content = .{ .h = 20 },
             .margin = Rect.all(2),
         })) {
             self.textLayout.selection.selectAll();
         }
 
-        if (dvui.buttonIcon(@src(), "cut", dvui.entypo.scissors, .{}, .{}, .{
+        if (dvui.button(@src(), "cut", .{}, .{
             .min_size_content = .{ .h = 20 },
             .margin = Rect.all(2),
         })) {
             self.cut();
         }
 
-        if (dvui.buttonIcon(@src(), "copy", dvui.entypo.copy, .{}, .{}, .{
+        if (dvui.button(@src(), "copy", .{}, .{
             .min_size_content = .{ .h = 20 },
             .margin = Rect.all(2),
         })) {

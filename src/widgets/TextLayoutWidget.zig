@@ -1784,22 +1784,18 @@ pub fn touchEditingMenu(self: *TextLayoutWidget) void {
     });
     defer hbox.deinit();
 
-    if (dvui.buttonIcon(
+    if (dvui.button(
         @src(),
         "select all",
-        dvui.entypo.swap,
-        .{},
         .{},
         .{ .min_size_content = .{ .h = 20 }, .margin = Rect.all(2) },
     )) {
         self.selection.selectAll();
     }
 
-    if (dvui.buttonIcon(
+    if (dvui.button(
         @src(),
         "copy",
-        dvui.entypo.copy,
-        .{},
         .{},
         .{ .min_size_content = .{ .h = 20 }, .margin = Rect.all(2) },
     )) {

@@ -1,6 +1,8 @@
 // Auto-generated from runtime/colors.js; edit source and re-run generator if needed.
 pub const entries = [_]struct { []const u8, u32 }{
     .{ "transparent", 0x00000000 },
+    .{ "white", 0xffffffff },
+    .{ "black", 0x000000ff },
     .{ "amber-100", 0xfef3c7ff },
     .{ "amber-200", 0xfde68aff },
     .{ "amber-300", 0xfcd34dff },

@@ -372,7 +372,12 @@ pub fn rectFor(self: *FlexBoxWidget, id: dvui.Id, min_size: Size, e: Options.Exp
     if (!self.allocation_failed and self.init_options.align_items != .start and orient.defaultCrossGravity(g)) {
         const fallback_cross = orient.crossSize(self.current_line_size);
         const line_cross_prev = self.prevLineCross(self.current_line_index, fallback_cross);
-        const leftover = line_cross_prev - child_cross;
+        const container_cross = orient.containerCross(container);
+        const baseline_cross = if (self.current_line_index == 0 and orient.crossPosition(self.insert_pt) == 0)
+            @max(line_cross_prev, container_cross)
+        else
+            line_cross_prev;
+        const leftover = baseline_cross - child_cross;
         if (leftover > 0) switch (self.init_options.align_items) {
             .start => {},
             .center => orient.addCrossOffset(&ret, leftover / 2),
@@ -414,7 +419,7 @@ pub fn minSizeForChild(self: *FlexBoxWidget, s: Size) void {
     self.main_size_without_wrap += child_main;
 
     const cross_total = orient.crossPosition(self.insert_pt) + orient.crossSize(self.current_line_size);
-    const new_min = switch (self.direction) {
+    var new_min = switch (self.direction) {
         .horizontal => Size{
             .w = self.main_size_without_wrap,
             .h = cross_total,
@@ -424,6 +429,12 @@ pub fn minSizeForChild(self: *FlexBoxWidget, s: Size) void {
             .h = self.main_size_without_wrap,
         },
     };
+    const option_min = self.data().options.min_size_contentGet();
+    const option_max = self.data().options.max_size_contentGet();
+    new_min.w = @max(new_min.w, option_min.w);
+    new_min.h = @max(new_min.h, option_min.h);
+    new_min.w = @min(new_min.w, option_max.w);
+    new_min.h = @min(new_min.h, option_max.h);
     self.data().min_size = self.data().options.padSize(new_min);
 }
 

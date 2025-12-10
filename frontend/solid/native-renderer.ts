@@ -25,9 +25,11 @@ export type RendererAdapter = {
   resize(width: number, height: number): void;
   onEvent(handler?: NativeCallbacks["onEvent"]): void;
   close(): void;
+  applyOps?(payload: Uint8Array): boolean;
   capabilities: RendererCapabilities;
   readonly disposed?: boolean;
   setText?(text: string): void;
+  setSolidTree?(payload: Uint8Array): void;
 };
 
 export class CommandEncoder {
@@ -205,6 +207,18 @@ export class NativeRenderer implements RendererAdapter {
     if (this.disposed) return;
     const encoded = this.textEncoder.encode(text);
     this.lib.symbols.setRendererText(this.handle, ptr(encoded), encoded.byteLength);
+  }
+
+  setSolidTree(payload: Uint8Array) {
+    if (this.disposed) return;
+    const dataPtr = payload.byteLength > 0 ? ptr(payload) : 0;
+    this.lib.symbols.setRendererSolidTree(this.handle, dataPtr, payload.byteLength);
+  }
+
+  applyOps(payload: Uint8Array): boolean {
+    if (this.disposed) return false;
+    const dataPtr = payload.byteLength > 0 ? ptr(payload) : 0;
+    return this.lib.symbols.applyRendererSolidOps(this.handle, dataPtr, payload.byteLength);
   }
 
   onEvent(handler?: NativeCallbacks["onEvent"]) {

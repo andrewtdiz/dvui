@@ -43,6 +43,14 @@ var nativeSymbols = {
   setRendererText: {
     args: ["ptr", "ptr", "usize"],
     returns: "void"
+  },
+  setRendererSolidTree: {
+    args: ["ptr", "ptr", "usize"],
+    returns: "void"
+  },
+  applyRendererSolidOps: {
+    args: ["ptr", "ptr", "usize"],
+    returns: "bool"
   }
 };
 var loadNativeLibrary = (libPath = defaultLibPath) => {
@@ -250,6 +258,18 @@ class NativeRenderer {
     const encoded = this.textEncoder.encode(text);
     this.lib.symbols.setRendererText(this.handle, ptr(encoded), encoded.byteLength);
   }
+  setSolidTree(payload) {
+    if (this.disposed)
+      return;
+    const dataPtr = payload.byteLength > 0 ? ptr(payload) : 0;
+    this.lib.symbols.setRendererSolidTree(this.handle, dataPtr, payload.byteLength);
+  }
+  applyOps(payload) {
+    if (this.disposed)
+      return false;
+    const dataPtr = payload.byteLength > 0 ? ptr(payload) : 0;
+    return this.lib.symbols.applyRendererSolidOps(this.handle, dataPtr, payload.byteLength);
+  }
   onEvent(handler) {
     if (!handler) {
       this.eventHandlers.clear();
@@ -411,15 +431,6 @@ function createRenderEffect(fn, value, options) {
   else
     updateComputation(c);
 }
-function createEffect(fn, value, options) {
-  runEffects = runUserEffects;
-  const c = createComputation(fn, value, false, STALE, options), s = SuspenseContext && useContext(SuspenseContext);
-  if (s)
-    c.suspense = s;
-  if (!options || !options.render)
-    c.user = true;
-  Effects ? Effects.push(c) : updateComputation(c);
-}
 function createMemo(fn, value, options) {
   options = options ? Object.assign({}, signalOptions, options) : signalOptions;
   const c = createComputation(fn, value, true, 0, options);
@@ -509,10 +520,6 @@ function registerGraph(value) {
   }
   if (DevHooks.afterRegisterGraph)
     DevHooks.afterRegisterGraph(value);
-}
-function useContext(context) {
-  let value;
-  return Owner && Owner.context && (value = Owner.context[context.id]) !== undefined ? value : context.defaultValue;
 }
 var SuspenseContext;
 function readSignal() {
@@ -827,31 +834,6 @@ function scheduleQueue(queue) {
       });
     }
   }
-}
-function runUserEffects(queue) {
-  let i, userLength = 0;
-  for (i = 0;i < queue.length; i++) {
-    const e = queue[i];
-    if (!e.user)
-      runTop(e);
-    else
-      queue[userLength++] = e;
-  }
-  if (sharedConfig.context) {
-    if (sharedConfig.count) {
-      sharedConfig.effects || (sharedConfig.effects = []);
-      sharedConfig.effects.push(...queue.slice(0, userLength));
-      return;
-    }
-    setHydrateContext();
-  }
-  if (sharedConfig.effects && (sharedConfig.done || !sharedConfig.count)) {
-    queue = [...sharedConfig.effects, ...queue];
-    userLength += sharedConfig.effects.length;
-    delete sharedConfig.effects;
-  }
-  for (i = 0;i < userLength; i++)
-    runTop(queue[i]);
 }
 function lookUpstream(node, ignore) {
   const runningTransition = Transition && Transition.running;
@@ -1366,9 +1348,6 @@ var bridge = {};
 var registerRuntimeBridge = (scheduleFlush) => {
   bridge.scheduleFlush = scheduleFlush;
 };
-var notifyRuntimePropChange = () => {
-  bridge.scheduleFlush?.();
-};
 
 // solid/solid-host.tsx
 var nextId = 1;
@@ -1378,8 +1357,58 @@ class HostNode {
   children = [];
   props = {};
   listeners = new Map;
+  created = false;
   constructor(tag) {
     this.tag = tag;
+  }
+  get firstChild() {
+    return this.children[0];
+  }
+  get lastChild() {
+    return this.children.length > 0 ? this.children[this.children.length - 1] : undefined;
+  }
+  get textContent() {
+    if (this.tag === "text")
+      return this.props.text ?? "";
+    return this.children.map((c) => c.textContent).join("");
+  }
+  set textContent(val) {
+    if (this.tag === "text") {
+      this.props.text = val;
+      return;
+    }
+    this.children = [];
+    const child = new HostNode("text");
+    child.props.text = val;
+    this.add(child);
+  }
+  get nodeValue() {
+    return this.textContent;
+  }
+  set nodeValue(val) {
+    this.textContent = val;
+  }
+  get data() {
+    return this.textContent;
+  }
+  set data(val) {
+    this.textContent = val;
+  }
+  get nextSibling() {
+    if (!this.parent)
+      return;
+    const idx = this.parent.children.indexOf(this);
+    if (idx === -1)
+      return;
+    return this.parent.children[idx + 1];
+  }
+  get previousSibling() {
+    if (!this.parent)
+      return;
+    const idx = this.parent.children.indexOf(this);
+    if (idx <= 0)
+      return;
+    return this.parent.children[idx - 1];
   }
   add(child, index = this.children.length) {
     child.parent = this;
@@ -1529,16 +1558,130 @@ var removeFromIndex = (node, index) => {
     removeFromIndex(child, index);
   }
 };
+var markCreated = (node) => {
+  node.created = true;
+  for (const child of node.children) {
+    markCreated(child);
+  }
+};
 var createSolidNativeHost = (native) => {
   const encoder = native.encoder;
   const root = new HostNode("root");
   const nodeIndex = new Map([[root.id, root]]);
   let flushPending = false;
+  const treeEncoder = new TextEncoder;
+  const ops = [];
+  const mutationsSupported = typeof native.applyOps === "function";
+  let seq = 0;
+  const mutationMode = "snapshot_once";
+  const snapshotEveryFlush = mutationMode === "snapshot_every_flush";
+  const snapshotOnceThenMutations = mutationMode === "snapshot_once";
+  const mutationsOnlyAfterSnapshot = mutationMode === "mutations_only";
+  let syncedOnce = false;
+  let needFullSync = false;
+  let framesSinceSnapshot = 0;
+  const nodeClass = (node) => node.props.className ?? node.props.class;
+  const enqueueCreateOrMove = (parent, node, anchor) => {
+    const parentId = parent === root ? 0 : parent.id;
+    const beforeId = anchor ? anchor.id : undefined;
+    if (!node.created) {
+      node.created = true;
+      const createOp = {
+        op: "create",
+        id: node.id,
+        parent: parentId,
+        before: beforeId,
+        tag: node.tag
+      };
+      if (node.tag === "text")
+        createOp.text = node.props.text ?? "";
+      const cls = nodeClass(node);
+      if (cls)
+        createOp.className = cls;
+      ops.push(createOp);
+      return;
+    }
+    ops.push({
+      op: "move",
+      id: node.id,
+      parent: parentId,
+      before: beforeId
+    });
+  };
+  const enqueueText = (node) => {
+    if (node.tag !== "text")
+      return;
+    ops.push({
+      op: "set_text",
+      id: node.id,
+      text: node.props.text ?? ""
+    });
+  };
   const flush = () => {
     flushPending = false;
+    framesSinceSnapshot += 1;
+    const nodes = [];
+    const serialize = (node, parentId) => {
+      const className = node.props.className ?? node.props.class;
+      const entry = {
+        id: node.id,
+        tag: node.tag,
+        parent: parentId
+      };
+      if (className)
+        entry.className = className;
+      if (node.tag === "text") {
+        entry.text = node.props.text ?? "";
+      }
+      nodes.push(entry);
+      for (const child of node.children) {
+        serialize(child, node.id);
+      }
+    };
     encoder.reset();
     for (const child of root.children) {
+      serialize(child, 0);
       emitNode(child, encoder, 0);
+    }
+    if (mutationsOnlyAfterSnapshot && ops.length == 0) {
+      for (const n of nodes) {
+        if (n.id === 0)
+          continue;
+        const createOp = {
+          op: "create",
+          id: n.id,
+          parent: n.parent ?? 0,
+          before: null,
+          tag: n.tag,
+          className: n.className,
+          text: n.text
+        };
+        ops.push(createOp);
+      }
+    }
+    if (mutationsSupported && native.applyOps && ops.length > 0 && !needFullSync && (syncedOnce || mutationsOnlyAfterSnapshot)) {
+      const payload = treeEncoder.encode(JSON.stringify({
+        seq: ++seq,
+        ops
+      }));
+      const ok = native.applyOps(payload);
+      ops.length = 0;
+      if (!ok) {
+        needFullSync = true;
+      }
+    }
+    const periodicResync = snapshotOnceThenMutations && framesSinceSnapshot >= 300;
+    const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || periodicResync || !mutationsSupported && native.setSolidTree != null;
+    if (native.setSolidTree && shouldSnapshot) {
+      const payload = treeEncoder.encode(JSON.stringify({
+        nodes
+      }));
+      native.setSolidTree(payload);
+      markCreated(root);
+      syncedOnce = true;
+      needFullSync = false;
+      ops.length = 0;
+      framesSinceSnapshot = 0;
     }
     native.commit(encoder);
   };
@@ -1580,7 +1723,7 @@ var createSolidNativeHost = (native) => {
       node.props.text = typeof value === "number" ? `${value}` : value;
       return node;
     },
-    createSlotNode() {
+    createFragment() {
       return registerNode(new HostNode("slot"));
     },
     isTextNode(node) {
@@ -1590,16 +1733,25 @@ var createSolidNativeHost = (native) => {
       if (node.tag !== "text")
         return;
       node.props.text = value;
+      if (node.created) {
+        enqueueText(node);
+      }
       scheduleFlush();
     },
     insertNode(parent, node, anchor) {
       const targetIndex = anchor ? parent.children.indexOf(anchor) : parent.children.length;
       parent.add(node, targetIndex === -1 ? parent.children.length : targetIndex);
+      enqueueCreateOrMove(parent, node, anchor);
       scheduleFlush();
     },
     removeNode(parent, node) {
       parent.remove(node);
       removeFromIndex(node, nodeIndex);
+      node.created = false;
+      ops.push({
+        op: "remove",
+        id: node.id
+      });
       scheduleFlush();
     },
     setProperty(node, name, value, prev) {
@@ -1612,6 +1764,16 @@ var createSolidNativeHost = (native) => {
         return;
       }
       node.props[name] = value;
+      if (name === "class" || name === "className") {
+        if (node.created) {
+          const cls = value == null ? "" : String(value);
+          ops.push({
+            op: "set_class",
+            id: node.id,
+            className: cls
+          });
+        }
+      }
       scheduleFlush();
     },
     getParentNode(node) {
@@ -1634,75 +1796,93 @@ var createSolidNativeHost = (native) => {
       return renderer.render(view, root);
     },
     flush,
+    flushIfPending() {
+      if (flushPending)
+        flush();
+    },
+    hasPendingFlush() {
+      return flushPending;
+    },
     root
   };
 };
 
 // solid/runtime.ts
-var setProp = (node, name, value) => {
-  node.props[name] = value;
-  notifyRuntimePropChange();
-};
-var setAttribute = (node, name, value) => {
-  setProp(node, name, value);
-};
-var appendText = (parent, text) => {
-  if (parent.tag === "text") {
-    parent.props.text = text;
-    return;
-  }
-  const child = new HostNode("text");
-  child.props.text = text;
-  parent.add(child);
-};
-var effect = (fn, initial) => {
-  fn(initial);
-  return createEffect(() => fn(initial));
-};
-var parseTemplate = (source) => {
-  const tagMatch = source.match(/<\s*([a-zA-Z0-9:_-]+)([^>]*)>/);
-  if (!tagMatch)
-    return { tag: "text", attrs: {} };
-  const [, rawTag, rawAttrs] = tagMatch;
-  const attrs = {};
-  const attrPattern = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+var tokenize = (source) => {
+  const tokens = [];
+  const re = /<\/?[A-Za-z0-9:_-]+(?:\s+[^>]*?)?>|[^<]+/g;
   let m;
-  while ((m = attrPattern.exec(rawAttrs)) !== null) {
-    const name = m[1];
-    const value = m[2] ?? m[3] ?? m[4] ?? "";
-    attrs[name] = value;
-  }
-  const textMatch = source.match(new RegExp(`<${rawTag}[^>]*>([^<]*)`, "i"));
-  return {
-    tag: rawTag,
-    attrs,
-    textContent: textMatch?.[1]
-  };
-};
-var template = (source) => {
-  const parsed = parseTemplate(source);
-  const tag = parsed.tag || "text";
-  return () => {
-    const node = new HostNode(tag);
-    for (const [key, val] of Object.entries(parsed.attrs)) {
-      node.props[key] = val;
+  while ((m = re.exec(source)) !== null) {
+    const raw = m[0];
+    if (raw.startsWith("</")) {
+      const tag = raw.slice(2, -1).trim();
+      tokens.push({ kind: "close", tag });
+      continue;
     }
-    if (parsed.textContent && parsed.textContent.length > 0) {
-      if (tag === "text") {
-        node.props.text = parsed.textContent;
-      } else {
-        appendText(node, parsed.textContent);
+    if (raw.startsWith("<")) {
+      const selfClosing = raw.endsWith("/>");
+      const inner = raw.slice(1, selfClosing ? -2 : -1).trim();
+      const [tag, ...rest] = inner.split(/\s+/);
+      const attrString = inner.slice(tag.length);
+      const attrs = {};
+      const attrPattern = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+      let ma;
+      while ((ma = attrPattern.exec(attrString)) !== null) {
+        const name = ma[1];
+        const value = ma[2] ?? ma[3] ?? ma[4] ?? "";
+        attrs[name] = value;
+      }
+      tokens.push({ kind: "open", tag, attrs, selfClosing });
+      continue;
+    }
+    const text = raw;
+    if (text.length > 0) {
+      tokens.push({ kind: "text", value: text });
+    }
+  }
+  return tokens;
+};
+var buildTreeFromTemplate = (source) => {
+  const fragment = new HostNode("slot");
+  const stack = [fragment];
+  const tokens = tokenize(source);
+  for (const tok of tokens) {
+    switch (tok.kind) {
+      case "open": {
+        const node = new HostNode(tok.tag);
+        for (const [k, v] of Object.entries(tok.attrs)) {
+          node.props[k] = v;
+        }
+        stack[stack.length - 1].add(node);
+        if (!tok.selfClosing) {
+          stack.push(node);
+        }
+        break;
+      }
+      case "close": {
+        while (stack.length > 1) {
+          const top = stack.pop();
+          if (top.tag === tok.tag)
+            break;
+        }
+        break;
+      }
+      case "text": {
+        const textNode = new HostNode("text");
+        textNode.props.text = tok.value;
+        stack[stack.length - 1].add(textNode);
+        break;
       }
     }
-    return node;
-  };
+  }
+  return fragment.children.length === 1 ? fragment.children[0] : fragment;
+};
+var template = (source) => {
+  return () => buildTreeFromTemplate(source);
 };
 
-// solid/color.ts
-var rgba = (r, g, b, a = 255) => [r, g, b, a];
-
 // solid/solid-entry.tsx
-var _tmpl$ = /* @__PURE__ */ template(`<div class="absolute bg-white">`);
+var _tmpl$ = /* @__PURE__ */ template(`<div class="flex justify-center items-center w-full h-full bg-gray-700"><div class="flex items-center justify-start bg-gray-600 w-60 h-60"><p class=bg-blue-500>Left anchor`);
 var createSolidTextApp = (renderer) => {
   const host = createSolidNativeHost(renderer);
   const [message, setMessage] = createSignal("Solid to Zig text");
@@ -1710,33 +1890,14 @@ var createSolidTextApp = (renderer) => {
     w: 800,
     h: 450
   };
-  const container = {
-    w: 360,
-    h: 200
+  const flexBox = {
+    size: 240
   };
-  const containerPos = {
-    x: (screen.w - container.w) / 2,
-    y: (screen.h - container.h) / 2
-  };
-  const dispose = host.render(() => (() => {
-    var _el$ = _tmpl$();
-    effect((_p$) => {
-      var { x: _v$, y: _v$2 } = containerPos, _v$3 = container.w, _v$4 = container.h, _v$5 = rgba(59, 130, 246, 255);
-      _v$ !== _p$.e && setAttribute(_el$, "x", _p$.e = _v$);
-      _v$2 !== _p$.t && setAttribute(_el$, "y", _p$.t = _v$2);
-      _v$3 !== _p$.a && setAttribute(_el$, "width", _p$.a = _v$3);
-      _v$4 !== _p$.o && setAttribute(_el$, "height", _p$.o = _v$4);
-      _v$5 !== _p$.i && setAttribute(_el$, "color", _p$.i = _v$5);
-      return _p$;
-    }, {
-      e: undefined,
-      t: undefined,
-      a: undefined,
-      o: undefined,
-      i: undefined
-    });
-    return _el$;
-  })());
+  const anchorPad = 24;
+  const textRowPad = 16;
+  const textRowHeight = 28;
+  const textSegmentWidth = (flexBox.size - textRowPad * 2) / 3;
+  const dispose = host.render(() => _tmpl$());
   host.flush();
   return {
     host,
@@ -1839,6 +2000,7 @@ var loop = () => {
   const elapsed = (now - startTime) / 1000;
   lastTime = now;
   setTime(elapsed, dt);
+  setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host.flush();
   renderer.present();
   frame += 1;

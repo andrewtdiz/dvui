@@ -100,49 +100,110 @@ export const effect = (fn: (prev?: any) => any, initial?: any) => {
   return createEffect(() => fn(initial));
 };
 
-type ParsedTemplate = {
-  tag: string;
-  attrs: Record<string, string>;
-  textContent?: string;
+// Minimal host-only spread helper used by compiled templates.
+export const spread = (node: HostNode, props: any) => {
+  if (!props) return node;
+  for (const [k, v] of Object.entries(props)) {
+    setProp(node, k, v);
+  }
+  return node;
 };
 
-const parseTemplate = (source: string): ParsedTemplate => {
-  const tagMatch = source.match(/<\s*([a-zA-Z0-9:_-]+)([^>]*)>/);
-  if (!tagMatch) return { tag: "text", attrs: {} };
+// mergeProps helper: last one wins, objects are shallow-merged.
+export const mergeProps = (...sources: any[]) => {
+  const out: Record<string, any> = {};
+  for (const src of sources) {
+    if (!src) continue;
+    for (const [k, v] of Object.entries(src)) {
+      out[k] = v;
+    }
+  }
+  return out;
+};
 
-  const [, rawTag, rawAttrs] = tagMatch;
-  const attrs: Record<string, string> = {};
-  const attrPattern = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+type Token =
+  | {
+      kind: "open";
+      tag: string;
+      attrs: Record<string, string>;
+      selfClosing: boolean;
+    }
+  | { kind: "close"; tag: string }
+  | { kind: "text"; value: string };
+
+const tokenize = (source: string): Token[] => {
+  const tokens: Token[] = [];
+  const re = /<\/?[A-Za-z0-9:_-]+(?:\s+[^>]*?)?>|[^<]+/g;
   let m: RegExpExecArray | null;
-  while ((m = attrPattern.exec(rawAttrs)) !== null) {
-    const name = m[1];
-    const value = m[2] ?? m[3] ?? m[4] ?? "";
-    attrs[name] = value;
+  while ((m = re.exec(source)) !== null) {
+    const raw = m[0];
+    if (raw.startsWith("</")) {
+      const tag = raw.slice(2, -1).trim();
+      tokens.push({ kind: "close", tag });
+      continue;
+    }
+    if (raw.startsWith("<")) {
+      const selfClosing = raw.endsWith("/>");
+      const inner = raw.slice(1, selfClosing ? -2 : -1).trim();
+      const [tag, ...rest] = inner.split(/\s+/);
+      const attrString = inner.slice(tag.length);
+      const attrs: Record<string, string> = {};
+      const attrPattern = /([^\s=]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+      let ma: RegExpExecArray | null;
+      while ((ma = attrPattern.exec(attrString)) !== null) {
+        const name = ma[1];
+        const value = ma[2] ?? ma[3] ?? ma[4] ?? "";
+        attrs[name] = value;
+      }
+      tokens.push({ kind: "open", tag, attrs, selfClosing });
+      continue;
+    }
+    const text = raw;
+    if (text.length > 0) {
+      tokens.push({ kind: "text", value: text });
+    }
+  }
+  return tokens;
+};
+
+const buildTreeFromTemplate = (source: string): HostNode => {
+  const fragment = new HostNode("slot"); // acts like a fragment/root
+  const stack: HostNode[] = [fragment];
+
+  const tokens = tokenize(source);
+  for (const tok of tokens) {
+    switch (tok.kind) {
+      case "open": {
+        const node = new HostNode(tok.tag);
+        for (const [k, v] of Object.entries(tok.attrs)) {
+          node.props[k] = v;
+        }
+        stack[stack.length - 1].add(node);
+        if (!tok.selfClosing) {
+          stack.push(node);
+        }
+        break;
+      }
+      case "close": {
+        // pop until matching tag or root
+        while (stack.length > 1) {
+          const top = stack.pop()!;
+          if (top.tag === tok.tag) break;
+        }
+        break;
+      }
+      case "text": {
+        const textNode = new HostNode("text");
+        textNode.props.text = tok.value;
+        stack[stack.length - 1].add(textNode);
+        break;
+      }
+    }
   }
 
-  const textMatch = source.match(new RegExp(`<${rawTag}[^>]*>([^<]*)`, "i"));
-  return {
-    tag: rawTag,
-    attrs,
-    textContent: textMatch?.[1],
-  };
+  return fragment.children.length === 1 ? fragment.children[0] : fragment;
 };
 
 export const template = (source: string) => {
-  const parsed = parseTemplate(source);
-  const tag = parsed.tag || "text";
-  return () => {
-    const node = new HostNode(tag);
-    for (const [key, val] of Object.entries(parsed.attrs)) {
-      node.props[key] = val;
-    }
-    if (parsed.textContent && parsed.textContent.length > 0) {
-      if (tag === "text") {
-        node.props.text = parsed.textContent;
-      } else {
-        appendText(node, parsed.textContent);
-      }
-    }
-    return node;
-  };
+  return () => buildTreeFromTemplate(source);
 };

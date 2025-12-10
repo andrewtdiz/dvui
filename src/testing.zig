@@ -81,24 +81,17 @@ pub const InitOptions = struct {
 };
 
 pub fn init(options: InitOptions) !Self {
-    // init SDL backend (creates and owns OS window)
+    // init backend (creates and owns OS window when applicable)
     const backend = try options.allocator.create(Backend);
     errdefer options.allocator.destroy(backend);
     backend.* = switch (Backend.kind) {
-        .sdl2, .sdl3 => try Backend.initWindow(.{
-            .allocator = options.allocator,
-            .size = options.window_size,
-            .vsync = false,
-            .title = "",
-            .hidden = true,
-        }),
         .testing => Backend.init(.{
             .allocator = options.allocator,
             .size = .cast(options.window_size),
             .size_pixels = options.window_size.scale(2, dvui.Size.Physical),
         }),
         inline else => |kind| {
-            std.debug.print("dvui.testing does not support the {s} backend\n", .{@tagName(kind)});
+            std.debug.print("dvui.testing only supports the testing backend (got {s})\n", .{@tagName(kind)});
             return error.SkipZigTest;
         },
     };

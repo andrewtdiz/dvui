@@ -9,14 +9,7 @@ Tested with [Zig](https://ziglang.org/) 0.15.2 (use tag v0.3.0 for zig 0.14.1)
 
 How to run the built-in examples:
 
-- SDL3
-  - ```zig build sdl3-standalone```
-  - ```zig build sdl3-ontop```  
-  - ```zig build sdl3-app```
-- SDL2
-  - ```zig build sdl2-standalone```
-  - ```zig build sdl2-ontop```
-  - ```zig build sdl2-app```
+- SDL backends were removed from this application.
 - Raylib
   - if you encounter error `No Wayland` also add flag `-Dlinux_display_backend=X11`
   - ```zig build raylib-standalone```
@@ -97,11 +90,7 @@ Add the dvui dependency:
 zig fetch --save git+https://github.com/david-vanderson/dvui#main
 ```
 
-Add build.zig logic (here using sdl3 backend):
-```
-const dvui_dep = b.dependency("dvui", .{ .target = target, .optimize = optimize, .backend = .sdl3 });
-exe.root_module.addImport("dvui", dvui_dep.module("dvui_sdl3"));
-```
+Add build.zig logic; this repository demonstrates wiring the raylib backend in `build.zig`.
 
 If you are starting a new project, copy the [app example](/examples/app.zig).
 
@@ -114,15 +103,7 @@ Important Tips:
 * Read the [devlog](https://david-vanderson.github.io/log)
   * Especially about [units](https://david-vanderson.github.io/log/2025/#2025-05-12)
 
-For zls autocomplete to work on dvui's backend, you must import it directly.  In build.zig:
-```
-mod.addImport("sdl-backend", dvui_dep.module("sdl3"));
-```
-
-Then in your code:
-```
-const SDLBackend = @import("sdl-backend");
-```
+For zls autocomplete to work on dvui's backend, import the chosen backend directly (see `build.zig` for a raylib example).
 
 ## Built-in Widgets
 
