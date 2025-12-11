@@ -5,6 +5,7 @@ zig-cache
 zig-out
 *.swp
 node_modules
+dist
 
 .cursor/
 
