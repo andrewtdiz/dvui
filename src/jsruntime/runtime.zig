@@ -3,7 +3,6 @@ const std = @import("std");
 const alloc = @import("../alloc.zig");
 const solid_events = @import("../solid/events/mod.zig");
 const console = @import("console.zig");
-const hot_reload = @import("hotreload.zig");
 const types = @import("types.zig");
 pub const FrameData = types.FrameData;
 pub const FrameResult = types.FrameResult;
@@ -31,7 +30,7 @@ event_ctx: ?*anyopaque = null,
 // Event ring buffer pointer for direct event dispatch (Phase 2)
 event_ring: ?*solid_events.EventRing = null,
 
-pub const EventCallback = fn (ctx: ?*anyopaque, name: []const u8, payload: []const u8) void;
+pub const EventCallback = *const fn (ctx: ?*anyopaque, name: []const u8, payload: []const u8) void;
 
 pub const Error = error{
     RuntimeInitFailed,
@@ -136,10 +135,6 @@ pub fn setMessage(self: *JSRuntime, value: []const u8) !void {
 
 pub fn message(self: *JSRuntime) []const u8 {
     return self.stored_message;
-}
-
-pub fn enableHotReload(script_path: []const u8) !void {
-    try hot_reload.enable(script_path);
 }
 
 pub fn setConsoleSink(_: console.ConsoleSink) void {}

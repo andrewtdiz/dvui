@@ -44,14 +44,33 @@ const Renderer = struct {
     pending_destroy: bool = false,
     destroy_started: bool = false,
     solid_store_ready: bool = false,
-    solid_store: solid.NodeStore = undefined,
+    solid_store_ptr: ?*anyopaque = null,
     solid_seq_last: u64 = 0,
     frame_count: u64 = 0,
-    runtime: jsruntime.JSRuntime = undefined,
+    runtime_ptr: ?*anyopaque = null,
     // Event ring buffer for Zig→JS event dispatch (Phase 2)
-    event_ring: ?solid.EventRing = null,
+    event_ring_ptr: ?*anyopaque = null,
     event_ring_ready: bool = false,
 };
+
+fn asOpaquePtr(comptime T: type, raw: ?*anyopaque) ?*T {
+    if (raw) |ptr| {
+        return @ptrCast(@alignCast(ptr));
+    }
+    return null;
+}
+
+fn runtime(renderer: *Renderer) ?*jsruntime.JSRuntime {
+    return asOpaquePtr(jsruntime.JSRuntime, renderer.runtime_ptr);
+}
+
+fn solidStore(renderer: *Renderer) ?*solid.NodeStore {
+    return asOpaquePtr(solid.NodeStore, renderer.solid_store_ptr);
+}
+
+fn eventRing(renderer: *Renderer) ?*solid.EventRing {
+    return asOpaquePtr(solid.EventRing, renderer.event_ring_ptr);
+}
 
 const flag_absolute: u8 = 1;
 const frame_event_interval: u64 = 6; // ~10fps when running at 60fps
@@ -173,25 +192,54 @@ fn colorFromPacked(value: u32) dvui.Color {
     };
 }
 
-fn ensureSolidStore(renderer: *Renderer) !void {
-    if (renderer.solid_store_ready) return;
-    renderer.solid_store.init(renderer.allocator) catch |err| {
+fn ensureSolidStore(renderer: *Renderer) !*solid.NodeStore {
+    if (renderer.solid_store_ready) {
+        if (solidStore(renderer)) |store| {
+            return store;
+        }
+        renderer.solid_store_ready = false;
+    }
+
+    const store = blk: {
+        if (solidStore(renderer)) |existing| {
+            break :blk existing;
+        }
+        const allocated = renderer.allocator.create(solid.NodeStore) catch {
+            logMessage(renderer, 3, "solid store alloc failed", .{});
+            return error.OutOfMemory;
+        };
+        renderer.solid_store_ptr = allocated;
+        break :blk allocated;
+    };
+
+    store.init(renderer.allocator) catch |err| {
         logMessage(renderer, 3, "solid store init failed: {s}", .{@errorName(err)});
         return err;
     };
     renderer.solid_store_ready = true;
+    return store;
 }
 
 fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
     // Ensure the store exists, then rebuild it from scratch based on the JSON payload.
-    ensureSolidStore(renderer) catch return;
+    const store = blk: {
+        if (solidStore(renderer)) |existing| {
+            break :blk existing;
+        }
+        const allocated = renderer.allocator.create(solid.NodeStore) catch {
+            logMessage(renderer, 3, "solid store alloc failed", .{});
+            return;
+        };
+        renderer.solid_store_ptr = allocated;
+        break :blk allocated;
+    };
 
     if (renderer.solid_store_ready) {
-        renderer.solid_store.deinit();
+        store.deinit();
         renderer.solid_store_ready = false;
     }
 
-    renderer.solid_store.init(renderer.allocator) catch |err| {
+    store.init(renderer.allocator) catch |err| {
         logMessage(renderer, 3, "solid store reset failed: {s}", .{@errorName(err)});
         return;
     };
@@ -238,27 +286,27 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
     for (payload.nodes) |node| {
         if (node.id == 0) continue; // 0 is reserved for root
         if (std.mem.eql(u8, node.tag, "text")) {
-            renderer.solid_store.setTextNode(node.id, node.text orelse "") catch |err| {
+            store.setTextNode(node.id, node.text orelse "") catch |err| {
                 logMessage(renderer, 3, "setTextNode failed for {d}: {s}", .{ node.id, @errorName(err) });
             };
             continue;
         }
         if (std.mem.eql(u8, node.tag, "slot")) {
-            renderer.solid_store.upsertSlot(node.id) catch |err| {
+            store.upsertSlot(node.id) catch |err| {
                 logMessage(renderer, 3, "upsertSlot failed for {d}: {s}", .{ node.id, @errorName(err) });
             };
         } else {
-            renderer.solid_store.upsertElement(node.id, node.tag) catch |err| {
+            store.upsertElement(node.id, node.tag) catch |err| {
                 logMessage(renderer, 3, "upsertElement failed for {d}: {s}", .{ node.id, @errorName(err) });
                 return;
             };
         }
         if (node.className) |cls| {
-            renderer.solid_store.setClassName(node.id, cls) catch |err| {
+            store.setClassName(node.id, cls) catch |err| {
                 logMessage(renderer, 3, "setClassName failed for {d}: {s}", .{ node.id, @errorName(err) });
             };
         }
-        if (renderer.solid_store.node(node.id)) |target| {
+        if (store.node(node.id)) |target| {
             var touched = false;
             if (node.rotation) |v| {
                 target.transform.rotation = v;
@@ -309,7 +357,7 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
                 touched = true;
             }
             if (touched) {
-                renderer.solid_store.markNodeChanged(node.id);
+                store.markNodeChanged(node.id);
             }
         }
     }
@@ -318,12 +366,12 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
     for (payload.nodes) |node| {
         if (node.id == 0) continue;
         const parent_id: u32 = node.parent orelse 0;
-        renderer.solid_store.insert(parent_id, node.id, null) catch |err| {
+        store.insert(parent_id, node.id, null) catch |err| {
             logMessage(renderer, 3, "insert failed for {d} -> {d}: {s}", .{ parent_id, node.id, @errorName(err) });
         };
     }
 
-    if (renderer.solid_store.node(0)) |root| {
+    if (store.node(0)) |root| {
         logMessage(renderer, 2, "solid snapshot root children={d}", .{root.children.items.len});
         if (root.children.items.len == 0) {
             renderer.solid_store_ready = false;
@@ -331,9 +379,8 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
     }
 }
 
-fn applySolidOp(renderer: *Renderer, op: SolidOp) OpError!void {
+fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
     if (op.op.len == 0) return error.UnknownOp;
-    const store = &renderer.solid_store;
 
     if (std.mem.eql(u8, op.op, "create")) {
         const tag = op.tag orelse return error.MissingTag;
@@ -429,7 +476,7 @@ fn applySolidOp(renderer: *Renderer, op: SolidOp) OpError!void {
 }
 
 fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
-    ensureSolidStore(renderer) catch return false;
+    const store = ensureSolidStore(renderer) catch return false;
 
     var parsed = std.json.parseFromSlice(SolidOpBatch, renderer.allocator, json_bytes, .{
         .ignore_unknown_fields = true,
@@ -447,7 +494,7 @@ fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
     }
     logMessage(renderer, 1, "solid ops seq={d} count={d}", .{ seq, batch.ops.len });
     for (batch.ops) |op| {
-        applySolidOp(renderer, op) catch |err| {
+        applySolidOp(store, op) catch |err| {
             logMessage(renderer, 3, "solid op failed: {s} op={s} id={d} parent={?d} before={?d}", .{
                 @errorName(err),
                 op.op,
@@ -460,12 +507,12 @@ fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
     }
     renderer.solid_seq_last = seq;
 
-    const root = renderer.solid_store.node(0) orelse {
+    const root = store.node(0) orelse {
         logMessage(renderer, 3, "solid store missing root after ops", .{});
         renderer.solid_store_ready = false;
         return false;
     };
-    logMessage(renderer, 1, "solid store nodes={d}", .{renderer.solid_store.nodes.count()});
+    logMessage(renderer, 1, "solid store nodes={d}", .{store.nodes.count()});
     logMessage(renderer, 1, "solid ops root children={d}", .{root.children.items.len});
 
     if (root.children.items.len == 0) {
@@ -832,8 +879,9 @@ fn renderFrame(renderer: *Renderer) void {
 
         const frame_start = std.time.nanoTimestamp();
 
-        const runtime_ptr: ?*jsruntime.JSRuntime = &renderer.runtime;
-        const drew_solid = renderer.solid_store_ready and solid.render(runtime_ptr, &renderer.solid_store);
+        const runtime_ptr = runtime(renderer);
+        const store = solidStore(renderer);
+        const drew_solid = renderer.solid_store_ready and store != null and solid.render(runtime_ptr, store.?);
         if (!drew_solid) {
             renderCommandsDvui(renderer, win);
         }
@@ -862,14 +910,30 @@ fn deinitRenderer(renderer: *Renderer) void {
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
-    renderer.runtime.deinit();
+    if (runtime(renderer)) |rt| {
+        rt.deinit();
+        renderer.allocator.destroy(rt);
+        renderer.runtime_ptr = null;
+    }
     if (renderer.solid_store_ready) {
-        renderer.solid_store.deinit();
+        if (solidStore(renderer)) |store| {
+            store.deinit();
+        }
         renderer.solid_store_ready = false;
     }
+    if (solidStore(renderer)) |store| {
+        renderer.allocator.destroy(store);
+        renderer.solid_store_ptr = null;
+    }
     if (renderer.event_ring_ready) {
-        renderer.event_ring.?.deinit();
+        if (eventRing(renderer)) |ring| {
+            ring.deinit();
+        }
         renderer.event_ring_ready = false;
+    }
+    if (eventRing(renderer)) |ring| {
+        renderer.allocator.destroy(ring);
+        renderer.event_ring_ptr = null;
     }
 }
 
@@ -924,32 +988,60 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
         .pending_destroy = false,
         .destroy_started = false,
         .solid_store_ready = false,
-        .solid_store = undefined,
+        .solid_store_ptr = null,
         .frame_count = 0,
-        .event_ring = null,
+        .event_ring_ptr = null,
         .event_ring_ready = false,
+        .runtime_ptr = null,
     };
 
     renderer.allocator = renderer.gpa_instance.allocator();
     renderer.frame_arena = std.heap.ArenaAllocator.init(renderer.allocator);
 
-    renderer.runtime = jsruntime.JSRuntime.init("") catch {
+    const runtime_instance = renderer.allocator.create(jsruntime.JSRuntime) catch {
+        renderer.frame_arena.deinit();
+        _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
-    renderer.runtime.event_cb = forwardEvent;
-    renderer.runtime.event_ctx = renderer;
+    renderer.runtime_ptr = runtime_instance;
+    runtime_instance.* = jsruntime.JSRuntime.init("") catch {
+        renderer.allocator.destroy(runtime_instance);
+        renderer.runtime_ptr = null;
+        renderer.frame_arena.deinit();
+        _ = renderer.gpa_instance.deinit();
+        std.heap.c_allocator.destroy(renderer);
+        return null;
+    };
+    runtime_instance.event_cb = &forwardEvent;
+    runtime_instance.event_ctx = renderer;
 
     // Initialize event ring buffer for Zig→JS event dispatch
-    renderer.event_ring = solid.EventRing.init(renderer.allocator) catch {
-        renderer.runtime.deinit();
+    const ring_instance = renderer.allocator.create(solid.EventRing) catch {
+        runtime_instance.deinit();
+        renderer.allocator.destroy(runtime_instance);
+        renderer.runtime_ptr = null;
+        renderer.frame_arena.deinit();
+        _ = renderer.gpa_instance.deinit();
+        std.heap.c_allocator.destroy(renderer);
+        return null;
+    };
+    renderer.event_ring_ptr = ring_instance;
+    ring_instance.* = solid.EventRing.init(renderer.allocator) catch {
+        renderer.allocator.destroy(ring_instance);
+        renderer.event_ring_ptr = null;
+        runtime_instance.deinit();
+        renderer.allocator.destroy(runtime_instance);
+        renderer.runtime_ptr = null;
+        renderer.frame_arena.deinit();
+        _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
     renderer.event_ring_ready = true;
 
     // Link event ring to runtime so render code can push events directly
-    renderer.runtime.event_ring = &renderer.event_ring.?;
+    runtime_instance.event_ring = ring_instance;
 
     return renderer;
 }
@@ -993,15 +1085,15 @@ pub export fn setRendererText(renderer: ?*Renderer, text_ptr: [*]const u8, text_
             ptr.busy = false;
             tryFinalize(ptr);
         }
-        ensureSolidStore(ptr) catch return;
+        const store = ensureSolidStore(ptr) catch return;
 
         const text_slice = text_ptr[0..text_len];
-        ptr.solid_store.setTextNode(1, text_slice) catch |err| {
+        store.setTextNode(1, text_slice) catch |err| {
             logMessage(ptr, 3, "setText failed: {s}", .{@errorName(err)});
             return;
         };
 
-        const root = ptr.solid_store.node(0) orelse return;
+        const root = store.node(0) orelse return;
         var present = false;
         for (root.children.items) |cid| {
             if (cid == 1) {
@@ -1010,7 +1102,7 @@ pub export fn setRendererText(renderer: ?*Renderer, text_ptr: [*]const u8, text_
             }
         }
         if (!present) {
-            ptr.solid_store.insert(0, 1, null) catch |err| {
+            store.insert(0, 1, null) catch |err| {
                 logMessage(ptr, 3, "insert text failed: {s}", .{@errorName(err)});
             };
         }
@@ -1098,7 +1190,9 @@ pub export fn presentRenderer(renderer: ?*Renderer) callconv(.c) void {
 pub export fn getEventRingHeader(renderer: ?*Renderer) callconv(.c) solid.EventRing.Header {
     if (renderer) |ptr| {
         if (ptr.event_ring_ready) {
-            return ptr.event_ring.?.getHeader();
+            if (eventRing(ptr)) |ring| {
+                return ring.getHeader();
+            }
         }
     }
     return .{ .read_head = 0, .write_head = 0, .capacity = 0, .detail_capacity = 0 };
@@ -1108,7 +1202,9 @@ pub export fn getEventRingHeader(renderer: ?*Renderer) callconv(.c) solid.EventR
 pub export fn getEventRingBuffer(renderer: ?*Renderer) callconv(.c) ?[*]solid.events.EventEntry {
     if (renderer) |ptr| {
         if (ptr.event_ring_ready) {
-            return ptr.event_ring.?.getBufferPtr();
+            if (eventRing(ptr)) |ring| {
+                return ring.getBufferPtr();
+            }
         }
     }
     return null;
@@ -1118,7 +1214,9 @@ pub export fn getEventRingBuffer(renderer: ?*Renderer) callconv(.c) ?[*]solid.ev
 pub export fn getEventRingDetail(renderer: ?*Renderer) callconv(.c) ?[*]u8 {
     if (renderer) |ptr| {
         if (ptr.event_ring_ready) {
-            return ptr.event_ring.?.getDetailPtr();
+            if (eventRing(ptr)) |ring| {
+                return ring.getDetailPtr();
+            }
         }
     }
     return null;
@@ -1128,7 +1226,9 @@ pub export fn getEventRingDetail(renderer: ?*Renderer) callconv(.c) ?[*]u8 {
 pub export fn acknowledgeEvents(renderer: ?*Renderer, new_read_head: u32) callconv(.c) void {
     if (renderer) |ptr| {
         if (ptr.event_ring_ready) {
-            ptr.event_ring.?.setReadHead(new_read_head);
+            if (eventRing(ptr)) |ring| {
+                ring.setReadHead(new_read_head);
+            }
         }
     }
 }
@@ -1136,7 +1236,10 @@ pub export fn acknowledgeEvents(renderer: ?*Renderer, new_read_head: u32) callco
 /// Push an event to the ring buffer (called from Zig render code)
 pub fn pushEvent(renderer: *Renderer, kind: solid.EventKind, node_id: u32, detail: ?[]const u8) bool {
     if (!renderer.event_ring_ready) return false;
-    return renderer.event_ring.?.push(kind, node_id, detail);
+    if (eventRing(renderer)) |ring| {
+        return ring.push(kind, node_id, detail);
+    }
+    return false;
 }
 
 // Simple test export to verify DLL exports work
