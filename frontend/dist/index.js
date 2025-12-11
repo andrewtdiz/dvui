@@ -120,6 +120,15 @@ function createRenderEffect(fn, value, options) {
   else
     updateComputation(c);
 }
+function createEffect(fn, value, options) {
+  runEffects = runUserEffects;
+  const c = createComputation(fn, value, false, STALE, options), s = SuspenseContext && useContext(SuspenseContext);
+  if (s)
+    c.suspense = s;
+  if (!options || !options.render)
+    c.user = true;
+  Effects ? Effects.push(c) : updateComputation(c);
+}
 function createMemo(fn, value, options) {
   options = options ? Object.assign({}, signalOptions, options) : signalOptions;
   const c = createComputation(fn, value, true, 0, options);
@@ -209,6 +218,10 @@ function registerGraph(value) {
   }
   if (DevHooks.afterRegisterGraph)
     DevHooks.afterRegisterGraph(value);
+}
+function useContext(context) {
+  let value;
+  return Owner && Owner.context && (value = Owner.context[context.id]) !== undefined ? value : context.defaultValue;
 }
 var SuspenseContext;
 function readSignal() {
@@ -524,6 +537,31 @@ function scheduleQueue(queue) {
     }
   }
 }
+function runUserEffects(queue) {
+  let i, userLength = 0;
+  for (i = 0;i < queue.length; i++) {
+    const e = queue[i];
+    if (!e.user)
+      runTop(e);
+    else
+      queue[userLength++] = e;
+  }
+  if (sharedConfig.context) {
+    if (sharedConfig.count) {
+      sharedConfig.effects || (sharedConfig.effects = []);
+      sharedConfig.effects.push(...queue.slice(0, userLength));
+      return;
+    }
+    setHydrateContext();
+  }
+  if (sharedConfig.effects && (sharedConfig.done || !sharedConfig.count)) {
+    queue = [...sharedConfig.effects, ...queue];
+    userLength += sharedConfig.effects.length;
+    delete sharedConfig.effects;
+  }
+  for (i = 0;i < userLength; i++)
+    runTop(queue[i]);
+}
 function lookUpstream(node, ignore) {
   const runningTransition = Transition && Transition.running;
   if (runningTransition)
@@ -762,6 +800,32 @@ function mergeProps(...sources) {
       target[key] = desc ? desc.value : undefined;
   }
   return target;
+}
+var narrowedError = (name) => `Attempting to access a stale value from <${name}> that could possibly be undefined. This may occur because you are reading the accessor returned from the component at a time where it has already been unmounted. We recommend cleaning up any stale timers or async, or reading from the initial condition.`;
+function Show(props) {
+  const keyed = props.keyed;
+  const conditionValue = createMemo(() => props.when, undefined, {
+    name: "condition value"
+  });
+  const condition = keyed ? conditionValue : createMemo(conditionValue, undefined, {
+    equals: (a, b) => !a === !b,
+    name: "condition"
+  });
+  return createMemo(() => {
+    const c = condition();
+    if (c) {
+      const child = props.children;
+      const fn = typeof child === "function" && child.length > 0;
+      return fn ? untrack(() => child(keyed ? c : () => {
+        if (!untrack(condition))
+          throw narrowedError("Show");
+        return conditionValue();
+      })) : child;
+    }
+    return props.fallback;
+  }, undefined, {
+    name: "value"
+  });
 }
 if (globalThis) {
   if (!globalThis.Solid$$)
@@ -1034,9 +1098,10 @@ function createRenderer(options) {
 
 // solid/runtime/bridge.ts
 var bridge = {};
-var registerRuntimeBridge = (scheduleFlush, registerNode) => {
+var registerRuntimeBridge = (scheduleFlush, registerNode, hostOps) => {
   bridge.scheduleFlush = scheduleFlush;
   bridge.registerNode = registerNode;
+  bridge.hostOps = hostOps;
 };
 var notifyRuntimePropChange = () => {
   bridge.scheduleFlush?.();
@@ -1044,6 +1109,7 @@ var notifyRuntimePropChange = () => {
 var registerRuntimeNode = (node) => {
   bridge.registerNode?.(node);
 };
+var getRuntimeHostOps = () => bridge.hostOps;
 
 // solid/host/props.ts
 var toByte = (value) => {
@@ -1213,10 +1279,11 @@ var emitNode = (node, encoder, parentId) => {
     const frame = frameFromProps(node.props);
     const flags = hasAbsoluteClass(node.props) ? 1 : 0;
     const resolvedColor = node.props.color ?? bgColorFromClass(node.props);
+    const packedBackground = resolvedColor == null ? 0 : packColor(resolvedColor);
     if (node.tag === "text") {
       encoder.pushText(node.id, parentId, frame, node.props.text ?? "", packColor(node.props.color), flags);
     } else {
-      encoder.pushQuad(node.id, parentId, frame, packColor(resolvedColor), flags);
+      encoder.pushQuad(node.id, parentId, frame, packedBackground, flags);
     }
     downstreamParent = node.id;
   } else if (node.tag !== "slot") {
@@ -1251,13 +1318,11 @@ var createFlushController = (ctx) => {
   let seq = 0;
   let syncedOnce = false;
   let needFullSync = false;
-  let framesSinceSnapshot = 0;
   const snapshotEveryFlush = mutationMode === "snapshot_every_flush";
   const snapshotOnceThenMutations = mutationMode === "snapshot_once";
   const mutationsOnlyAfterSnapshot = mutationMode === "mutations_only";
   const flush = () => {
     flushPending = false;
-    framesSinceSnapshot += 1;
     const nodes = serializeTree(root.children);
     encoder.reset();
     for (const child of root.children) {
@@ -1293,8 +1358,7 @@ var createFlushController = (ctx) => {
         needFullSync = true;
       }
     }
-    const periodicResync = snapshotOnceThenMutations && framesSinceSnapshot >= 300;
-    const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || periodicResync || !mutationsSupported && native.setSolidTree != null;
+    const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || !mutationsSupported && native.setSolidTree != null;
     let sentSnapshot = false;
     if (native.setSolidTree && shouldSnapshot) {
       const payloadObj = { nodes };
@@ -1304,7 +1368,6 @@ var createFlushController = (ctx) => {
       syncedOnce = true;
       needFullSync = false;
       ops.length = 0;
-      framesSinceSnapshot = 0;
       sentSnapshot = true;
       for (const node of nodeIndex.values()) {
         if (node.sentListeners.size > 0) {
@@ -1622,8 +1685,7 @@ var createSolidHost = (native) => {
     nodeIndex.set(node.id, node);
     return node;
   };
-  registerRuntimeBridge(flushController.scheduleFlush, registerNode);
-  const renderer = createRenderer({
+  const runtimeOps = {
     createElement(tagName) {
       return registerNode(new HostNode(tagName));
     },
@@ -1632,11 +1694,8 @@ var createSolidHost = (native) => {
       node.props.text = typeof value === "number" ? `${value}` : value;
       return node;
     },
-    createFragment() {
+    createSlotNode() {
       return registerNode(new HostNode("slot"));
-    },
-    isTextNode(node) {
-      return node.tag === "text";
     },
     replaceText(node, value) {
       if (node.tag !== "text")
@@ -1652,6 +1711,7 @@ var createSolidHost = (native) => {
       parent.add(node, targetIndex === -1 ? parent.children.length : targetIndex);
       enqueueCreateOrMove(parent, node, anchor);
       flushController.scheduleFlush();
+      return node;
     },
     removeNode(parent, node) {
       parent.remove(node);
@@ -1691,7 +1751,19 @@ var createSolidHost = (native) => {
         applyVisualMutation(node, name, value, ops);
       }
       flushController.scheduleFlush();
+    }
+  };
+  const renderer = createRenderer({
+    createElement: runtimeOps.createElement,
+    createTextNode: runtimeOps.createTextNode,
+    createFragment: runtimeOps.createSlotNode,
+    isTextNode(node) {
+      return node.tag === "text";
     },
+    replaceText: runtimeOps.replaceText,
+    insertNode: runtimeOps.insertNode,
+    removeNode: runtimeOps.removeNode,
+    setProperty: runtimeOps.setProperty,
     getParentNode(node) {
       return node.parent;
     },
@@ -1706,6 +1778,11 @@ var createSolidHost = (native) => {
         return;
       return node.parent.children[idx + 1];
     }
+  });
+  registerRuntimeBridge(flushController.scheduleFlush, registerNode, {
+    ...runtimeOps,
+    insert: renderer.insert,
+    spread: renderer.spread
   });
   native.onEvent((name, payload) => {
     if (payload.byteLength < 4)
@@ -2138,18 +2215,31 @@ class NativeRenderer {
   }
 }
 // solid/runtime/index.ts
+var memo2 = (fn) => createMemo(() => fn());
 var createElement = (tag) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.createElement) {
+    return hostOps.createElement(tag);
+  }
   const node = new HostNode(tag);
   registerRuntimeNode(node);
   return node;
 };
 var createTextNode = (value) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.createTextNode) {
+    return hostOps.createTextNode(value);
+  }
   const node = new HostNode("text");
   node.props.text = typeof value === "number" ? `${value}` : value;
   registerRuntimeNode(node);
   return node;
 };
 var insertNode = (parent, node, anchor) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.insertNode) {
+    return hostOps.insertNode(parent, node, anchor);
+  }
   if (anchor) {
     const idx = parent.children.indexOf(anchor);
     if (idx >= 0) {
@@ -2163,7 +2253,21 @@ var insertNode = (parent, node, anchor) => {
   notifyRuntimePropChange();
   return node;
 };
+var removeNode = (parent, node) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.removeNode) {
+    hostOps.removeNode(parent, node);
+    return;
+  }
+  parent.remove(node);
+  notifyRuntimePropChange();
+};
 var setProperty = (node, name, value, prev) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.setProperty) {
+    hostOps.setProperty(node, name, value, prev);
+    return;
+  }
   if (name.startsWith("on:")) {
     const eventName = name.slice(3);
     if (prev)
@@ -2192,6 +2296,67 @@ var setProperty = (node, name, value, prev) => {
   notifyRuntimePropChange();
 };
 var setProp = setProperty;
+var createComponent2 = (Comp, props) => {
+  return Comp(props);
+};
+var resolveValue = (input) => {
+  let resolved = input;
+  while (typeof resolved === "function") {
+    resolved = resolved();
+  }
+  return resolved;
+};
+var appendContent = (parent, value) => {
+  if (value == null || value === true || value === false)
+    return false;
+  if (typeof value === "string" || typeof value === "number") {
+    const textNode = createTextNode(String(value));
+    insertNode(parent, textNode);
+    return true;
+  }
+  if (value instanceof HostNode) {
+    insertNode(parent, value);
+    return true;
+  }
+  return false;
+};
+var clearChildren = (node) => {
+  const existing = [...node.children];
+  for (const child of existing) {
+    removeNode(node, child);
+  }
+};
+var applyInsertValue = (parent, value) => {
+  const resolved = resolveValue(value);
+  clearChildren(parent);
+  if (Array.isArray(resolved)) {
+    for (const item of resolved) {
+      appendContent(parent, resolveValue(item));
+    }
+  } else {
+    appendContent(parent, resolved);
+  }
+  notifyRuntimePropChange();
+};
+var insert = (parent, value, anchor) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.insert) {
+    hostOps.insert(parent, value, anchor ?? null);
+    return;
+  }
+  if (anchor) {
+    const wrapper = new HostNode("slot");
+    applyInsertValue(wrapper, value);
+    for (const child of wrapper.children) {
+      insertNode(parent, child, anchor);
+    }
+  } else {
+    applyInsertValue(parent, value);
+  }
+  if (typeof value === "function") {
+    createEffect(() => applyInsertValue(parent, value));
+  }
+};
 // solid/native/dvui-core.ts
 import { dlopen as dlopen2, ptr as ptr2, suffix as suffix2, CString } from "bun:ffi";
 import { existsSync as existsSync2 } from "fs";
@@ -2410,62 +2575,85 @@ var createFrameScheduler = (options = {}) => {
     }
   };
 };
-// solid/solid-entry.tsx
-var createSolidTextApp = (renderer) => {
-  const host2 = createSolidNativeHost(renderer);
-  const [message, setMessage] = createSignal("Solid to Zig text");
-  const screen = {
-    w: 800,
-    h: 450
-  };
-  const flexBox = {
-    size: 240
-  };
-  const anchorPad = 24;
-  const textRowPad = 16;
-  const textRowHeight = 28;
-  const textSegmentWidth = (flexBox.size - textRowPad * 2) / 3;
-  const dispose = host2.render(() => (() => {
-    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("p"), _el$5 = createElement("p"), _el$7 = createElement("p"), _el$9 = createElement("button"), _el$1 = createElement("p");
+// solid/state/time.ts
+var [elapsedSeconds, setElapsedSeconds] = createSignal(0);
+var [deltaSeconds, setDeltaSeconds] = createSignal(0);
+var getElapsedSeconds = elapsedSeconds;
+var getDeltaSeconds = deltaSeconds;
+var setTime = (elapsed, dt) => {
+  setElapsedSeconds(elapsed);
+  setDeltaSeconds(dt);
+};
+
+// solid/App.tsx
+var App = () => {
+  const [count, setCount] = createSignal(0);
+  const elapsed = getElapsedSeconds;
+  const delta = getDeltaSeconds;
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("p"), _el$5 = createElement("p"), _el$7 = createElement("p"), _el$9 = createElement("button"), _el$10 = createElement("p"), _el$11 = createTextNode(`Right `);
     insertNode(_el$, _el$2);
-    setProp(_el$, "class", "flex justify-center items-center w-full h-full bg-gray-500");
+    setProp(_el$, "class", "relative w-full h-full bg-gray-500");
     insertNode(_el$2, _el$3);
     insertNode(_el$2, _el$5);
     insertNode(_el$2, _el$7);
     insertNode(_el$2, _el$9);
-    insertNode(_el$2, _el$1);
-    setProp(_el$2, "class", "flex flex-col gap-4 items-start justify-start bg-red-500 border border-red-500 w-60 h-60 p-3 rounded-md");
+    insertNode(_el$2, _el$10);
+    setProp(_el$2, "class", "absolute bottom-0 right-0 flex flex-col items-start justify-start gap-3 bg-red-500 border border-red-500 w-64 h-64 p-3 rounded-md");
     insertNode(_el$3, createTextNode(`Centered Text`));
     setProp(_el$3, "class", "bg-blue-400 text-gray-100 rounded-sm px-2 py-1 text-center");
-    insertNode(_el$5, createTextNode(`50% Opacity`));
-    setProp(_el$5, "class", "bg-green-500 text-white rounded-sm px-2 py-1 opacity-50");
-    insertNode(_el$7, createTextNode(`This is hidden!`));
-    setProp(_el$7, "class", "bg-yellow-500 hidden");
-    insertNode(_el$9, createTextNode(`Full Width Button`));
+    insertNode(_el$5, createTextNode(`Does render on the UI`));
+    setProp(_el$5, "class", "bg-green-500 text-white");
+    insertNode(_el$7, createTextNode(`Doesnt render on the UI`));
+    setProp(_el$7, "class", "text-white");
     setProp(_el$9, "class", "bg-blue-400 text-gray-100 px-4 py-2 rounded");
     setProp(_el$9, "onClick", (payload) => {
       const view = new DataView(payload.buffer);
       const nodeId = view.getUint32(0, true);
       console.log("[event demo] click payload nodeId=", nodeId);
+      setCount((prev) => prev + 1);
     });
-    insertNode(_el$1, createTextNode(`Right Aligned`));
-    setProp(_el$1, "class", "bg-purple-500 text-white rounded-sm px-2 py-1 text-right");
+    insert(_el$9, count);
+    insert(_el$2, createComponent2(Show, {
+      get when() {
+        return memo2(() => count() > 0)() && count() < 10;
+      },
+      get children() {
+        var _el$0 = createElement("p"), _el$1 = createTextNode(`Right `);
+        insertNode(_el$0, _el$1);
+        setProp(_el$0, "class", "bg-purple-500 text-white rounded-sm");
+        insert(_el$0, count, null);
+        return _el$0;
+      }
+    }), _el$10);
+    insert(_el$2, (() => {
+      var _c$ = memo2(() => !!(count() > 0 && count() < 10));
+      return () => _c$() && (() => {
+        var _el$12 = createElement("p"), _el$13 = createTextNode(`Right `);
+        insertNode(_el$12, _el$13);
+        setProp(_el$12, "class", "bg-purple-500 text-white rounded-sm");
+        insert(_el$12, count, null);
+        return _el$12;
+      })();
+    })(), _el$10);
+    insertNode(_el$10, _el$11);
+    setProp(_el$10, "class", "bg-purple-500 text-white rounded-sm");
+    insert(_el$10, count, null);
     return _el$;
-  })());
+  })();
+};
+
+// solid/solid-entry.tsx
+var createSolidTextApp = (renderer) => {
+  const host2 = createSolidNativeHost(renderer);
+  const [message, setMessage] = createSignal("Solid to Zig text");
+  const dispose = host2.render(App);
   host2.flush();
   return {
     host: host2,
     setMessage,
     dispose: dispose ?? (() => {})
   };
-};
-
-// solid/state/time.ts
-var [elapsedSeconds, setElapsedSeconds] = createSignal(0);
-var [deltaSeconds, setDeltaSeconds] = createSignal(0);
-var setTime = (elapsed, dt) => {
-  setElapsedSeconds(elapsed);
-  setDeltaSeconds(dt);
 };
 
 // index.ts

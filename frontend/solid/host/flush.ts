@@ -21,11 +21,12 @@ const emitNode = (node: HostNode, encoder: CommandEncoder, parentId: number) => 
     const frame = frameFromProps(node.props);
     const flags = hasAbsoluteClass(node.props) ? 1 : 0;
     const resolvedColor = node.props.color ?? bgColorFromClass(node.props);
+    const packedBackground = resolvedColor == null ? 0x00000000 : packColor(resolvedColor);
 
     if (node.tag === "text") {
       encoder.pushText(node.id, parentId, frame, node.props.text ?? "", packColor(node.props.color), flags);
     } else {
-      encoder.pushQuad(node.id, parentId, frame, packColor(resolvedColor), flags);
+      encoder.pushQuad(node.id, parentId, frame, packedBackground, flags);
     }
 
     downstreamParent = node.id;
@@ -81,7 +82,6 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
   let seq = 0;
   let syncedOnce = false;
   let needFullSync = false;
-  let framesSinceSnapshot = 0;
 
   const snapshotEveryFlush = mutationMode === "snapshot_every_flush";
   const snapshotOnceThenMutations = mutationMode === "snapshot_once";
@@ -89,7 +89,6 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
 
   const flush = () => {
     flushPending = false;
-    framesSinceSnapshot += 1;
 
     const nodes: SerializedNode[] = serializeTree(root.children);
 
@@ -130,9 +129,8 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       }
     }
 
-    const periodicResync = snapshotOnceThenMutations && framesSinceSnapshot >= 300;
     const shouldSnapshot =
-      !syncedOnce || snapshotEveryFlush || needFullSync || periodicResync || (!mutationsSupported && native.setSolidTree != null);
+      !syncedOnce || snapshotEveryFlush || needFullSync || (!mutationsSupported && native.setSolidTree != null);
     let sentSnapshot = false;
 
     if (native.setSolidTree && shouldSnapshot) {
@@ -143,7 +141,6 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       syncedOnce = true;
       needFullSync = false;
       ops.length = 0;
-      framesSinceSnapshot = 0;
       sentSnapshot = true;
 
       for (const node of nodeIndex.values()) {

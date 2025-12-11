@@ -81,9 +81,7 @@ export const createSolidHost = (native: RendererAdapter) => {
     return node;
   };
 
-  registerRuntimeBridge(flushController.scheduleFlush, registerNode);
-
-  const renderer = createRenderer<HostNode>({
+  const runtimeOps = {
     createElement(tagName: string) {
       return registerNode(new HostNode(tagName));
     },
@@ -92,13 +90,10 @@ export const createSolidHost = (native: RendererAdapter) => {
       node.props.text = typeof value === "number" ? `${value}` : value;
       return node;
     },
-    createFragment() {
+    createSlotNode() {
       return registerNode(new HostNode("slot"));
     },
-    isTextNode(node) {
-      return node.tag === "text";
-    },
-    replaceText(node, value: string) {
+    replaceText(node: HostNode, value: string) {
       if (node.tag !== "text") return;
       node.props.text = value;
       if (node.created) {
@@ -106,20 +101,21 @@ export const createSolidHost = (native: RendererAdapter) => {
       }
       flushController.scheduleFlush();
     },
-    insertNode(parent, node, anchor) {
+    insertNode(parent: HostNode, node: HostNode, anchor?: HostNode) {
       const targetIndex = anchor ? parent.children.indexOf(anchor) : parent.children.length;
       parent.add(node, targetIndex === -1 ? parent.children.length : targetIndex);
       enqueueCreateOrMove(parent, node, anchor);
       flushController.scheduleFlush();
+      return node;
     },
-    removeNode(parent, node) {
+    removeNode(parent: HostNode, node: HostNode) {
       parent.remove(node);
       removeFromIndex(node, nodeIndex);
       node.created = false;
       push({ op: "remove", id: node.id });
       flushController.scheduleFlush();
     },
-    setProperty(node, name, value, prev) {
+    setProperty(node: HostNode, name: string, value: unknown, prev?: unknown) {
       let eventName: string | null = null;
       if (name.startsWith("on:")) {
         eventName = name.slice(3);
@@ -151,6 +147,19 @@ export const createSolidHost = (native: RendererAdapter) => {
       }
       flushController.scheduleFlush();
     },
+  };
+
+  const renderer = createRenderer<HostNode>({
+    createElement: runtimeOps.createElement,
+    createTextNode: runtimeOps.createTextNode,
+    createFragment: runtimeOps.createSlotNode,
+    isTextNode(node) {
+      return node.tag === "text";
+    },
+    replaceText: runtimeOps.replaceText,
+    insertNode: runtimeOps.insertNode,
+    removeNode: runtimeOps.removeNode,
+    setProperty: runtimeOps.setProperty,
     getParentNode(node) {
       return node.parent;
     },
@@ -164,6 +173,12 @@ export const createSolidHost = (native: RendererAdapter) => {
       return node.parent.children[idx + 1];
     },
   } as any);
+
+  registerRuntimeBridge(flushController.scheduleFlush, registerNode, {
+    ...runtimeOps,
+    insert: renderer.insert,
+    spread: renderer.spread,
+  });
 
   native.onEvent((name, payload) => {
     if (payload.byteLength < 4) return;

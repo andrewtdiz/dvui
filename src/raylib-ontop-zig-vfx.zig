@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const ray = @import("raylib");
 const wgpu = @import("wgpu");
 
-const alloc = @import("alloc.zig");
+const alloc = @import("utils/alloc.zig");
 const swap_chain = @import("pipeline/swap_chain.zig");
 const geometry = @import("pipeline/geometry.zig");
 const uniforms = @import("pipeline/uniforms.zig");

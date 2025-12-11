@@ -6,17 +6,58 @@
  * calls these functions instead of DOM-specific ones.
  */
 
-import { createEffect } from "solid-js";
+import { createEffect, createMemo, untrack } from "solid-js";
 import { HostNode, type EventHandler } from "../host/node";
-import { notifyRuntimePropChange, registerRuntimeNode } from "./bridge";
+import { getRuntimeHostOps, notifyRuntimePropChange, registerRuntimeNode } from "./bridge";
+
+// Solid built-in control-flow components are imported from this runtime module
+// when using babel-preset-solid in universal mode.
+export {
+  For,
+  Show,
+  Switch,
+  Match,
+  Suspense,
+  SuspenseList,
+  Index,
+  ErrorBoundary,
+} from "solid-js";
+
+// Universal runtime helpers expected by babel-plugin-jsx-dom-expressions.
+export const memo = (fn: () => any) => createMemo(() => fn());
+
+export const use = (fn: (el: any, arg: any) => any, el: any, arg: any) => {
+  return untrack(() => fn(el, arg));
+};
+
+// Web-specific built-ins like Portal/Dynamic don't make sense for the native DVUI renderer.
+// Provide minimal fallbacks so JSX compiles; they render inline.
+export const Portal = (props: any) => props.children;
+
+export const Dynamic = (props: any) => {
+  return createMemo(() => {
+    const Comp = props.component;
+    if (!Comp) return null;
+    const { component: _c, ...rest } = props;
+    return typeof Comp === "function" ? Comp(rest) : Comp;
+  });
+};
 
 export const createElement = (tag: string): HostNode => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.createElement) {
+    return hostOps.createElement(tag);
+  }
   const node = new HostNode(tag);
   registerRuntimeNode(node);
   return node;
 };
 
 export const createTextNode = (value: string | number): HostNode => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.createTextNode) {
+    return hostOps.createTextNode(value);
+  }
   const node = new HostNode("text");
   node.props.text = typeof value === "number" ? `${value}` : value;
   registerRuntimeNode(node);
@@ -24,6 +65,10 @@ export const createTextNode = (value: string | number): HostNode => {
 };
 
 export const createSlotNode = (): HostNode => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.createSlotNode) {
+    return hostOps.createSlotNode();
+  }
   const node = new HostNode("slot");
   registerRuntimeNode(node);
   return node;
@@ -34,6 +79,11 @@ export const isTextNode = (node: HostNode): boolean => {
 };
 
 export const replaceText = (node: HostNode, value: string): void => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.replaceText) {
+    hostOps.replaceText(node, value);
+    return;
+  }
   if (node.tag === "text") {
     node.props.text = value;
     notifyRuntimePropChange();
@@ -41,6 +91,11 @@ export const replaceText = (node: HostNode, value: string): void => {
 };
 
 export const insertNode = (parent: HostNode, node: HostNode, anchor?: HostNode): HostNode => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.insertNode) {
+    return hostOps.insertNode(parent, node, anchor);
+  }
+
   if (anchor) {
     const idx = parent.children.indexOf(anchor);
     if (idx >= 0) {
@@ -56,6 +111,11 @@ export const insertNode = (parent: HostNode, node: HostNode, anchor?: HostNode):
 };
 
 export const removeNode = (parent: HostNode, node: HostNode): void => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.removeNode) {
+    hostOps.removeNode(parent, node);
+    return;
+  }
   parent.remove(node);
   notifyRuntimePropChange();
 };
@@ -73,6 +133,12 @@ export const getNextSibling = (node: HostNode): HostNode | undefined => {
 };
 
 export const setProperty = (node: HostNode, name: string, value: any, prev?: any): void => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.setProperty) {
+    hostOps.setProperty(node, name, value, prev);
+    return;
+  }
+
   if (name.startsWith("on:")) {
     const eventName = name.slice(3);
     if (prev) node.off(eventName, prev as EventHandler);
@@ -119,14 +185,13 @@ const appendContent = (parent: HostNode, value: any): boolean => {
   if (value == null || value === true || value === false) return false;
 
   if (typeof value === "string" || typeof value === "number") {
-    const textNode = new HostNode("text");
-    textNode.props.text = String(value);
-    parent.add(textNode);
+    const textNode = createTextNode(String(value));
+    insertNode(parent, textNode);
     return true;
   }
 
   if (value instanceof HostNode) {
-    parent.add(value);
+    insertNode(parent, value);
     return true;
   }
 
@@ -134,10 +199,10 @@ const appendContent = (parent: HostNode, value: any): boolean => {
 };
 
 const clearChildren = (node: HostNode) => {
-  for (const child of node.children) {
-    child.parent = undefined;
+  const existing = [...node.children];
+  for (const child of existing) {
+    removeNode(node, child);
   }
-  node.children.length = 0;
 };
 
 const applyInsertValue = (parent: HostNode, value: any) => {
@@ -156,6 +221,12 @@ const applyInsertValue = (parent: HostNode, value: any) => {
 };
 
 export const insert = (parent: HostNode, value: any, anchor?: HostNode) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.insert) {
+    hostOps.insert(parent, value, anchor ?? null);
+    return;
+  }
+
   if (anchor) {
     const wrapper = new HostNode("slot");
     applyInsertValue(wrapper, value);
@@ -177,6 +248,11 @@ export const effect = (fn: (prev?: any) => any, initial?: any) => {
 };
 
 export const spread = (node: HostNode, props: any) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.spread) {
+    hostOps.spread(node, props);
+    return node;
+  }
   if (!props) return node;
   for (const [k, v] of Object.entries(props)) {
     setProperty(node, k, v);
@@ -248,18 +324,18 @@ const tokenize = (source: string): Token[] => {
 };
 
 const buildTreeFromTemplate = (source: string): HostNode => {
-  const fragment = new HostNode("slot");
+  const fragment = createSlotNode();
   const stack: HostNode[] = [fragment];
 
   const tokens = tokenize(source);
   for (const tok of tokens) {
     switch (tok.kind) {
       case "open": {
-        const node = new HostNode(tok.tag);
+        const node = createElement(tok.tag);
         for (const [k, v] of Object.entries(tok.attrs)) {
-          node.props[k] = v;
+          setProperty(node, k, v);
         }
-        stack[stack.length - 1].add(node);
+        insertNode(stack[stack.length - 1], node);
         if (!tok.selfClosing) {
           stack.push(node);
         }
@@ -273,9 +349,8 @@ const buildTreeFromTemplate = (source: string): HostNode => {
         break;
       }
       case "text": {
-        const textNode = new HostNode("text");
-        textNode.props.text = tok.value;
-        stack[stack.length - 1].add(textNode);
+        const textNode = createTextNode(tok.value);
+        insertNode(stack[stack.length - 1], textNode);
         break;
       }
     }

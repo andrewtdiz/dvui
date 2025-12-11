@@ -158,7 +158,7 @@ pub const Node = struct {
         return cdef.YGNodeLayoutGetWidth(self.handle);
     }
     pub fn getComputedHeight(self: Node) f32 {
-        return cdef.YGNodeLayoutGetWidth(self.handle);
+        return cdef.YGNodeLayoutGetHeight(self.handle);
     }
     pub fn getComputedLeft(self: Node) f32 {
         return cdef.YGNodeLayoutGetLeft(self.handle);

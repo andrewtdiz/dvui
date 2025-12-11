@@ -67,7 +67,7 @@ pub fn build(b: *Build) !void {
     root_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
 
     const native_module = b.createModule(.{
-        .root_source_file = b.path("src/native_renderer/mod.zig"),
+        .root_source_file = b.path("src/integrations/native_renderer/mod.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -77,14 +77,14 @@ pub fn build(b: *Build) !void {
 
     // Create and add solid and jsruntime modules for native_renderer submodules
     const solid_mod = b.createModule(.{
-        .root_source_file = b.path("src/solid/mod.zig"),
+        .root_source_file = b.path("src/integrations/solid/mod.zig"),
         .target = target,
         .optimize = optimize,
     });
     solid_mod.addImport("dvui", dvui_mod);
 
     const jsruntime_mod = b.createModule(.{
-        .root_source_file = b.path("src/jsruntime/mod.zig"),
+        .root_source_file = b.path("src/integrations/jsruntime/mod.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -95,7 +95,7 @@ pub fn build(b: *Build) !void {
     jsruntime_mod.addImport("solid", solid_mod);
     // Add alloc module for jsruntime
     const alloc_mod = b.createModule(.{
-        .root_source_file = b.path("src/alloc.zig"),
+        .root_source_file = b.path("src/integrations/jsruntime/alloc.zig"),
         .target = target,
         .optimize = optimize,
     });
