@@ -531,7 +531,15 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
 
     // Mutations path (after initial snapshot unless forced otherwise).
     if (mutationsSupported && native.applyOps && ops.length > 0 && !needFullSync && (syncedOnce || mutationsOnlyAfterSnapshot)) {
-      const payload = treeEncoder.encode(JSON.stringify({ seq: ++seq, ops }));
+      const payloadObj = { seq: ++seq, ops };
+      // Debug: print the first create op classes to confirm bundle in use.
+      if (ops.length > 0) {
+        const firstCreate = ops.find((o) => o.op === "create");
+        if (firstCreate) {
+          console.log("[solid-host debug] first create op className=", firstCreate.className);
+        }
+      }
+      const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       const ok = native.applyOps(payload);
       ops.length = 0;
       if (!ok) {
@@ -549,7 +557,13 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
       (!mutationsSupported && native.setSolidTree != null);
 
     if (native.setSolidTree && shouldSnapshot) {
-      const payload = treeEncoder.encode(JSON.stringify({ nodes }));
+      const payloadObj = { nodes };
+      // Debug: log root child class on snapshot
+      const firstNode = nodes.find((n) => n.id !== 0);
+      if (firstNode?.className) {
+        console.log("[solid-host debug] snapshot first node className=", firstNode.className);
+      }
+      const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       native.setSolidTree(payload);
       markCreated(root);
       syncedOnce = true;

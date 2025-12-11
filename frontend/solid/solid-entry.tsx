@@ -22,9 +22,9 @@ export const createSolidTextApp = (renderer: RendererAdapter): SolidTextApp => {
   const textSegmentWidth = (flexBox.size - textRowPad * 2) / 3;
 
   const dispose = host.render(() => (
-    <div class="flex justify-center items-center w-full h-full bg-gray-700">
-      <div class="flex items-center justify-start bg-gray-600 w-60 h-60">
-        <p class="bg-blue-500">Left anchor</p>
+    <div class="flex justify-center items-center w-full h-full bg-gray-500">
+      <div class="flex items-center justify-start bg-red-500 border border-red-500 w-60 h-60 p-1 rounded-md">
+        <p class="bg-blue-400 text-gray-100 rounded-sm">Left anchor</p>
       </div>
     </div>
   ));

@@ -29,7 +29,7 @@ const eventKindToName: Record<number, string> = Object.fromEntries(
 );
 
 /** Size of EventEntry struct in bytes (packed) */
-const EVENT_ENTRY_SIZE = 12; // u8 + u8 + u32 + u32 + u16
+const EVENT_ENTRY_SIZE = 16; // u8 + u8 + padding + u32 + u32 + u16 + pad
 
 /** Header struct layout */
 export interface EventRingHeader {
@@ -79,10 +79,9 @@ export function pollEvents(
     
     // Read packed EventEntry
     const kind = bufferView.getUint8(offset) as EventKindValue;
-    // skip pad byte at offset + 1
-    const nodeId = bufferView.getUint32(offset + 2, true);
-    const detailOffset = bufferView.getUint32(offset + 6, true);
-    const detailLen = bufferView.getUint16(offset + 10, true);
+    const nodeId = bufferView.getUint32(offset + 4, true);
+    const detailOffset = bufferView.getUint32(offset + 8, true);
+    const detailLen = bufferView.getUint16(offset + 12, true);
     
     const node = nodeIndex.get(nodeId);
     if (node) {

@@ -70,6 +70,10 @@ pub fn renderCachedOrDirectBackground(
     fallback_bg: ?dvui.Color,
 ) void {
     if (renderPaintCache(node)) return;
+
+    // Skip if no background available and no fallback; log for visibility.
+    if (node.visual.background == null and fallback_bg == null) return;
+
     draw.drawRectDirect(rect, node.visual, node.transform, allocator, fallback_bg);
 }
 
@@ -109,6 +113,16 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const rect = node.layout.rect;
 
+    // Ensure a background is available even if visual.background was not set before caching.
+    var visual = node.visual;
+    if (visual.background == null) {
+        const spec = node.prepareClassSpec();
+        if (spec.background) |bg| {
+            visual.background = draw.dvuiColorToPacked(bg);
+            node.visual.background = visual.background;
+        }
+    }
+
     if (!shouldCachePaint(node) or rect == null) {
         const bounds = if (rect) |r| draw.transformedRect(node, r) orelse r else null;
         node.paint.painted_rect = bounds;
@@ -119,7 +133,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
         return;
     }
 
-    const geom = buildRectGeometry(rect.?, node.visual, node.transform, allocator) catch {
+    const geom = buildRectGeometry(rect.?, visual, node.transform, allocator) catch {
         const bounds = draw.transformedRect(node, rect.?) orelse rect.?;
         node.paint.painted_rect = bounds;
         tracker.add(bounds);

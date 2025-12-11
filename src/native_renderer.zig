@@ -47,7 +47,8 @@ const Renderer = struct {
     solid_store_ptr: ?*anyopaque = null,
     solid_seq_last: u64 = 0,
     frame_count: u64 = 0,
-    runtime_ptr: ?*anyopaque = null,
+    // Safe Runtime Handle
+    runtime: RuntimeHandle = .{},
     // Event ring buffer for Zig→JS event dispatch (Phase 2)
     event_ring_ptr: ?*anyopaque = null,
     event_ring_ready: bool = false,
@@ -60,10 +61,6 @@ fn asOpaquePtr(comptime T: type, raw: ?*anyopaque) ?*T {
     return null;
 }
 
-fn runtime(renderer: *Renderer) ?*jsruntime.JSRuntime {
-    return asOpaquePtr(jsruntime.JSRuntime, renderer.runtime_ptr);
-}
-
 fn solidStore(renderer: *Renderer) ?*solid.NodeStore {
     return asOpaquePtr(solid.NodeStore, renderer.solid_store_ptr);
 }
@@ -71,6 +68,35 @@ fn solidStore(renderer: *Renderer) ?*solid.NodeStore {
 fn eventRing(renderer: *Renderer) ?*solid.EventRing {
     return asOpaquePtr(solid.EventRing, renderer.event_ring_ptr);
 }
+
+// Make a safe handle for the FFI boundary.
+// FFI fails to bind if not done this way.
+const RuntimeHandle = struct {
+    raw: ?*anyopaque = null,
+
+    fn get(self: *const RuntimeHandle) ?*jsruntime.JSRuntime {
+        if (self.raw) |ptr| {
+            return @ptrCast(@alignCast(ptr));
+        }
+        return null;
+    }
+
+    fn set(self: *RuntimeHandle, ptr: *jsruntime.JSRuntime) void {
+        self.raw = ptr;
+    }
+
+    fn clear(self: *RuntimeHandle) void {
+        self.raw = null;
+    }
+
+    fn deinit(self: *RuntimeHandle, allocator: std.mem.Allocator) void {
+        if (self.get()) |rt| {
+            rt.deinit();
+            allocator.destroy(rt);
+        }
+        self.raw = null;
+    }
+};
 
 const flag_absolute: u8 = 1;
 const frame_event_interval: u64 = 6; // ~10fps when running at 60fps
@@ -394,6 +420,9 @@ fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
         if (op.className) |cls| {
             try store.setClassName(op.id, cls);
         }
+        // Apply inline transform/visual props carried with create, so nodes are born with correct style.
+        try applyTransformFields(store, op.id, op);
+        try applyVisualFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
         return;
@@ -482,6 +511,7 @@ fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
         .ignore_unknown_fields = true,
     }) catch |err| {
         logMessage(renderer, 3, "solid ops parse failed: {s}", .{@errorName(err)});
+        renderer.solid_store_ready = false;
         return false;
     };
     defer parsed.deinit();
@@ -502,6 +532,7 @@ fn applySolidOps(renderer: *Renderer, json_bytes: []const u8) bool {
                 op.parent,
                 op.before,
             });
+            renderer.solid_store_ready = false;
             return false;
         };
     }
@@ -853,6 +884,7 @@ fn renderFrame(renderer: *Renderer) void {
     ray.beginDrawing();
     defer ray.endDrawing();
 
+    // Clear to neutral black; Solid will draw its own backgrounds.
     ray.clearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
     if (renderer.window) |*win| {
@@ -879,7 +911,7 @@ fn renderFrame(renderer: *Renderer) void {
 
         const frame_start = std.time.nanoTimestamp();
 
-        const runtime_ptr = runtime(renderer);
+        const runtime_ptr = renderer.runtime.get();
         const store = solidStore(renderer);
         const drew_solid = renderer.solid_store_ready and store != null and solid.render(runtime_ptr, store.?);
         if (!drew_solid) {
@@ -910,11 +942,7 @@ fn deinitRenderer(renderer: *Renderer) void {
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
-    if (runtime(renderer)) |rt| {
-        rt.deinit();
-        renderer.allocator.destroy(rt);
-        renderer.runtime_ptr = null;
-    }
+    renderer.runtime.deinit(renderer.allocator);
     if (renderer.solid_store_ready) {
         if (solidStore(renderer)) |store| {
             store.deinit();
@@ -992,7 +1020,7 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
         .frame_count = 0,
         .event_ring_ptr = null,
         .event_ring_ready = false,
-        .runtime_ptr = null,
+        .runtime = .{},
     };
 
     renderer.allocator = renderer.gpa_instance.allocator();
@@ -1004,10 +1032,10 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
-    renderer.runtime_ptr = runtime_instance;
+    renderer.runtime.set(runtime_instance);
     runtime_instance.* = jsruntime.JSRuntime.init("") catch {
+        renderer.runtime.clear();
         renderer.allocator.destroy(runtime_instance);
-        renderer.runtime_ptr = null;
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
@@ -1020,7 +1048,7 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
     const ring_instance = renderer.allocator.create(solid.EventRing) catch {
         runtime_instance.deinit();
         renderer.allocator.destroy(runtime_instance);
-        renderer.runtime_ptr = null;
+        renderer.runtime.clear();
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
@@ -1032,7 +1060,7 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
         renderer.event_ring_ptr = null;
         runtime_instance.deinit();
         renderer.allocator.destroy(runtime_instance);
-        renderer.runtime_ptr = null;
+        renderer.runtime.clear();
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
@@ -1186,16 +1214,16 @@ pub export fn presentRenderer(renderer: ?*Renderer) callconv(.c) void {
 
 // === Event Ring Buffer FFI Exports ===
 
-/// Get event ring header (read_head, write_head, capacity, detail_capacity)
-pub export fn getEventRingHeader(renderer: ?*Renderer) callconv(.c) solid.EventRing.Header {
+/// Get pointer to event ring header (read_head, write_head, capacity, detail_capacity)
+pub export fn getEventRingHeader(renderer: ?*Renderer) callconv(.c) ?*solid.EventRing.Header {
     if (renderer) |ptr| {
         if (ptr.event_ring_ready) {
             if (eventRing(ptr)) |ring| {
-                return ring.getHeader();
+                return ring.snapshotHeader();
             }
         }
     }
-    return .{ .read_head = 0, .write_head = 0, .capacity = 0, .detail_capacity = 0 };
+    return null;
 }
 
 /// Get pointer to event buffer for JS TypedArray view

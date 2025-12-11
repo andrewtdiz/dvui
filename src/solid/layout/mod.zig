@@ -20,10 +20,19 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     const root = store.node(0) orelse return;
 
+    const missing_layout = hasMissingLayout(store, root);
+
     // If screen size changed, invalidate the entire layout tree so descendants recompute.
-    if (last_screen_size.w != screen_w or last_screen_size.h != screen_h) {
+    const size_changed = last_screen_size.w != screen_w or last_screen_size.h != screen_h;
+    if (size_changed) {
         invalidateLayoutSubtree(store, root);
+        store.markNodeChanged(root.id);
         last_screen_size = .{ .w = screen_w, .h = screen_h };
+    }
+
+    // Skip work when nothing is dirty and the screen size is stable.
+    if (!size_changed and !root.hasDirtySubtree() and !missing_layout) {
+        return;
     }
 
     updateLayoutIfDirty(store, root, root_rect);
@@ -127,4 +136,14 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
             }
         }
     }
+}
+
+fn hasMissingLayout(store: *types.NodeStore, node: *types.SolidNode) bool {
+    if (node.layout.rect == null) return true;
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            if (hasMissingLayout(store, child)) return true;
+        }
+    }
+    return false;
 }

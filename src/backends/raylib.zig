@@ -17,6 +17,7 @@ pub const RaylibBackend = @This();
 pub const Context = *RaylibBackend;
 
 const log = std.log.scoped(.RaylibBackend);
+var debug_triangle_count: u32 = 0;
 
 gpa: std.mem.Allocator,
 we_own_window: bool = false,
@@ -214,6 +215,18 @@ pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: [
     //make sure all raylib draw calls are rendered
     //before rendering dvui elements
     c.rlDrawRenderBatchActive();
+
+    // Debug: log a few triangle submissions to verify rendering is invoked.
+    const log_limit: u32 = 8;
+    const should_log = debug_triangle_count < log_limit;
+    if (should_log) {
+        debug_triangle_count += 1;
+        const first = if (vtx.len > 0) vtx[0] else dvui.Vertex{ .pos = .{ .x = 0, .y = 0 }, .col = dvui.Color.PMA.transparent, .uv = .{ .x = 0, .y = 0 } };
+        std.log.info(
+            "raylib draw idx={d} vtx={d} first_pos={any} first_col={any} clip={any}",
+            .{ idx.len, vtx.len, first.pos, first.col, clipr_in },
+        );
+    }
 
     if (clipr_in) |clip_rect| {
         if (self.fb_width == null) {

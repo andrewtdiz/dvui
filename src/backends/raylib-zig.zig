@@ -32,7 +32,7 @@ previous_time: f64 = 0,
 
 const vertexSource =
     \\#version 330
-    \\in vec3 vertexPosition;
+    \\in vec2 vertexPosition;
     \\in vec2 vertexTexCoord;
     \\in vec4 vertexColor;
     \\out vec2 fragTexCoord;
@@ -42,7 +42,7 @@ const vertexSource =
     \\{
     \\    fragTexCoord = vertexTexCoord;
     \\    fragColor = vertexColor / 255.0;
-    \\    gl_Position = mvp*vec4(vertexPosition, 1.0);
+    \\    gl_Position = mvp*vec4(vertexPosition, 0.0, 1.0);
     \\}
 ;
 
@@ -250,6 +250,10 @@ pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: [
 
     _ = raylib.gl.rlEnableVertexArray(self.VAO);
 
+    // Disable culling/depth so 2D UI quads always render.
+    raylib.gl.rlDisableBackfaceCulling();
+    raylib.gl.rlDisableDepthTest();
+
     const VBO = raylib.gl.rlLoadVertexBuffer(vtx.ptr, @intCast(vtx.len * @sizeOf(dvui.Vertex)), false);
     raylib.gl.rlEnableVertexBuffer(VBO);
     const EBO = raylib.gl.rlLoadVertexBufferElement(idx.ptr, @intCast(idx.len * @sizeOf(u16)), false);
@@ -299,6 +303,10 @@ pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: [
     if (clipr_in) |_| {
         raylib.endScissorMode();
     }
+
+    // Restore state
+    raylib.gl.rlEnableDepthTest();
+    raylib.gl.rlEnableBackfaceCulling();
 }
 
 pub fn textureCreate(_: *RaylibBackend, pixels: [*]const u8, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) !dvui.Texture {

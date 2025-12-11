@@ -34,6 +34,7 @@ pub const EventRing = struct {
     detail_write: u32 = 0,
     capacity: u32,
     detail_capacity: u32,
+    header_cache: Header = .{ .read_head = 0, .write_head = 0, .capacity = 0, .detail_capacity = 0 },
 
     const DEFAULT_CAPACITY: u32 = 256;
     const DEFAULT_DETAIL_CAPACITY: u32 = 4096;
@@ -155,6 +156,11 @@ pub const EventRing = struct {
             .capacity = self.capacity,
             .detail_capacity = self.detail_capacity,
         };
+    }
+
+    pub fn snapshotHeader(self: *EventRing) *Header {
+        self.header_cache = self.getHeader();
+        return &self.header_cache;
     }
 
     /// Update read head after JS has consumed events

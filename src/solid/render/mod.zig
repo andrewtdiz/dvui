@@ -13,6 +13,7 @@ const applyVisualToOptions = style_apply.applyVisualToOptions;
 const applyClassSpecToVisual = style_apply.applyClassSpecToVisual;
 const tailwind = @import("../style/tailwind.zig");
 const direct = @import("direct.zig");
+const dvuiColorToPacked = direct.dvuiColorToPacked;
 const applyTransformToOptions = direct.applyTransformToOptions;
 const transformedRect = direct.transformedRect;
 const drawTextDirect = direct.drawTextDirect;
@@ -27,6 +28,44 @@ const log = std.log.scoped(.solid_bridge);
 var gizmo_override_rect: ?types.GizmoRect = null;
 var gizmo_rect_pending: ?types.GizmoRect = null;
 var logged_tree_dump: bool = false;
+var logged_render_state: bool = false;
+
+fn syncVisualsFromClasses(store: *types.NodeStore, node: *types.SolidNode) void {
+    const class_spec = node.prepareClassSpec();
+    const prev_bg = node.visual.background;
+    applyClassSpecToVisual(node, &class_spec);
+    if (node.visual.background == null) {
+        if (class_spec.background) |bg| {
+            node.visual.background = dvuiColorToPacked(bg);
+        }
+    }
+    const bg_changed = blk: {
+        if (node.visual.background) |bg| {
+            if (prev_bg) |prev| break :blk bg.value != prev.value;
+            break :blk true;
+        } else {
+            break :blk prev_bg != null;
+        }
+    };
+    if (bg_changed) {
+        node.invalidatePaint();
+    }
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            syncVisualsFromClasses(store, child);
+        }
+    }
+}
+
+fn hasPaintDirtySubtree(store: *types.NodeStore, node: *types.SolidNode) bool {
+    if (node.paint.paint_dirty) return true;
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            if (hasPaintDirtySubtree(store, child)) return true;
+        }
+    }
+    return false;
+}
 
 pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
     gizmo_override_rect = rect;
@@ -41,11 +80,19 @@ pub fn takeGizmoRectUpdate() ?types.GizmoRect {
 pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
     const root = store.node(0) orelse return false;
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    layout.updateLayouts(store);
+
+    // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
+    syncVisualsFromClasses(store, root);
+
+    // If nothing is dirty, skip layout/paint/caching work.
+    if (!root.hasDirtySubtree() and !hasPaintDirtySubtree(store, root)) {
+        return true;
+    }
+
+    var arena = std.heap.ArenaAllocator.init(store.allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-
-    layout.updateLayouts(store);
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
@@ -57,23 +104,24 @@ pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
         var iter = store.nodes.iterator();
         while (iter.next()) |entry| {
             const node = entry.value_ptr;
-            log.info(
-                "node {d} kind={s} tag={s} class=\"{s}\" text_len={d} children={d} rect={?}",
-                .{
-                    node.id,
-                    switch (node.kind) {
-                        .root => "root",
-                        .element => "elem",
-                        .text => "text",
-                        .slot => "slot",
-                    },
-                    node.tag,
-                    node.class_name,
-                    node.text.len,
-                    node.children.items.len,
-                    node.layout.rect,
+        log.info(
+            "node {d} kind={s} tag={s} class=\"{s}\" text_len={d} children={d} rect={?} bg={?}",
+            .{
+                node.id,
+                switch (node.kind) {
+                    .root => "root",
+                    .element => "elem",
+                    .text => "text",
+                    .slot => "slot",
                 },
-            );
+                node.tag,
+                node.class_name,
+                node.text.len,
+                node.children.items.len,
+                node.layout.rect,
+                node.visual.background,
+            },
+        );
         }
     }
 
@@ -134,6 +182,19 @@ fn renderElement(
 ) void {
     const class_spec = node.prepareClassSpec();
     applyClassSpecToVisual(node, &class_spec);
+    // DVUI path fallback: if class provided a background but visual is still null, copy it.
+    if (node.visual.background == null) {
+        if (class_spec.background) |bg| {
+            node.visual.background = dvuiColorToPacked(bg);
+        }
+    }
+    if (!logged_render_state) {
+        logged_render_state = true;
+        log.info(
+            "render node {d} tag={s} class=\"{s}\" spec_bg={any} visual_bg={any} rect={any}",
+            .{ node.id, node.tag, node.class_name, class_spec.background, node.visual.background, node.layout.rect },
+        );
+    }
 
     if (node.isInteractive()) {
         renderInteractiveElement(runtime, store, node_id, node, allocator, class_spec, tracker);
@@ -234,6 +295,8 @@ fn renderParagraphDirect(
     }
 
     for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        if (child.kind == .text) continue; // already drawn as part of the paragraph
         renderNode(runtime, store, child_id, allocator, tracker);
     }
     node.markRendered();
@@ -262,11 +325,9 @@ fn renderNonInteractiveElement(
     class_spec: tailwind.ClassSpec,
     tracker: *DirtyRegionTracker,
 ) void {
-    if (shouldDirectDraw(node)) {
-        renderNonInteractiveDirect(runtime, store, node_id, node, allocator, class_spec, tracker);
-        return;
-    }
-    renderElementBody(runtime, store, node_id, node, allocator, class_spec, tracker);
+    // Always draw non-interactive elements directly so backgrounds are guaranteed,
+    // then recurse into children. This bypasses DVUI background handling.
+    renderNonInteractiveDirect(runtime, store, node_id, node, allocator, class_spec, tracker);
 }
 
 fn renderContainer(
@@ -277,6 +338,18 @@ fn renderContainer(
     class_spec: tailwind.ClassSpec,
     tracker: *DirtyRegionTracker,
 ) void {
+    // Ensure a background color is present for container nodes.
+    if (class_spec.background) |bg| {
+        if (node.visual.background == null) {
+            node.visual.background = dvuiColorToPacked(bg);
+        }
+    }
+
+    if (node.layout.rect) |rect| {
+        // Draw background ourselves so flex containers still show their fill even when they host interactive children.
+        renderCachedOrDirectBackground(node, rect, allocator, class_spec.background);
+    }
+
     var options = dvui.Options{
         .name = "solid-div",
         .background = false,
@@ -359,7 +432,28 @@ fn renderNonInteractiveDirect(
     class_spec: tailwind.ClassSpec,
     tracker: *DirtyRegionTracker,
 ) void {
-    const rect = node.layout.rect orelse {
+    var rect_opt = node.layout.rect;
+    if (rect_opt == null) {
+        // Compute a fallback layout on-demand using the parent's rect (or screen) so backgrounds still render.
+        const parent_rect = blk: {
+            if (node.parent) |pid| {
+                if (store.node(pid)) |parent| {
+                    if (parent.layout.rect) |pr| break :blk pr;
+                }
+            }
+            const win = dvui.currentWindow();
+            break :blk types.Rect{
+                .x = 0,
+                .y = 0,
+                .w = win.rect_pixels.w,
+                .h = win.rect_pixels.h,
+            };
+        };
+        layout.computeNodeLayout(store, node, parent_rect);
+        rect_opt = node.layout.rect;
+    }
+
+    const rect = rect_opt orelse {
         renderElementBody(runtime, store, node_id, node, allocator, class_spec, tracker);
         return;
     };
@@ -582,9 +676,10 @@ fn renderInput(
         log.err("Solid input buffer sync failed for node {d}: {s}", .{ node_id, @errorName(err) });
         return;
     };
-
-    // UI text entry removed from Zig layer; track length based on buffered state only.
-    state.text_len = state.buffer.len;
+    // Preserve the actual text length; buffer may retain extra capacity for future edits.
+    if (state.text_len > state.buffer.len) {
+        state.text_len = state.buffer.len;
+    }
 }
 
 fn renderChildElements(

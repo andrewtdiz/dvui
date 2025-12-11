@@ -481,6 +481,9 @@ pub const NodeStore = struct {
 
         self.detachFromParent(child);
         child.parent = parent_id;
+        child.invalidateLayout();
+        child.invalidatePaint();
+        self.markNodeChanged(child_id);
         if (child.total_interactive > 0) {
             self.propagateInteractiveDelta(parent_id, @intCast(child.total_interactive));
         }

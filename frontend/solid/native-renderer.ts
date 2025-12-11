@@ -288,7 +288,7 @@ export class NativeRenderer implements RendererAdapter {
     const detailPtr = this.lib.symbols.getEventRingDetail(this.handle);
     if (!bufferPtr) return 0;
     
-    const EVENT_ENTRY_SIZE = 12;
+    const EVENT_ENTRY_SIZE = 16;
     const bufferView = new DataView(toArrayBuffer(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
     const detailBuffer = detailPtr 
       ? new Uint8Array(toArrayBuffer(detailPtr, 0, detailCapacity))
@@ -316,9 +316,9 @@ export class NativeRenderer implements RendererAdapter {
       const offset = idx * EVENT_ENTRY_SIZE;
       
       const kind = bufferView.getUint8(offset);
-      const nodeId = bufferView.getUint32(offset + 2, true);
-      const detailOffset = bufferView.getUint32(offset + 6, true);
-      const detailLen = bufferView.getUint16(offset + 10, true);
+      const nodeId = bufferView.getUint32(offset + 4, true);
+      const detailOffset = bufferView.getUint32(offset + 8, true);
+      const detailLen = bufferView.getUint16(offset + 12, true);
       
       const node = nodeIndex.get(nodeId);
       if (node) {

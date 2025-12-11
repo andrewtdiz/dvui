@@ -344,7 +344,7 @@ class NativeRenderer {
     const detailPtr = this.lib.symbols.getEventRingDetail(this.handle);
     if (!bufferPtr)
       return 0;
-    const EVENT_ENTRY_SIZE = 12;
+    const EVENT_ENTRY_SIZE = 16;
     const bufferView = new DataView(toArrayBuffer2(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
     const detailBuffer = detailPtr ? new Uint8Array(toArrayBuffer2(detailPtr, 0, detailCapacity)) : new Uint8Array(0);
     const decoder = new TextDecoder;
@@ -366,9 +366,9 @@ class NativeRenderer {
       const idx = current % capacity;
       const offset = idx * EVENT_ENTRY_SIZE;
       const kind = bufferView.getUint8(offset);
-      const nodeId = bufferView.getUint32(offset + 2, true);
-      const detailOffset = bufferView.getUint32(offset + 6, true);
-      const detailLen = bufferView.getUint16(offset + 10, true);
+      const nodeId = bufferView.getUint32(offset + 4, true);
+      const detailOffset = bufferView.getUint32(offset + 8, true);
+      const detailLen = bufferView.getUint16(offset + 12, true);
       const node = nodeIndex.get(nodeId);
       if (node) {
         const eventName = eventKindToName[kind] ?? "unknown";
@@ -1790,10 +1790,17 @@ var createSolidNativeHost = (native) => {
       }
     }
     if (mutationsSupported && native.applyOps && ops.length > 0 && !needFullSync && (syncedOnce || mutationsOnlyAfterSnapshot)) {
-      const payload = treeEncoder.encode(JSON.stringify({
+      const payloadObj = {
         seq: ++seq,
         ops
-      }));
+      };
+      if (ops.length > 0) {
+        const firstCreate = ops.find((o) => o.op === "create");
+        if (firstCreate) {
+          console.log("[solid-host debug] first create op className=", firstCreate.className);
+        }
+      }
+      const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       const ok = native.applyOps(payload);
       ops.length = 0;
       if (!ok) {
@@ -1803,9 +1810,14 @@ var createSolidNativeHost = (native) => {
     const periodicResync = snapshotOnceThenMutations && framesSinceSnapshot >= 300;
     const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || periodicResync || !mutationsSupported && native.setSolidTree != null;
     if (native.setSolidTree && shouldSnapshot) {
-      const payload = treeEncoder.encode(JSON.stringify({
+      const payloadObj = {
         nodes
-      }));
+      };
+      const firstNode = nodes.find((n) => n.id !== 0);
+      if (firstNode?.className) {
+        console.log("[solid-host debug] snapshot first node className=", firstNode.className);
+      }
+      const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       native.setSolidTree(payload);
       markCreated(root);
       syncedOnce = true;
@@ -2040,7 +2052,7 @@ var template = (source) => {
 };
 
 // solid/solid-entry.tsx
-var _tmpl$ = /* @__PURE__ */ template(`<div class="flex justify-center items-center w-full h-full bg-gray-700"><div class="flex items-center justify-start bg-gray-600 w-60 h-60"><p class=bg-blue-500>Left anchor`);
+var _tmpl$ = /* @__PURE__ */ template(`<div class="flex justify-center items-center w-full h-full bg-gray-500"><div class="flex items-center justify-start bg-red-500 border border-red-500 w-60 h-60 p-1 rounded-md"><p class="bg-blue-400 text-gray-100 py-3 rounded-sm">Left anchor`);
 var createSolidTextApp = (renderer) => {
   const host = createSolidNativeHost(renderer);
   const [message, setMessage] = createSignal("Solid to Zig text");
@@ -2161,6 +2173,18 @@ var loop = () => {
   setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host.flush();
   renderer.present();
+  if (frame === 0) {
+    const rootChild = host.root.children[0];
+    if (rootChild) {
+      const cls = rootChild.props.className ?? rootChild.props.class;
+      console.log("[frontend debug] root child className=", cls);
+      const nested = rootChild.children[0];
+      if (nested) {
+        const nestedCls = nested.props.className ?? nested.props.class;
+        console.log("[frontend debug] nested className=", nestedCls);
+      }
+    }
+  }
   const nodeIndex = host.getNodeIndex?.() ?? new Map;
   renderer.pollEvents(nodeIndex);
   frame += 1;
