@@ -1,0 +1,25 @@
+# Solid Frontend Structure
+
+- `host/`
+  - `index.ts` – Host renderer wiring; handles create/insert/remove/setProperty + event dispatch.
+  - `flush.ts` – Mutation/snapshot state machine and commit to native encoder.
+  - `node.ts` – HostNode model and listener management.
+  - `props.ts` – Color packing, class parsing, transform/visual extractors.
+  - `mutation-queue.ts` – Mutation op types + queue helpers.
+  - `snapshot.ts` – Tree serialization for full snapshots.
+- `runtime/`
+  - `index.ts` – Solid universal-mode runtime exports (createElement, setProperty, insert, template, etc.).
+  - `bridge.ts` – Bridge for runtime → host (register nodes, schedule flush).
+- `native/`
+  - `adapter.ts` – Native renderer adapter (commit/present/resize/applyOps/onEvent).
+  - `encoder.ts` – CommandEncoder that builds quad/text command buffers.
+  - `command-schema.ts` – Opcode/flag enums and command header sizes.
+  - `ffi.ts` – dlopen, callback wiring, and symbol table for native renderer.
+  - `dvui-core.ts` – FFI bridge to dvui core (raylib/wgpu).
+  - `core-renderer.ts` – RendererAdapter backed by dvui core.
+- `util/`
+  - `frame-scheduler.ts` – Simple frame loop helper (setImmediate/timeout).
+- `state/`
+  - `time.ts` – Shared elapsed/delta time tracking for demos.
+- `solid-entry.tsx` – Demo app wiring onto the host.
+- `index.ts` – Barrel exports for host/runtime/native/util/state.

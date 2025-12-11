@@ -24,6 +24,8 @@ pub const EventEntry = extern struct {
     _pad2: u16 = 0,
 };
 
+const log = std.log.scoped(.event_ring);
+
 /// Ring buffer for events that JS will poll after each frame
 pub const EventRing = struct {
     allocator: std.mem.Allocator,
@@ -69,6 +71,7 @@ pub const EventRing = struct {
     pub fn push(self: *EventRing, kind: EventKind, node_id: u32, detail: ?[]const u8) bool {
         // Check if buffer is full
         if (self.write_head - self.read_head >= self.capacity) {
+            log.warn("EventRing full! kind={d} node={d}", .{ @intFromEnum(kind), node_id });
             return false;
         }
 
@@ -93,6 +96,10 @@ pub const EventRing = struct {
 
         self.buffer[idx] = entry;
         self.write_head += 1;
+
+        // Debug: trace event push to ring buffer
+        log.info("PUSH kind={d} node={d} wh={d} rh={d}", .{ @intFromEnum(kind), node_id, self.write_head, self.read_head });
+
         return true;
     }
 
@@ -158,9 +165,9 @@ pub const EventRing = struct {
         };
     }
 
-    pub fn snapshotHeader(self: *EventRing) *Header {
+    pub fn snapshotHeader(self: *EventRing) Header {
         self.header_cache = self.getHeader();
-        return &self.header_cache;
+        return self.header_cache;
     }
 
     /// Update read head after JS has consumed events

@@ -29,6 +29,7 @@ pub const InputState = struct {
     value_owned: []u8 = &.{},
     value_serial: u64 = 0,
     applied_serial: u64 = 0,
+    focused: bool = false,
 
     fn init(allocator: std.mem.Allocator) InputState {
         return .{ .allocator = allocator };

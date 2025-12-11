@@ -49,6 +49,13 @@ fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void
 }
 
 fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
+    // Skip hidden elements entirely - they should not take up layout space
+    const spec = node.prepareClassSpec();
+    if (spec.hidden) {
+        node.layout.rect = types.Rect{}; // Zero rect
+        return;
+    }
+
     if (!node.needsLayoutUpdate()) {
         const child_rect = node.layout.rect orelse parent_rect;
         for (node.children.items) |child_id| {
@@ -70,6 +77,12 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     const prev_rect = node.layout.rect;
     var rect = parent_rect;
     const spec = node.prepareClassSpec();
+
+    // Skip hidden elements
+    if (spec.hidden) {
+        node.layout.rect = types.Rect{};
+        return;
+    }
 
     const margin_left = sideValue(spec.margin.left);
     const margin_right = sideValue(spec.margin.right);

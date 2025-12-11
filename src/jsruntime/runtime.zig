@@ -1,7 +1,8 @@
 const std = @import("std");
 
-const alloc = @import("../alloc.zig");
-const solid_events = @import("../solid/events/mod.zig");
+const alloc = @import("alloc");
+const solid_events = @import("solid").events;
+
 const console = @import("console.zig");
 const types = @import("types.zig");
 pub const FrameData = types.FrameData;

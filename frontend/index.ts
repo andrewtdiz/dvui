@@ -1,6 +1,6 @@
-import { NativeRenderer } from "./solid/native-renderer";
+import { NativeRenderer } from "./solid";
 import { createSolidTextApp } from "./solid/solid-entry";
-import { createFrameScheduler } from "./solid/frame-scheduler";
+import { createFrameScheduler } from "./solid/util/frame-scheduler";
 import { setTime } from "./solid/state/time";
 
 const screenWidth = 800;

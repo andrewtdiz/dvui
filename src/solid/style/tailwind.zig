@@ -5,6 +5,12 @@ const FontStyle = dvui.Options.FontStyle;
 
 const color_data = @import("colors.zig");
 
+pub const TextAlign = enum {
+    left,
+    center,
+    right,
+};
+
 pub const Spec = struct {
     background: ?dvui.Color = null,
     text: ?dvui.Color = null,
@@ -23,6 +29,10 @@ pub const Spec = struct {
     gap_row: ?f32 = null,
     gap_col: ?f32 = null,
     corner_radius: ?f32 = null,
+    // New easy wins
+    hidden: bool = false,
+    opacity: ?f32 = null,
+    text_align: ?TextAlign = null,
 };
 
 // Compatibility alias for callers expecting ClassSpec.
@@ -97,6 +107,12 @@ const LiteralKind = enum {
     align_content_start,
     align_content_center,
     align_content_end,
+    // Visibility
+    hidden,
+    // Text alignment
+    text_left,
+    text_center,
+    text_right,
 };
 
 const LiteralRule = struct {
@@ -119,6 +135,12 @@ const literal_rules = [_]LiteralRule{
     .{ .token = "content-start", .kind = .align_content_start },
     .{ .token = "content-center", .kind = .align_content_center },
     .{ .token = "content-end", .kind = .align_content_end },
+    // Visibility
+    .{ .token = "hidden", .kind = .hidden },
+    // Text alignment
+    .{ .token = "text-left", .kind = .text_left },
+    .{ .token = "text-center", .kind = .text_center },
+    .{ .token = "text-right", .kind = .text_right },
 };
 
 const RoundedRule = struct {
@@ -182,6 +204,7 @@ pub fn parse(classes: []const u8) Spec {
         if (handleBorder(&spec, token)) continue;
         if (handleRounded(&spec, token)) continue;
         if (handleTypography(&spec, token)) continue;
+        if (handleOpacity(&spec, token)) continue;
         _ = handlePrefixed(&spec, token);
     }
 
@@ -219,6 +242,14 @@ pub fn applyToOptions(spec: *const Spec, options: *dvui.Options) void {
     }
     if (spec.corner_radius) |radius| {
         options.corner_radius = dvui.Rect.all(radius);
+    }
+    // Text alignment via gravity_x
+    if (spec.text_align) |text_alignment| {
+        options.gravity_x = switch (text_alignment) {
+            .left => 0.0,
+            .center => 0.5,
+            .right => 1.0,
+        };
     }
 }
 
@@ -284,7 +315,27 @@ fn applyLiteral(spec: *Spec, kind: LiteralKind) void {
         .align_content_start => spec.align_content = .start,
         .align_content_center => spec.align_content = .center,
         .align_content_end => spec.align_content = .end,
+        // Visibility
+        .hidden => spec.hidden = true,
+        // Text alignment
+        .text_left => spec.text_align = .left,
+        .text_center => spec.text_align = .center,
+        .text_right => spec.text_align = .right,
     }
+}
+
+fn handleOpacity(spec: *Spec, token: []const u8) bool {
+    const prefix = "opacity-";
+    if (!std.mem.startsWith(u8, token, prefix)) return false;
+    const suffix = token[prefix.len..];
+    if (suffix.len == 0) return false;
+
+    // Handle common Tailwind opacity values: 0, 5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 95, 100
+    const int_value = std.fmt.parseInt(u8, suffix, 10) catch return false;
+    if (int_value > 100) return false;
+
+    spec.opacity = @as(f32, @floatFromInt(int_value)) / 100.0;
+    return true;
 }
 
 fn handleBackground(spec: *Spec, suffix: []const u8) void {
@@ -310,6 +361,10 @@ fn handleWidth(spec: *Spec, suffix: []const u8) void {
         spec.width = .full;
         return;
     }
+    if (std.mem.eql(u8, suffix, "screen")) {
+        spec.width = .full; // screen = full viewport width
+        return;
+    }
     if (std.mem.eql(u8, suffix, width_px)) {
         spec.width = .{ .pixels = 1.0 };
         return;
@@ -322,6 +377,10 @@ fn handleWidth(spec: *Spec, suffix: []const u8) void {
 fn handleHeight(spec: *Spec, suffix: []const u8) void {
     if (std.mem.eql(u8, suffix, height_full)) {
         spec.height = .full;
+        return;
+    }
+    if (std.mem.eql(u8, suffix, "screen")) {
+        spec.height = .full; // screen = full viewport height
         return;
     }
     if (std.mem.eql(u8, suffix, height_px)) {

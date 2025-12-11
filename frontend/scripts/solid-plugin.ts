@@ -3,7 +3,7 @@ import ts from "@babel/preset-typescript";
 import solid from "babel-preset-solid";
 import { type BunPlugin } from "bun";
 
-// Transforms TS/TSX with Solid JSX into our custom runtime (solid/runtime.ts).
+// Transforms TS/TSX with Solid JSX into our custom runtime (solid/runtime/index.ts).
 export const solidTransformPlugin: BunPlugin = {
   name: "solid-transform",
   setup(build) {
@@ -15,7 +15,9 @@ export const solidTransformPlugin: BunPlugin = {
           [
             solid,
             {
-              generate: "dom",
+              // Use universal mode for custom renderer
+              // This ensures onClick etc go through setProperty
+              generate: "universal",
               moduleName: "#solid-runtime",
             },
           ],

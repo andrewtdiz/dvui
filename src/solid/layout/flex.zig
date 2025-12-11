@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const tailwind = @import("../style/tailwind.zig");
 const types = @import("../core/types.zig");
+const tailwind = @import("../style/tailwind.zig");
 const measure = @import("measure.zig");
 
 pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area: types.Rect, spec: tailwind.Spec) void {
@@ -20,6 +20,12 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
 
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
+            // Skip hidden children entirely
+            const child_spec = child.prepareClassSpec();
+            if (child_spec.hidden) {
+                child_sizes.append(std.heap.page_allocator, .{}) catch {};
+                continue;
+            }
             const child_size = measure.measureNodeSize(store, child, available_size);
             child_sizes.append(std.heap.page_allocator, child_size) catch {};
             const main = switch (dir) {
@@ -61,11 +67,19 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
         const child_size = if (idx < child_sizes.items.len) child_sizes.items[idx] else types.Size{};
         const child_ptr = store.node(child_id) orelse continue;
 
+        // Skip hidden children - they get zero rect and don't advance cursor
+        const child_spec = child_ptr.prepareClassSpec();
+        if (child_spec.hidden) {
+            child_ptr.layout.rect = types.Rect{};
+            continue;
+        }
+
         var child_rect = types.Rect{};
+        const alignment = spec.align_items orelse .start;
         switch (dir) {
             .horizontal => {
                 child_rect.x = cursor;
-                child_rect.y = switch (spec.align_items orelse .start) {
+                child_rect.y = switch (alignment) {
                     .center => area.y + (area.h - child_size.h) / 2.0,
                     .end => area.y + (area.h - child_size.h),
                     else => area.y,
@@ -75,7 +89,7 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
                 cursor += child_rect.w + gap_main;
             },
             .vertical => {
-                child_rect.x = switch (spec.align_items orelse .start) {
+                child_rect.x = switch (alignment) {
                     .center => area.x + (area.w - child_size.w) / 2.0,
                     .end => area.x + (area.w - child_size.w),
                     else => area.x,

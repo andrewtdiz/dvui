@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "imports": {
-    "#solid-runtime": "./solid/runtime.ts"
+    "#solid-runtime": "./solid/runtime/index.ts"
   },
   "scripts": {
     "build": "bun scripts/build.ts",

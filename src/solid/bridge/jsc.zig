@@ -1,8 +1,10 @@
 const std = @import("std");
 
-// Bun / JavaScriptCore bridge stub replacing the old QuickJS integration.
-const jsruntime = @import("../../jsruntime/mod.zig");
+const jsruntime = @import("jsruntime");
+
 const types = @import("../core/types.zig");
+
+// Bun / JavaScriptCore bridge stub replacing the old QuickJS integration.
 
 pub fn syncOps(_: *jsruntime.JSRuntime, _: *types.NodeStore) !bool {
     return false;

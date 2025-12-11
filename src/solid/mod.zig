@@ -1,4 +1,5 @@
-const jsruntime = @import("../jsruntime/mod.zig");
+const jsruntime = @import("jsruntime");
+
 const bridge = @import("bridge/jsc.zig");
 pub const bridge_jsc = bridge;
 const types = @import("core/types.zig");

@@ -3,7 +3,11 @@ import { dlopen, JSCallback, suffix, toArrayBuffer, type Pointer } from "bun:ffi
 import { join, resolve } from "path";
 
 const defaultLibName =
-  process.platform === "win32" ? `native_renderer.${suffix}` : process.platform === "darwin" ? `libnative_renderer.${suffix}` : `libnative_renderer.${suffix}`;
+  process.platform === "win32"
+    ? `native_renderer.${suffix}`
+    : process.platform === "darwin"
+    ? `libnative_renderer.${suffix}`
+    : `libnative_renderer.${suffix}`;
 
 const frontendRoot = resolve(import.meta.dir, "..");
 const repoRoot = resolve(import.meta.dir, "../..");
@@ -18,11 +22,13 @@ for (const root of roots) {
   candidateLibs.push(
     ...fallbackNames.map((name) => join(binDir, name)),
     ...fallbackNames.map((name) => join(libDir, name)),
-    join(process.platform === "win32" ? binDir : libDir, defaultLibName),
+    join(process.platform === "win32" ? binDir : libDir, defaultLibName)
   );
 }
 
-const defaultLibPath = candidateLibs.find((p) => existsSync(p)) ?? join(repoRoot, "zig-out", process.platform === "win32" ? "bin" : "lib", defaultLibName);
+const defaultLibPath =
+  candidateLibs.find((p) => existsSync(p)) ??
+  join(repoRoot, "zig-out", process.platform === "win32" ? "bin" : "lib", defaultLibName);
 
 const binDirs = Array.from(new Set(roots.map((root) => join(root, "zig-out", "bin"))));
 
@@ -59,18 +65,17 @@ const nativeSymbols = {
     args: ["ptr", "ptr", "usize"],
     returns: "bool",
   },
-  // Event ring buffer FFI (Phase 2)
   getEventRingHeader: {
-    args: ["ptr"],
-    returns: "ptr",  // Returns pointer to Header struct (16 bytes)
+    args: ["ptr", "ptr", "usize"],
+    returns: "usize",
   },
   getEventRingBuffer: {
     args: ["ptr"],
-    returns: "ptr",  // Returns pointer to event entries
+    returns: "ptr",
   },
   getEventRingDetail: {
     args: ["ptr"],
-    returns: "ptr",  // Returns pointer to detail string buffer
+    returns: "ptr",
   },
   acknowledgeEvents: {
     args: ["ptr", "u32"],
@@ -122,7 +127,7 @@ export const createCallbackBundle = (callbacks: NativeCallbacks = {}): CallbackB
     {
       args: ["u8", "ptr", "usize"],
       returns: "void",
-    },
+    }
   );
 
   const eventCallback = new JSCallback(
@@ -146,7 +151,7 @@ export const createCallbackBundle = (callbacks: NativeCallbacks = {}): CallbackB
     {
       args: ["ptr", "usize", "ptr", "usize"],
       returns: "void",
-    },
+    }
   );
 
   return {

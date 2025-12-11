@@ -1,7 +1,9 @@
 const std = @import("std");
+
 const dvui = @import("dvui");
-const tailwind = @import("tailwind.zig");
+
 const types = @import("../core/types.zig");
+const tailwind = @import("tailwind.zig");
 
 pub fn dvuiColorToPacked(color: dvui.Color) types.PackedColor {
     const value: u32 = (@as(u32, color.r) << 24) | (@as(u32, color.g) << 16) | (@as(u32, color.b) << 8) | @as(u32, color.a);
@@ -28,6 +30,10 @@ pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec
     }
     if (spec.corner_radius) |radius| {
         node.visual.corner_radius = radius;
+    }
+    // Apply opacity from Tailwind class (opacity-50, etc.)
+    if (spec.opacity) |opacity| {
+        node.visual.opacity = opacity;
     }
 }
 

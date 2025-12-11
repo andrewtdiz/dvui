@@ -1,9 +1,9 @@
 const std = @import("std");
 
 const dvui = @import("dvui");
+const image_loader = @import("jsruntime").image_loader;
+const jsruntime = @import("jsruntime");
 
-const image_loader = @import("../../jsruntime/image_loader.zig");
-const jsruntime = @import("../../jsruntime/mod.zig");
 const jsc_bridge = @import("../bridge/jsc.zig");
 const types = @import("../core/types.zig");
 const events = @import("../events/mod.zig");
@@ -29,9 +29,16 @@ var gizmo_override_rect: ?types.GizmoRect = null;
 var gizmo_rect_pending: ?types.GizmoRect = null;
 var logged_tree_dump: bool = false;
 var logged_render_state: bool = false;
+var logged_button_render: bool = false;
 
 fn syncVisualsFromClasses(store: *types.NodeStore, node: *types.SolidNode) void {
     const class_spec = node.prepareClassSpec();
+
+    // Skip hidden nodes entirely
+    if (class_spec.hidden) {
+        return;
+    }
+
     const prev_bg = node.visual.background;
     applyClassSpecToVisual(node, &class_spec);
     if (node.visual.background == null) {
@@ -104,24 +111,24 @@ pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
         var iter = store.nodes.iterator();
         while (iter.next()) |entry| {
             const node = entry.value_ptr;
-        log.info(
-            "node {d} kind={s} tag={s} class=\"{s}\" text_len={d} children={d} rect={?} bg={?}",
-            .{
-                node.id,
-                switch (node.kind) {
-                    .root => "root",
-                    .element => "elem",
-                    .text => "text",
-                    .slot => "slot",
+            log.info(
+                "node {d} kind={s} tag={s} class=\"{s}\" text_len={d} children={d} rect={?} bg={?}",
+                .{
+                    node.id,
+                    switch (node.kind) {
+                        .root => "root",
+                        .element => "elem",
+                        .text => "text",
+                        .slot => "slot",
+                    },
+                    node.tag,
+                    node.class_name,
+                    node.text.len,
+                    node.children.items.len,
+                    node.layout.rect,
+                    node.visual.background,
                 },
-                node.tag,
-                node.class_name,
-                node.text.len,
-                node.children.items.len,
-                node.layout.rect,
-                node.visual.background,
-            },
-        );
+            );
         }
     }
 
@@ -181,6 +188,13 @@ fn renderElement(
     tracker: *DirtyRegionTracker,
 ) void {
     const class_spec = node.prepareClassSpec();
+
+    // Skip rendering if element has 'hidden' class
+    if (class_spec.hidden) {
+        node.markRendered();
+        return;
+    }
+
     applyClassSpecToVisual(node, &class_spec);
     // DVUI path fallback: if class provided a background but visual is still null, copy it.
     if (node.visual.background == null) {
@@ -590,6 +604,13 @@ fn renderButton(
     const text = buildText(store, node, allocator);
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
     const caption = if (trimmed.len == 0) "Button" else trimmed;
+    if (!logged_button_render) {
+        logged_button_render = true;
+        log.info(
+            "renderButton node={d} caption_len={d} caption=\"{s}\" rect={any} class=\"{s}\"",
+            .{ node_id, caption.len, caption, node.layout.rect, node.class_name },
+        );
+    }
 
     var options = dvui.Options{
         .id_extra = nodeIdExtra(node_id),
@@ -599,16 +620,50 @@ fn renderButton(
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
 
-    const pressed = dvui.button(@src(), caption, .{}, options);
-    if (pressed and node.hasListener("click")) {
-        if (runtime) |rt| {
-            // Use event ring buffer if available, otherwise fall back to callback
-            if (rt.event_ring) |ring| {
-                _ = ring.pushClick(node_id);
+    // Use ButtonWidget directly instead of dvui.button() to ensure unique widget IDs.
+    // The issue with dvui.button(@src(), ...) is that @src() returns the same source location
+    // for every button rendered through this function, causing all buttons to share the same
+    // DVUI widget ID. This breaks click detection and event dispatch.
+    // By using ButtonWidget directly with id_extra set to a hash of node_id, each button
+    // gets a unique ID even though they all originate from the same source location.
+    var bw = dvui.ButtonWidget.init(@src(), .{}, options);
+    bw.install();
+    bw.processEvents();
+    bw.drawBackground();
+
+    // Draw caption with a different id_extra to avoid label ID collision
+    const label_id_extra = nodeIdExtra(node_id) +% 0x12345678;
+    dvui.labelNoFmt(
+        @src(),
+        caption,
+        .{ .align_x = 0.5, .align_y = 0.5 },
+        options.strip().override(bw.style()).override(.{
+            .gravity_x = 0.5,
+            .gravity_y = 0.5,
+            .id_extra = label_id_extra,
+        }),
+    );
+
+    bw.drawFocus();
+    const pressed = bw.clicked();
+    bw.deinit();
+
+    if (pressed) {
+        log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListener("click") });
+        if (node.hasListener("click")) {
+            if (runtime) |rt| {
+                // Use event ring buffer if available, otherwise fall back to callback
+                if (rt.event_ring) |ring| {
+                    const ok = ring.pushClick(node_id);
+                    log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
+                } else {
+                    jsc_bridge.dispatchEvent(rt, node_id, "click", null) catch |err| {
+                        log.err("Solid click dispatch failed: {s}", .{@errorName(err)});
+                    };
+                    log.info("button dispatched via callback node={d}", .{node_id});
+                }
             } else {
-                jsc_bridge.dispatchEvent(rt, node_id, "click", null) catch |err| {
-                    log.err("Solid click dispatch failed: {s}", .{@errorName(err)});
-                };
+                log.info("button pressed but runtime missing node={d}", .{node_id});
             }
         }
     }
@@ -657,11 +712,10 @@ fn renderInput(
     node: *types.SolidNode,
     class_spec: tailwind.Spec,
 ) void {
-    _ = runtime;
     var options = dvui.Options{
         .name = "solid-input",
         .id_extra = nodeIdExtra(node_id),
-        .background = false,
+        .background = true,
     };
     style_apply.applyToOptions(&class_spec, &options);
     applyVisualToOptions(node, &options);
@@ -679,6 +733,123 @@ fn renderInput(
     // Preserve the actual text length; buffer may retain extra capacity for future edits.
     if (state.text_len > state.buffer.len) {
         state.text_len = state.buffer.len;
+    }
+    if (state.buffer.len > state.text_len) {
+        state.buffer[state.text_len] = 0;
+    }
+
+    var box = dvui.BoxWidget.init(@src(), .{}, options);
+    box.install();
+    defer box.deinit();
+
+    const wd = box.data();
+    dvui.tabIndexSet(wd.id, wd.options.tab_index);
+
+    var hovered = false;
+    _ = dvui.clickedEx(wd, .{ .hovered = &hovered, .hover_cursor = .ibeam });
+
+    const prev_focused = state.focused;
+    const focused_now = dvui.focusedWidgetId() == wd.id;
+    state.focused = focused_now;
+
+    if (focused_now) {
+        const rs = wd.contentRectScale();
+        const natural = rs.rectFromPhysical(rs.r);
+        dvui.wantTextInput(natural);
+    }
+
+    var text_changed = false;
+
+    for (dvui.events()) |*e| {
+        if (!dvui.eventMatch(e, .{ .id = wd.id, .r = wd.borderRectScale().r })) continue;
+
+        switch (e.evt) {
+            .text => |te| {
+                if (te.txt.len == 0) break;
+                const new_len = state.text_len + te.txt.len;
+                state.ensureCapacity(new_len + 1) catch |err| {
+                    log.err("Solid input ensureCapacity failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                    break;
+                };
+                @memcpy(state.buffer[state.text_len .. state.text_len + te.txt.len], te.txt);
+                if (state.buffer.len > new_len) {
+                    state.buffer[new_len] = 0;
+                }
+                state.text_len = new_len;
+                state.updateFromText(state.buffer[0..new_len]) catch |err| {
+                    log.err("Solid input update failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                    break;
+                };
+                store.markNodeChanged(node_id);
+                text_changed = true;
+                e.handle(@src(), wd);
+            },
+            .key => |ke| {
+                if (ke.action != .down and ke.action != .repeat) break;
+                switch (ke.code) {
+                    .backspace => {
+                        if (state.text_len == 0) break;
+                        const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len);
+                        if (state.buffer.len > new_len) {
+                            state.buffer[new_len] = 0;
+                        }
+                        state.text_len = new_len;
+                        state.updateFromText(state.buffer[0..new_len]) catch |err| {
+                            log.err("Solid input backspace update failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                            break;
+                        };
+                        store.markNodeChanged(node_id);
+                        text_changed = true;
+                        e.handle(@src(), wd);
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+
+    box.drawBackground();
+    const rs = wd.contentRectScale();
+    const text_rect_nat = rs.rectFromPhysical(rs.r);
+    const text_rect = types.Rect{
+        .x = text_rect_nat.x,
+        .y = text_rect_nat.y,
+        .w = text_rect_nat.w,
+        .h = text_rect_nat.h,
+    };
+    const text_slice = state.currentText();
+    direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
+
+    if (runtime) |rt| {
+        if (!prev_focused and focused_now and node.hasListener("focus")) {
+            if (rt.event_ring) |ring| {
+                _ = ring.pushFocus(node_id);
+            } else {
+                jsc_bridge.dispatchEvent(rt, node_id, "focus", null) catch |err| {
+                    log.err("Solid focus dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                };
+            }
+        } else if (prev_focused and !focused_now and node.hasListener("blur")) {
+            if (rt.event_ring) |ring| {
+                _ = ring.pushBlur(node_id);
+            } else {
+                jsc_bridge.dispatchEvent(rt, node_id, "blur", null) catch |err| {
+                    log.err("Solid blur dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                };
+            }
+        }
+
+        if (text_changed and node.hasListener("input")) {
+            const payload = state.currentText();
+            if (rt.event_ring) |ring| {
+                _ = ring.pushInput(node_id, payload);
+            } else {
+                jsc_bridge.dispatchEvent(rt, node_id, "input", payload) catch |err| {
+                    log.err("Solid input dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                };
+            }
+        }
     }
 }
 

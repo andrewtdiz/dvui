@@ -1,4 +1,4 @@
-import { type RendererAdapter, CommandEncoder, type CommandBuffers } from "./native-renderer";
+import { type RendererAdapter, CommandEncoder, type CommandBuffers } from "../index";
 import { createCoreSession, BackendKind } from "./dvui-core";
 import { ptr } from "bun:ffi";
 
@@ -52,7 +52,6 @@ export class CoreRenderer implements RendererAdapter {
     this.disposed = true;
   }
 }
-
 
 
 

@@ -1,5 +1,6 @@
 const console = @import("console.zig");
 pub const ConsoleSink = console.ConsoleSink;
+pub const image_loader = @import("image_loader.zig");
 const runtime = @import("runtime.zig");
 pub const FrameData = runtime.FrameData;
 pub const FrameResult = runtime.FrameResult;
