@@ -3,7 +3,7 @@ const std = @import("std");
 const dvui = @import("dvui");
 const FontStyle = dvui.Options.FontStyle;
 
-const color_data = @import("tailwind_colors.zig");
+const color_data = @import("colors.zig");
 
 pub const Spec = struct {
     background: ?dvui.Color = null,

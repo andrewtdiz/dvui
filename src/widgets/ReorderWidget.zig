@@ -292,7 +292,6 @@ pub const Reorderable = struct {
     init_options: Reorderable.InitOptions,
     options: Options,
     installed: bool = false,
-    floating_widget: ?dvui.FloatingWidget = null,
     target_rs: ?dvui.RectScale = null,
 
     pub fn init(src: std.builtin.SourceLocation, reorder: *ReorderWidget, init_opts: Reorderable.InitOptions, opts: Options) Reorderable {
@@ -306,53 +305,33 @@ pub const Reorderable = struct {
         };
     }
 
-    // can call this after init before install
-    pub fn floating(self: *Reorderable) bool {
-        // if drag_point is non-null, id_reorderable is non-null
-        if (self.reorder.drag_point != null and self.reorder.id_reorderable.? == (self.init_options.reorder_id orelse self.data().id.asUsize())) {
-            return true;
-        }
-
-        return false;
-    }
-
     pub fn install(self: *Reorderable) void {
         self.installed = true;
         if (self.reorder.drag_ending or dvui.captured(self.reorder.data().id) or (self.reorder.init_opts.drag_name != null and dvui.dragName(self.reorder.init_opts.drag_name.?))) {
-            const topleft = dvui.currentWindow().mouse_pt.plus(dvui.dragOffset());
-            if (self.reorder.drag_point != null and self.reorder.id_reorderable.? == (self.init_options.reorder_id orelse self.data().id.asUsize())) {
-                // we are being dragged - put in floating widget
+            if (self.init_options.last_slot) {
+                self.wd = WidgetData.init(self.data().src, .{}, self.options.override(.{ .min_size_content = self.reorder.reorderable_size }));
+            } else {
+                self.wd = WidgetData.init(self.data().src, .{}, self.options);
+            }
+            const rs = self.data().rectScale();
+
+            if (!self.reorder.found_slot and rs.r.contains(dvui.currentWindow().mouse_pt)) {
+                // user is dragging something over this rect
+                self.target_rs = rs;
+                self.reorder.found_slot = true;
+
+                if (self.init_options.draw_target) {
+                    rs.r.fill(.{}, .{ .color = dvui.themeGet().focus, .fade = 1.0 });
+                }
+
+                if (self.init_options.reinstall and !self.init_options.last_slot) {
+                    self.reinstall();
+                }
+            }
+
+            if (self.target_rs == null or self.init_options.last_slot) {
                 self.data().register();
                 dvui.parentSet(self.widget());
-
-                self.floating_widget = dvui.FloatingWidget.init(@src(), .{ .mouse_events = false }, .{ .rect = Rect.fromPoint(.cast(topleft.toNatural())), .min_size_content = self.reorder.reorderable_size });
-                self.floating_widget.?.install();
-            } else {
-                if (self.init_options.last_slot) {
-                    self.wd = WidgetData.init(self.data().src, .{}, self.options.override(.{ .min_size_content = self.reorder.reorderable_size }));
-                } else {
-                    self.wd = WidgetData.init(self.data().src, .{}, self.options);
-                }
-                const rs = self.data().rectScale();
-
-                if (!self.reorder.found_slot and rs.r.contains(dvui.currentWindow().mouse_pt)) {
-                    // user is dragging something over this rect
-                    self.target_rs = rs;
-                    self.reorder.found_slot = true;
-
-                    if (self.init_options.draw_target) {
-                        rs.r.fill(.{}, .{ .color = dvui.themeGet().focus, .fade = 1.0 });
-                    }
-
-                    if (self.init_options.reinstall and !self.init_options.last_slot) {
-                        self.reinstall();
-                    }
-                }
-
-                if (self.target_rs == null or self.init_options.last_slot) {
-                    self.data().register();
-                    dvui.parentSet(self.widget());
-                }
             }
         } else {
             self.wd = WidgetData.init(self.data().src, .{}, self.options);
@@ -432,10 +411,6 @@ pub const Reorderable = struct {
         const should_free = self.init_options.was_allocated_on_widget_stack;
         defer if (should_free) dvui.widgetFree(self);
         defer self.* = undefined;
-        if (self.floating_widget) |*fw| {
-            self.data().minSizeMax(fw.data().min_size);
-            fw.deinit();
-        }
 
         self.data().minSizeSetAndRefresh();
         self.data().minSizeReportToParent();

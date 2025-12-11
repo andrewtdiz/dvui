@@ -2,15 +2,14 @@ const std = @import("std");
 const jsruntime = @import("../mod.zig");
 
 const alloc = @import("../../alloc.zig");
-const types = @import("types.zig");
-const renderer = @import("renderer.zig");
-pub const jsc = @import("jsc.zig");
-pub const quickjs = @import("quickjs.zig");
+const solid = @import("../../solid/mod.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
 var store_initialized = false;
-var store: types.NodeStore = undefined;
+var store: solid.NodeStore = undefined;
+
+pub const jsc = solid.bridge_jsc;
 
 pub fn render(runtime: *jsruntime.JSRuntime) void {
     if (!store_initialized) {
@@ -22,5 +21,5 @@ pub fn render(runtime: *jsruntime.JSRuntime) void {
         store_initialized = true;
     }
 
-    _ = renderer.render(runtime, &store);
+    _ = solid.render(runtime, &store);
 }

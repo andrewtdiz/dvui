@@ -1,6 +1,6 @@
-//! Core re-export surface for consumers that want a stable path as we
+//! Core surface for consumers that want a stable path as we
 //! reorganize internals under /src/core.
-pub usingnamespace @import("../dvui.zig");
+pub const dvui = @import("../dvui.zig");
 
 
 

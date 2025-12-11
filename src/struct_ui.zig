@@ -288,17 +288,6 @@ pub fn numberFieldWidget(
             defer hbox_aligned.deinit();
             alignment.record(box.data().id, hbox_aligned.data());
 
-            if (!read_only) {
-                const maybe_num = dvui.textEntryNumber(@src(), T, .{
-                    .min = opt.minValue(T),
-                    .max = opt.maxValue(T),
-                    .value = field_value_ptr,
-                    .show_min_max = opt.min != null and opt.max != null,
-                }, .{});
-                if (maybe_num.value == .Valid) {
-                    field_value_ptr.* = maybe_num.value.Valid;
-                }
-            }
             dvui.label(@src(), "{d}", .{field_value_ptr.*}, .{});
         },
         .slider => {
@@ -451,30 +440,7 @@ pub fn textFieldWidget(
         defer hbox_aligned.deinit();
         alignment.record(box.data().id, hbox_aligned.data());
 
-        const text_box = dvui.textEntry(@src(), if (backing == .buffer) .{ .text = .{ .buffer = backing.buffer } } else .{}, .{});
-        defer text_box.deinit();
-        if (!text_box.text_changed and !std.mem.eql(u8, text_box.getText(), field_value_ptr.*)) {
-            text_box.textSet(field_value_ptr.*, false);
-        }
-        if (!@typeInfo(@TypeOf(field_value_ptr)).pointer.is_const and !sentinel_terminated) {
-            if (text_box.text_changed and !std.mem.eql(u8, text_box.getText(), field_value_ptr.*)) {
-                switch (backing) {
-                    .gpa => {
-                        if (string_map.getEntry(field_value_ptr)) |entry| {
-                            backing.gpa.free(entry.value_ptr.*);
-                        }
-                        // Memory leaks from this line are caused by not calling struct_ui.deinit()
-                        field_value_ptr.* = backing.gpa.dupe(u8, text_box.getText()) catch "";
-                        string_map.put(dvui.currentWindow().gpa, field_value_ptr, field_value_ptr.*) catch |err| {
-                            dvui.logError(@src(), err, "Error adding to struct_ui.string_map. This will leak memory", .{});
-                        };
-                    },
-                    .buffer => {
-                        field_value_ptr.* = text_box.getText();
-                    },
-                }
-            }
-        }
+        dvui.label(@src(), "{s}", .{field_value_ptr.*}, .{});
     } else {
         var hbox_aligned = dvui.box(@src(), .{ .dir = .horizontal }, .{ .margin = alignment.margin(box.data().id) });
         defer hbox_aligned.deinit();

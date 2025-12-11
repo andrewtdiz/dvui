@@ -60,6 +60,10 @@ const loop = () => {
 
   host.flush();
   renderer.present();
+  
+  // Poll event ring buffer and dispatch to Solid handlers
+  const nodeIndex = host.getNodeIndex?.() ?? new Map();
+  renderer.pollEvents(nodeIndex);
 
   frame += 1;
   return true;

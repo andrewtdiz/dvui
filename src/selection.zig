@@ -116,13 +116,11 @@ pub const SelectAllKeyboard = struct {
     last_focused_in_frame: Id = .zero,
 
     /// reset() should be called immediately before the first "selectable" is created.
-    /// If using with a GridWidget, call reset before the first body cell is created.
     pub fn reset(self: *SelectAllKeyboard) void {
         self.last_focused_in_frame = dvui.lastFocusedIdInFrame();
     }
 
     // processEvents() should be called after all selectables have been created
-    // If using with a GridWidget, call processEvents after all body cells have been created.
     pub fn processEvents(self: *SelectAllKeyboard, select_all_state: *SelectAllState, wd: *const WidgetData) void {
         self.selection_changed = false;
         for (dvui.events()) |*e| {

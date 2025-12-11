@@ -20,7 +20,6 @@ const MenuWidget = @This();
 /// of some widget chain to be notified when, for example,
 /// the menu chain closes.
 ///
-/// This is used by `dvui.ContextWidget`
 pub const Root = struct {
     ptr: *anyopaque,
     close: *const fn (ptr: *anyopaque, reason: CloseReason) void,
@@ -72,8 +71,6 @@ winId: dvui.Id,
 parentMenu: ?*MenuWidget = null,
 last_focus: dvui.Id,
 last_focus_in_subwindow: dvui.Id,
-/// SAFETY: Set in `install`
-group: dvui.FocusGroupWidget = undefined,
 /// SAFETY: Set in `install`
 box: BoxWidget = undefined,
 
@@ -138,15 +135,6 @@ pub fn install(self: *MenuWidget) void {
         self.processEvent(e);
     }
 
-    self.group = dvui.FocusGroupWidget.init(@src(), .{}, .{});
-    self.group.install();
-
-    // a floating menu could have been opened by mouse, but then a key is
-    // pressed, so focus the group which will focus the first thing in the menu
-    if (!self.mouse_mode and self.floating() and dvui.focusedWidgetIdInCurrentSubwindow() == null) {
-        dvui.focusWidget(self.group.data().id, null, null);
-    }
-
     self.box = BoxWidget.init(@src(), .{ .dir = self.init_opts.dir }, self.data().options.strip().override(.{ .expand = .both }));
     self.box.install();
     self.box.drawBackground();
@@ -181,7 +169,7 @@ pub fn close_chain(self: *MenuWidget, reason: CloseReason) void {
 }
 
 pub fn floating(_: *MenuWidget) bool {
-    return dvui.FloatingMenuWidget.currentGet() != null;
+    return false;
 }
 
 pub fn widget(self: *MenuWidget) Widget {
@@ -292,7 +280,6 @@ pub fn deinit(self: *MenuWidget) void {
     defer if (should_free) dvui.widgetFree(self);
     defer self.* = undefined;
     self.box.deinit();
-    self.group.deinit();
     dvui.dataSet(null, self.data().id, "_mouse_mode", self.mouse_mode);
     dvui.dataSet(null, self.data().id, "_sub_act", self.submenus_activated);
     dvui.dataSet(null, self.data().id, "_has_focused_child", self.last_focus_in_subwindow != dvui.lastFocusedIdInSubwindow());

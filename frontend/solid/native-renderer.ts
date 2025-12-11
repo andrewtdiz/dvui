@@ -261,4 +261,97 @@ export class NativeRenderer implements RendererAdapter {
     this.callbacks.log.close();
     this.callbacks.event.close();
   }
+
+  /**
+   * Poll the event ring buffer and dispatch events to handlers.
+   * Call this after present() each frame.
+   */
+  pollEvents(nodeIndex: Map<number, import("./solid-host").HostNode>): number {
+    if (this.disposed) return 0;
+    
+    // Get header pointer and read header values
+    const headerPtr = this.lib.symbols.getEventRingHeader(this.handle);
+    if (!headerPtr) return 0;
+    
+    // Read header struct (16 bytes: readHead, writeHead, capacity, detailCapacity)
+    const { toArrayBuffer } = require("bun:ffi");
+    const headerView = new DataView(toArrayBuffer(headerPtr, 0, 16));
+    const readHead = headerView.getUint32(0, true);
+    const writeHead = headerView.getUint32(4, true);
+    const capacity = headerView.getUint32(8, true);
+    const detailCapacity = headerView.getUint32(12, true);
+    
+    if (readHead === writeHead || capacity === 0) return 0;
+    
+    // Get buffer pointers
+    const bufferPtr = this.lib.symbols.getEventRingBuffer(this.handle);
+    const detailPtr = this.lib.symbols.getEventRingDetail(this.handle);
+    if (!bufferPtr) return 0;
+    
+    const EVENT_ENTRY_SIZE = 12;
+    const bufferView = new DataView(toArrayBuffer(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
+    const detailBuffer = detailPtr 
+      ? new Uint8Array(toArrayBuffer(detailPtr, 0, detailCapacity))
+      : new Uint8Array(0);
+    
+    const decoder = new TextDecoder();
+    const eventKindToName: Record<number, string> = {
+      0: "click",
+      1: "input",
+      2: "focus",
+      3: "blur",
+      4: "mouseenter",
+      5: "mouseleave",
+      6: "keydown",
+      7: "keyup",
+      8: "change",
+      9: "submit",
+    };
+    
+    let current = readHead;
+    let dispatched = 0;
+    
+    while (current < writeHead) {
+      const idx = current % capacity;
+      const offset = idx * EVENT_ENTRY_SIZE;
+      
+      const kind = bufferView.getUint8(offset);
+      const nodeId = bufferView.getUint32(offset + 2, true);
+      const detailOffset = bufferView.getUint32(offset + 6, true);
+      const detailLen = bufferView.getUint16(offset + 10, true);
+      
+      const node = nodeIndex.get(nodeId);
+      if (node) {
+        const eventName = eventKindToName[kind] ?? "unknown";
+        const handlers = node.listeners.get(eventName);
+        
+        if (handlers && handlers.size > 0) {
+          let detail: string | undefined;
+          if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
+            detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+          }
+          
+          const payload = new Uint8Array(4);
+          new DataView(payload.buffer).setUint32(0, nodeId, true);
+          
+          for (const handler of handlers) {
+            try {
+              handler(payload);
+            } catch (err) {
+              console.error(`Event handler error for ${eventName} on node ${nodeId}:`, err);
+            }
+          }
+          dispatched++;
+        }
+      }
+      current++;
+    }
+    
+    // Acknowledge consumed events
+    if (current !== readHead) {
+      this.lib.symbols.acknowledgeEvents(this.handle, current);
+    }
+    
+    return dispatched;
+  }
 }

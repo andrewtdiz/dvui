@@ -6,8 +6,8 @@ const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
 
-const solid_types = @import("jsruntime/solid/types.zig");
-const solid_renderer = @import("solid_renderer.zig");
+const jsruntime = @import("jsruntime/mod.zig");
+const solid = @import("solid/mod.zig");
 
 const LogFn = fn (level: u8, msg_ptr: [*]const u8, msg_len: usize) callconv(.c) void;
 const EventFn = fn (name_ptr: [*]const u8, name_len: usize, data_ptr: [*]const u8, data_len: usize) callconv(.c) void;
@@ -44,11 +44,17 @@ const Renderer = struct {
     pending_destroy: bool = false,
     destroy_started: bool = false,
     solid_store_ready: bool = false,
-    solid_store: solid_types.NodeStore = undefined,
+    solid_store: solid.NodeStore = undefined,
     solid_seq_last: u64 = 0,
+    frame_count: u64 = 0,
+    runtime: jsruntime.JSRuntime = undefined,
+    // Event ring buffer for Zig→JS event dispatch (Phase 2)
+    event_ring: ?solid.EventRing = null,
+    event_ring_ready: bool = false,
 };
 
 const flag_absolute: u8 = 1;
+const frame_event_interval: u64 = 6; // ~10fps when running at 60fps
 
 const SolidOp = struct {
     op: []const u8,
@@ -58,6 +64,12 @@ const SolidOp = struct {
     tag: ?[]const u8 = null,
     text: ?[]const u8 = null,
     className: ?[]const u8 = null,
+    // Listen op fields
+    eventType: ?[]const u8 = null,
+    // Generic set op fields
+    name: ?[]const u8 = null,
+    value: ?[]const u8 = null,
+    src: ?[]const u8 = null,
     // Transform fields (optional; last-write-wins)
     rotation: ?f32 = null,
     scaleX: ?f32 = null,
@@ -79,24 +91,68 @@ const SolidOpBatch = struct {
     seq: ?u64 = null,
 };
 
-fn applyTransformFields(store: *solid_types.NodeStore, id: u32, op: SolidOp) OpError!void {
+fn applyTransformFields(store: *solid.NodeStore, id: u32, op: SolidOp) OpError!void {
     const target = store.node(id) orelse return error.MissingId;
-    if (op.rotation) |v| target.transform.rotation = v;
-    if (op.scaleX) |v| target.transform.scale[0] = v;
-    if (op.scaleY) |v| target.transform.scale[1] = v;
-    if (op.anchorX) |v| target.transform.anchor[0] = v;
-    if (op.anchorY) |v| target.transform.anchor[1] = v;
-    if (op.translateX) |v| target.transform.translation[0] = v;
-    if (op.translateY) |v| target.transform.translation[1] = v;
+    var changed = false;
+    if (op.rotation) |v| {
+        target.transform.rotation = v;
+        changed = true;
+    }
+    if (op.scaleX) |v| {
+        target.transform.scale[0] = v;
+        changed = true;
+    }
+    if (op.scaleY) |v| {
+        target.transform.scale[1] = v;
+        changed = true;
+    }
+    if (op.anchorX) |v| {
+        target.transform.anchor[0] = v;
+        changed = true;
+    }
+    if (op.anchorY) |v| {
+        target.transform.anchor[1] = v;
+        changed = true;
+    }
+    if (op.translateX) |v| {
+        target.transform.translation[0] = v;
+        changed = true;
+    }
+    if (op.translateY) |v| {
+        target.transform.translation[1] = v;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
 }
 
-fn applyVisualFields(store: *solid_types.NodeStore, id: u32, op: SolidOp) OpError!void {
+fn applyVisualFields(store: *solid.NodeStore, id: u32, op: SolidOp) OpError!void {
     const target = store.node(id) orelse return error.MissingId;
-    if (op.opacity) |v| target.visual.opacity = v;
-    if (op.cornerRadius) |v| target.visual.corner_radius = v;
-    if (op.background) |c| target.visual.background = .{ .value = c };
-    if (op.textColor) |c| target.visual.text_color = .{ .value = c };
-    if (op.clipChildren) |flag| target.visual.clip_children = flag;
+    var changed = false;
+    if (op.opacity) |v| {
+        target.visual.opacity = v;
+        changed = true;
+    }
+    if (op.cornerRadius) |v| {
+        target.visual.corner_radius = v;
+        changed = true;
+    }
+    if (op.background) |c| {
+        target.visual.background = .{ .value = c };
+        changed = true;
+    }
+    if (op.textColor) |c| {
+        target.visual.text_color = .{ .value = c };
+        changed = true;
+    }
+    if (op.clipChildren) |flag| {
+        target.visual.clip_children = flag;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
 }
 
 const OpError = error{
@@ -147,6 +203,20 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
         parent: ?u32 = null,
         text: ?[]const u8 = null,
         className: ?[]const u8 = null,
+        // Transform fields
+        rotation: ?f32 = null,
+        scaleX: ?f32 = null,
+        scaleY: ?f32 = null,
+        anchorX: ?f32 = null,
+        anchorY: ?f32 = null,
+        translateX: ?f32 = null,
+        translateY: ?f32 = null,
+        // Visual fields
+        opacity: ?f32 = null,
+        cornerRadius: ?f32 = null,
+        background: ?u32 = null,
+        textColor: ?u32 = null,
+        clipChildren: ?bool = null,
     };
 
     const Payload = struct {
@@ -187,6 +257,60 @@ fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8) void {
             renderer.solid_store.setClassName(node.id, cls) catch |err| {
                 logMessage(renderer, 3, "setClassName failed for {d}: {s}", .{ node.id, @errorName(err) });
             };
+        }
+        if (renderer.solid_store.node(node.id)) |target| {
+            var touched = false;
+            if (node.rotation) |v| {
+                target.transform.rotation = v;
+                touched = true;
+            }
+            if (node.scaleX) |v| {
+                target.transform.scale[0] = v;
+                touched = true;
+            }
+            if (node.scaleY) |v| {
+                target.transform.scale[1] = v;
+                touched = true;
+            }
+            if (node.anchorX) |v| {
+                target.transform.anchor[0] = v;
+                touched = true;
+            }
+            if (node.anchorY) |v| {
+                target.transform.anchor[1] = v;
+                touched = true;
+            }
+            if (node.translateX) |v| {
+                target.transform.translation[0] = v;
+                touched = true;
+            }
+            if (node.translateY) |v| {
+                target.transform.translation[1] = v;
+                touched = true;
+            }
+            if (node.opacity) |v| {
+                target.visual.opacity = v;
+                touched = true;
+            }
+            if (node.cornerRadius) |v| {
+                target.visual.corner_radius = v;
+                touched = true;
+            }
+            if (node.background) |c| {
+                target.visual.background = .{ .value = c };
+                touched = true;
+            }
+            if (node.textColor) |c| {
+                target.visual.text_color = .{ .value = c };
+                touched = true;
+            }
+            if (node.clipChildren) |flag| {
+                target.visual.clip_children = flag;
+                touched = true;
+            }
+            if (touched) {
+                renderer.solid_store.markNodeChanged(node.id);
+            }
         }
     }
 
@@ -265,6 +389,39 @@ fn applySolidOp(renderer: *Renderer, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_visual")) {
         if (op.id == 0) return error.MissingId;
         try applyVisualFields(store, op.id, op);
+        return;
+    }
+
+    // Listen op - register event listener on node (extracted from reference)
+    if (std.mem.eql(u8, op.op, "listen")) {
+        if (op.id == 0) return error.MissingId;
+        const event_type = op.eventType orelse return error.MissingTag;
+        try store.addListener(op.id, event_type);
+        return;
+    }
+
+    // Generic set op - route by property name (extracted from reference)
+    if (std.mem.eql(u8, op.op, "set")) {
+        if (op.id == 0) return error.MissingId;
+        const prop_name = op.name orelse return error.MissingTag;
+
+        // Route to appropriate setter based on property name
+        if (std.mem.eql(u8, prop_name, "class") or std.mem.eql(u8, prop_name, "className")) {
+            const val = op.value orelse op.className orelse return error.MissingTag;
+            try store.setClassName(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "src")) {
+            const val = op.value orelse op.src orelse return error.MissingTag;
+            try store.setImageSource(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "value")) {
+            const val = op.value orelse return error.MissingTag;
+            try store.setInputValue(op.id, val);
+            return;
+        }
+        // Unknown property - log but don't fail
         return;
     }
 
@@ -675,7 +832,8 @@ fn renderFrame(renderer: *Renderer) void {
 
         const frame_start = std.time.nanoTimestamp();
 
-        const drew_solid = renderer.solid_store_ready and solid_renderer.render(null, &renderer.solid_store);
+        const runtime_ptr: ?*jsruntime.JSRuntime = &renderer.runtime;
+        const drew_solid = renderer.solid_store_ready and solid.render(runtime_ptr, &renderer.solid_store);
         if (!drew_solid) {
             renderCommandsDvui(renderer, win);
         }
@@ -693,8 +851,10 @@ fn renderFrame(renderer: *Renderer) void {
     }
 
     ray.drawFPS(10, 10);
-    // Temporarily disable frame event callback to diagnose FFI crash
-    // sendFrameEvent(renderer);
+    renderer.frame_count +%= 1;
+    if (frame_event_interval == 0 or renderer.frame_count % frame_event_interval == 0) {
+        sendFrameEvent(renderer);
+    }
 }
 
 fn deinitRenderer(renderer: *Renderer) void {
@@ -702,9 +862,14 @@ fn deinitRenderer(renderer: *Renderer) void {
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
+    renderer.runtime.deinit();
     if (renderer.solid_store_ready) {
         renderer.solid_store.deinit();
         renderer.solid_store_ready = false;
+    }
+    if (renderer.event_ring_ready) {
+        renderer.event_ring.?.deinit();
+        renderer.event_ring_ready = false;
     }
 }
 
@@ -715,6 +880,21 @@ fn finalizeDestroy(renderer: *Renderer) void {
     deinitRenderer(renderer);
     _ = gpa_instance.deinit();
     std.heap.c_allocator.destroy(renderer);
+}
+
+fn forwardEvent(ctx: ?*anyopaque, name: []const u8, payload: []const u8) void {
+    const renderer = ctx orelse return;
+    const typed: *Renderer = @ptrCast(@alignCast(renderer));
+    if (typed.event_cb) |event_fn| {
+        const name_ptr: [*]const u8 = @ptrCast(name.ptr);
+        const payload_ptr: [*]const u8 = @ptrCast(payload.ptr);
+        typed.callback_depth += 1;
+        defer {
+            typed.callback_depth -= 1;
+            tryFinalize(typed);
+        }
+        event_fn(name_ptr, name.len, payload_ptr, payload.len);
+    }
 }
 
 fn tryFinalize(renderer: *Renderer) void {
@@ -745,10 +925,31 @@ pub export fn createRenderer(log_cb: ?*const LogFn, event_cb: ?*const EventFn) c
         .destroy_started = false,
         .solid_store_ready = false,
         .solid_store = undefined,
+        .frame_count = 0,
+        .event_ring = null,
+        .event_ring_ready = false,
     };
 
     renderer.allocator = renderer.gpa_instance.allocator();
     renderer.frame_arena = std.heap.ArenaAllocator.init(renderer.allocator);
+
+    renderer.runtime = jsruntime.JSRuntime.init("") catch {
+        std.heap.c_allocator.destroy(renderer);
+        return null;
+    };
+    renderer.runtime.event_cb = forwardEvent;
+    renderer.runtime.event_ctx = renderer;
+
+    // Initialize event ring buffer for Zig→JS event dispatch
+    renderer.event_ring = solid.EventRing.init(renderer.allocator) catch {
+        renderer.runtime.deinit();
+        std.heap.c_allocator.destroy(renderer);
+        return null;
+    };
+    renderer.event_ring_ready = true;
+
+    // Link event ring to runtime so render code can push events directly
+    renderer.runtime.event_ring = &renderer.event_ring.?;
 
     return renderer;
 }
@@ -889,4 +1090,56 @@ pub export fn presentRenderer(renderer: ?*Renderer) callconv(.c) void {
         }
         renderFrame(ptr);
     }
+}
+
+// === Event Ring Buffer FFI Exports ===
+
+/// Get event ring header (read_head, write_head, capacity, detail_capacity)
+pub export fn getEventRingHeader(renderer: ?*Renderer) callconv(.c) solid.EventRing.Header {
+    if (renderer) |ptr| {
+        if (ptr.event_ring_ready) {
+            return ptr.event_ring.?.getHeader();
+        }
+    }
+    return .{ .read_head = 0, .write_head = 0, .capacity = 0, .detail_capacity = 0 };
+}
+
+/// Get pointer to event buffer for JS TypedArray view
+pub export fn getEventRingBuffer(renderer: ?*Renderer) callconv(.c) ?[*]solid.events.EventEntry {
+    if (renderer) |ptr| {
+        if (ptr.event_ring_ready) {
+            return ptr.event_ring.?.getBufferPtr();
+        }
+    }
+    return null;
+}
+
+/// Get pointer to detail string buffer for JS TypedArray view
+pub export fn getEventRingDetail(renderer: ?*Renderer) callconv(.c) ?[*]u8 {
+    if (renderer) |ptr| {
+        if (ptr.event_ring_ready) {
+            return ptr.event_ring.?.getDetailPtr();
+        }
+    }
+    return null;
+}
+
+/// Acknowledge that JS has consumed events up to new_read_head
+pub export fn acknowledgeEvents(renderer: ?*Renderer, new_read_head: u32) callconv(.c) void {
+    if (renderer) |ptr| {
+        if (ptr.event_ring_ready) {
+            ptr.event_ring.?.setReadHead(new_read_head);
+        }
+    }
+}
+
+/// Push an event to the ring buffer (called from Zig render code)
+pub fn pushEvent(renderer: *Renderer, kind: solid.EventKind, node_id: u32, detail: ?[]const u8) bool {
+    if (!renderer.event_ring_ready) return false;
+    return renderer.event_ring.?.push(kind, node_id, detail);
+}
+
+// Simple test export to verify DLL exports work
+pub export fn testExportWorks() callconv(.c) i32 {
+    return 12345;
 }

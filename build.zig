@@ -70,6 +70,7 @@ pub fn build(b: *Build) !void {
         .root_source_file = b.path("src/native_renderer.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     native_module.addImport("dvui", dvui_mod);
     native_module.addImport("raylib-backend", raylib_mod);
@@ -85,6 +86,10 @@ pub fn build(b: *Build) !void {
         .linkage = .dynamic,
     });
 
+    if (raylib_dep) |dep| {
+        native_lib.linkLibrary(dep.artifact("raylib"));
+    }
+
     b.installArtifact(native_lib);
 
     const exe = b.addExecutable(.{
@@ -95,7 +100,7 @@ pub fn build(b: *Build) !void {
     if (raylib_dep) |dep| {
         exe.linkLibrary(dep.artifact("raylib"));
     }
-    
+
     if (target.result.os.tag == .windows) {
         exe.win32_manifest = b.path("src/main.manifest");
         exe.subsystem = .Console;
@@ -289,7 +294,6 @@ fn addRaylibBackend(
     if (maybe_glfw) |glfw| {
         raylib_backend_mod.addImport("zglfw", glfw.module("root"));
     }
-
 
     return raylib_backend_mod;
 }

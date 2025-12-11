@@ -171,42 +171,10 @@ pub fn adjustColorForState(self: *const Theme, col: Color, ask: Options.ColorAsk
 ///
 /// Sets the theme on the current `dvui.Window` upon selection
 pub fn picker(src: std.builtin.SourceLocation, themes: []const Theme, opts: Options) bool {
-    var picked = false;
-
-    const defaults: Options = .{
-        .name = "Theme Picker",
-        .min_size_content = .{ .w = 120 },
-    };
-
-    const options = defaults.override(opts);
-    const current_theme_name = dvui.themeGet().name;
-
-    const theme_choice: ?usize = for (themes, 0..) |val, i| {
-        if (std.mem.eql(u8, current_theme_name, val.name)) {
-            break i;
-        }
-    } else null;
-
-    var dd = dvui.DropdownWidget.init(
-        src,
-        .{ .selected_index = theme_choice, .label = current_theme_name },
-        options,
-    );
-    dd.install();
-
-    if (dd.dropped()) {
-        for (themes) |theme| {
-            if (dd.addChoiceLabel(theme.name)) {
-                dvui.themeSet(theme);
-                picked = true;
-                break;
-            }
-        }
-    }
-
-    dd.deinit();
-
-    return picked;
+    _ = src;
+    _ = themes;
+    _ = opts;
+    return false;
 }
 
 pub const builtin = struct {

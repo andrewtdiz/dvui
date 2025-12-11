@@ -66,8 +66,8 @@ Below is a screenshot of the demo window, whose source code can be found at `src
   - [Web](https://david-vanderson.github.io/demo)
   - [Raylib](https://www.raylib.com/)
   - [Dx11](https://learn.microsoft.com/en-us/windows/win32/direct3d11/atoc-dx-graphics-direct3d-11)
-- [TinyVG](https://tinyvg.tech/) icon support via [zig-lib-svg2tvg](https://github.com/nat3Github/zig-lib-svg2tvg)
-  - more icons at [zig-lib-icons](https://github.com/nat3Github/zig-lib-icons)
+- [TinyVG](https://tinyvg.tech/) icon support via [zig-lib-svg2tvg](https://github.com/nat3Github/zig-lib-svg2tvg); bring your own icons (the bundled entypo pack has been removed)
+  - suggested sources: [zig-lib-icons](https://github.com/nat3Github/zig-lib-icons) or your own svg2tvg-converted assets
 - Raster image support via [stb_image](https://github.com/nothings/stb)
 - Font support
   - [freetype](https://github.com/david-vanderson/freetype/tree/zig-pkg)

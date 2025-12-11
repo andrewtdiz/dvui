@@ -19,7 +19,6 @@ drag_ending: bool = false,
 branch_size: Size = .{},
 init_options: InitOptions = undefined,
 /// SAFETY: Set in `install`
-group: dvui.FocusGroupWidget = undefined,
 
 pub const InitOptions = struct {
     enable_reordering: bool = true,
@@ -50,14 +49,6 @@ pub fn install(self: *TreeWidget) void {
     self.data().borderAndBackground(.{});
 
     dvui.parentSet(self.widget());
-
-    self.group = dvui.FocusGroupWidget.init(@src(), .{}, .{});
-    self.group.install();
-
-    if (self.group.data().accesskit_node()) |ak_node| {
-        AccessKit.nodeAddAction(ak_node, AccessKit.Action.focus);
-        AccessKit.nodeAddAction(ak_node, AccessKit.Action.click);
-    }
 }
 
 pub fn tree(src: std.builtin.SourceLocation, init_opts: InitOptions, opts: Options) *TreeWidget {
@@ -145,8 +136,6 @@ pub fn deinit(self: *TreeWidget) void {
     defer if (should_free) dvui.widgetFree(self);
     defer self.* = undefined;
 
-    self.group.deinit();
-
     if (self.drag_ending) {
         self.id_branch = null;
         self.drag_point = null;
@@ -220,7 +209,6 @@ pub const Branch = struct {
     init_options: Branch.InitOptions = undefined,
     options: Options = undefined,
     installed: bool = false,
-    floating_widget: ?dvui.FloatingWidget = null,
     target_rs: ?dvui.RectScale = null,
     expanded: bool = false,
     can_expand: bool = false,
@@ -276,73 +264,15 @@ pub const Branch = struct {
 
     pub fn install(self: *Branch) void {
         self.installed = true;
-        var check_button_hovered: bool = false;
-        if (self.tree.drag_point) |dp| {
-            const topleft = dp.plus(dvui.dragOffset().plus(.{ .x = 5, .y = 5 }));
-            if (self.tree.id_branch.? == (self.init_options.branch_id orelse self.data().id.asUsize())) {
-                // we are being dragged - put in floating widget
-                self.data().register();
-                dvui.parentSet(self.widget());
-
-                self.floating_widget = dvui.FloatingWidget.init(
-                    @src(),
-                    .{ .mouse_events = false },
-                    .{ .rect = Rect.fromPoint(.cast(topleft.toNatural())), .min_size_content = self.tree.branch_size },
-                );
-                self.floating_widget.?.install();
-            } else {
-                self.wd = WidgetData.init(self.wd.src, .{}, wrapOuter(self.options));
-                self.wd.register();
-                dvui.parentSet(self.widget());
-
-                var rs = self.wd.rectScale();
-
-                var dragRect = Rect.Physical.fromPoint(topleft).toSize(self.tree.branch_size.scale(rs.s, Size.Physical));
-                dragRect.h = 2.0;
-
-                if (!rs.r.intersect(dragRect).empty()) {
-                    // user is dragging a reorderable over this rect
-                    if (!self.expanded) {
-                        if (dvui.timerDone(self.data().id)) {
-                            self.expanded = true;
-                        } else {
-                            _ = dvui.timer(self.data().id, 500_000);
-                        }
-                    }
-
-                    if (!self.expanded) {
-                        self.target_rs = rs;
-                    } else {
-                        check_button_hovered = true;
-                    }
-
-                    if (self.target_rs != null) {
-                        rs.r.h = 2.0;
-                        rs.r.fill(.{}, .{ .color = dvui.themeGet().focus, .fade = 1.0 });
-                    }
-                }
-            }
-        } else {
-            self.wd = WidgetData.init(self.wd.src, .{}, wrapOuter(self.options));
-
-            self.wd.register();
-            dvui.parentSet(self.widget());
-        }
+        self.wd = WidgetData.init(self.wd.src, .{}, wrapOuter(self.options));
+        self.wd.register();
+        dvui.parentSet(self.widget());
 
         self.button = dvui.ButtonWidget.init(@src(), .{}, wrapInner(self.options));
         self.button.install();
         self.button.processEvents();
         self.button.drawBackground();
         self.button.drawFocus();
-
-        // Check if the button is hovered if we are expanded, this allows us to set the target rs when
-        // the entry is expanded
-        if (self.button.hovered() and check_button_hovered) {
-            var rs = self.data().rectScale();
-            self.target_rs = rs;
-            rs.r.h = 2.0;
-            rs.r.fill(.{}, .{ .color = dvui.themeGet().focus, .fade = 1.0 });
-        }
 
         self.tree.branch_size = self.button.data().rect.size();
 
@@ -412,33 +342,6 @@ pub const Branch = struct {
         self.can_expand = true;
 
         return self.expanded;
-    }
-
-    pub fn targetRectScale(self: *Branch) ?dvui.RectScale {
-        return self.target_rs;
-    }
-
-    pub fn removed(self: *Branch) bool {
-        // if drag_ending is true, id_reorderable is non-null
-        if (self.tree.drag_ending and self.tree.id_branch.? == (self.init_options.branch_id orelse self.data().id.asUsize())) {
-            return true;
-        }
-
-        return false;
-    }
-
-    // must be called after install()
-    pub fn insertBefore(self: *Branch) bool {
-        if (!self.installed) {
-            dvui.log.err("Branch.insertBefore() must be called after install()", .{});
-            std.debug.assert(false);
-        }
-
-        if (self.tree.drag_ending and self.target_rs != null) {
-            return true;
-        }
-
-        return false;
     }
 
     pub fn widget(self: *Branch) Widget {

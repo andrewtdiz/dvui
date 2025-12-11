@@ -1,4 +1,6 @@
 // @bun
+var __require = import.meta.require;
+
 // solid/native-renderer.ts
 import { ptr } from "bun:ffi";
 
@@ -51,6 +53,22 @@ var nativeSymbols = {
   applyRendererSolidOps: {
     args: ["ptr", "ptr", "usize"],
     returns: "bool"
+  },
+  getEventRingHeader: {
+    args: ["ptr"],
+    returns: "ptr"
+  },
+  getEventRingBuffer: {
+    args: ["ptr"],
+    returns: "ptr"
+  },
+  getEventRingDetail: {
+    args: ["ptr"],
+    returns: "ptr"
+  },
+  acknowledgeEvents: {
+    args: ["ptr", "u32"],
+    returns: "void"
   }
 };
 var loadNativeLibrary = (libPath = defaultLibPath) => {
@@ -307,6 +325,77 @@ class NativeRenderer {
     this.closeDeferred = false;
     this.callbacks.log.close();
     this.callbacks.event.close();
+  }
+  pollEvents(nodeIndex) {
+    if (this.disposed)
+      return 0;
+    const headerPtr = this.lib.symbols.getEventRingHeader(this.handle);
+    if (!headerPtr)
+      return 0;
+    const { toArrayBuffer: toArrayBuffer2 } = __require("bun:ffi");
+    const headerView = new DataView(toArrayBuffer2(headerPtr, 0, 16));
+    const readHead = headerView.getUint32(0, true);
+    const writeHead = headerView.getUint32(4, true);
+    const capacity = headerView.getUint32(8, true);
+    const detailCapacity = headerView.getUint32(12, true);
+    if (readHead === writeHead || capacity === 0)
+      return 0;
+    const bufferPtr = this.lib.symbols.getEventRingBuffer(this.handle);
+    const detailPtr = this.lib.symbols.getEventRingDetail(this.handle);
+    if (!bufferPtr)
+      return 0;
+    const EVENT_ENTRY_SIZE = 12;
+    const bufferView = new DataView(toArrayBuffer2(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
+    const detailBuffer = detailPtr ? new Uint8Array(toArrayBuffer2(detailPtr, 0, detailCapacity)) : new Uint8Array(0);
+    const decoder = new TextDecoder;
+    const eventKindToName = {
+      0: "click",
+      1: "input",
+      2: "focus",
+      3: "blur",
+      4: "mouseenter",
+      5: "mouseleave",
+      6: "keydown",
+      7: "keyup",
+      8: "change",
+      9: "submit"
+    };
+    let current = readHead;
+    let dispatched = 0;
+    while (current < writeHead) {
+      const idx = current % capacity;
+      const offset = idx * EVENT_ENTRY_SIZE;
+      const kind = bufferView.getUint8(offset);
+      const nodeId = bufferView.getUint32(offset + 2, true);
+      const detailOffset = bufferView.getUint32(offset + 6, true);
+      const detailLen = bufferView.getUint16(offset + 10, true);
+      const node = nodeIndex.get(nodeId);
+      if (node) {
+        const eventName = eventKindToName[kind] ?? "unknown";
+        const handlers = node.listeners.get(eventName);
+        if (handlers && handlers.size > 0) {
+          let detail;
+          if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
+            detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+          }
+          const payload = new Uint8Array(4);
+          new DataView(payload.buffer).setUint32(0, nodeId, true);
+          for (const handler of handlers) {
+            try {
+              handler(payload);
+            } catch (err) {
+              console.error(`Event handler error for ${eventName} on node ${nodeId}:`, err);
+            }
+          }
+          dispatched++;
+        }
+      }
+      current++;
+    }
+    if (current !== readHead) {
+      this.lib.symbols.acknowledgeEvents(this.handle, current);
+    }
+    return dispatched;
   }
 }
 
@@ -1564,6 +1653,38 @@ var markCreated = (node) => {
     markCreated(child);
   }
 };
+var transformFields = ["rotation", "scaleX", "scaleY", "anchorX", "anchorY", "translateX", "translateY"];
+var visualFields = ["opacity", "cornerRadius", "background", "textColor", "clipChildren"];
+var extractTransform = (props) => {
+  const t = {};
+  for (const key of transformFields) {
+    const v = props[key];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      t[key] = v;
+    }
+  }
+  return t;
+};
+var extractVisual = (props) => {
+  const v = {};
+  for (const key of visualFields) {
+    const raw = props[key];
+    if (raw == null)
+      continue;
+    if (key === "background" || key === "textColor") {
+      v[key] = packColor(raw);
+      continue;
+    }
+    if (key === "clipChildren") {
+      v[key] = Boolean(raw);
+      continue;
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      v[key] = raw;
+    }
+  }
+  return v;
+};
 var createSolidNativeHost = (native) => {
   const encoder = native.encoder;
   const root = new HostNode("root");
@@ -1598,7 +1719,15 @@ var createSolidNativeHost = (native) => {
       const cls = nodeClass(node);
       if (cls)
         createOp.className = cls;
+      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props));
       ops.push(createOp);
+      for (const [eventType] of node.listeners) {
+        ops.push({
+          op: "listen",
+          id: node.id,
+          eventType
+        });
+      }
       return;
     }
     ops.push({
@@ -1633,6 +1762,7 @@ var createSolidNativeHost = (native) => {
       if (node.tag === "text") {
         entry.text = node.props.text ?? "";
       }
+      Object.assign(entry, extractTransform(node.props), extractVisual(node.props));
       nodes.push(entry);
       for (const child of node.children) {
         serialize(child, node.id);
@@ -1773,6 +1903,31 @@ var createSolidNativeHost = (native) => {
             className: cls
           });
         }
+      } else if (node.created && transformFields.includes(name)) {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          const payload = {
+            op: "set_transform",
+            id: node.id,
+            [name]: value
+          };
+          ops.push(payload);
+        }
+      } else if (node.created && visualFields.includes(name)) {
+        const payload = {
+          op: "set_visual",
+          id: node.id
+        };
+        if (name === "background" || name === "textColor") {
+          payload[name] = packColor(value);
+        } else if (name === "clipChildren") {
+          payload.clipChildren = Boolean(value);
+        } else if (typeof value === "number" && Number.isFinite(value)) {
+          payload[name] = value;
+        }
+        const hasField = payload.opacity != null || payload.cornerRadius != null || payload.background != null || payload.textColor != null || payload.clipChildren != null;
+        if (hasField) {
+          ops.push(payload);
+        }
       }
       scheduleFlush();
     },
@@ -1803,7 +1958,10 @@ var createSolidNativeHost = (native) => {
     hasPendingFlush() {
       return flushPending;
     },
-    root
+    root,
+    getNodeIndex() {
+      return nodeIndex;
+    }
   };
 };
 
@@ -2003,6 +2161,8 @@ var loop = () => {
   setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host.flush();
   renderer.present();
+  const nodeIndex = host.getNodeIndex?.() ?? new Map;
+  renderer.pollEvents(nodeIndex);
   frame += 1;
   return true;
 };

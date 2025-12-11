@@ -20,6 +20,20 @@ type NodeProps = {
   text?: string;
   class?: string;
   className?: string;
+  // Transform
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
+  anchorX?: number;
+  anchorY?: number;
+  translateX?: number;
+  translateY?: number;
+  // Visual
+  opacity?: number;
+  cornerRadius?: number;
+  background?: ColorInput;
+  textColor?: ColorInput;
+  clipChildren?: boolean;
 };
 
 type EventHandler = (payload: Uint8Array) => void;
@@ -30,16 +44,59 @@ type SerializedNode = {
   parent?: number;
   text?: string;
   className?: string;
+  // Transform
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
+  anchorX?: number;
+  anchorY?: number;
+  translateX?: number;
+  translateY?: number;
+  // Visual
+  opacity?: number;
+  cornerRadius?: number;
+  background?: number;
+  textColor?: number;
+  clipChildren?: boolean;
 };
 
 type MutationOp = {
-  op: "create" | "remove" | "move" | "set_text" | "set_class";
+  op:
+    | "create"
+    | "remove"
+    | "move"
+    | "set_text"
+    | "set_class"
+    | "set_transform"
+    | "set_visual"
+    | "listen"
+    | "set";
   id: number;
   parent?: number;
   before?: number | null;
   tag?: string;
   text?: string;
   className?: string;
+  // Listen op fields
+  eventType?: string;
+  // Generic set op fields
+  name?: string;
+  value?: string;
+  src?: string;
+  // Transform
+  rotation?: number;
+  scaleX?: number;
+  scaleY?: number;
+  anchorX?: number;
+  anchorY?: number;
+  translateX?: number;
+  translateY?: number;
+  // Visual
+  opacity?: number;
+  cornerRadius?: number;
+  background?: number;
+  textColor?: number;
+  clipChildren?: boolean;
 };
 
 type MutationMode = "snapshot_once" | "snapshot_every_flush" | "mutations_only";
@@ -311,6 +368,55 @@ const markCreated = (node: HostNode) => {
   }
 };
 
+const transformFields = [
+  "rotation",
+  "scaleX",
+  "scaleY",
+  "anchorX",
+  "anchorY",
+  "translateX",
+  "translateY",
+] as const;
+
+const visualFields = [
+  "opacity",
+  "cornerRadius",
+  "background",
+  "textColor",
+  "clipChildren",
+] as const;
+
+const extractTransform = (props: NodeProps) => {
+  const t: Partial<Record<(typeof transformFields)[number], number>> = {};
+  for (const key of transformFields) {
+    const v = props[key];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      t[key] = v;
+    }
+  }
+  return t;
+};
+
+const extractVisual = (props: NodeProps) => {
+  const v: Partial<Record<(typeof visualFields)[number], number | boolean>> = {};
+  for (const key of visualFields) {
+    const raw = props[key];
+    if (raw == null) continue;
+    if (key === "background" || key === "textColor") {
+      v[key] = packColor(raw as ColorInput);
+      continue;
+    }
+    if (key === "clipChildren") {
+      v[key] = Boolean(raw);
+      continue;
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      v[key] = raw;
+    }
+  }
+  return v;
+};
+
 export const createSolidNativeHost = (native: RendererAdapter) => {
   const encoder = native.encoder;
   const root = new HostNode("root");
@@ -347,7 +453,17 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
       if (node.tag === "text") createOp.text = node.props.text ?? "";
       const cls = nodeClass(node);
       if (cls) createOp.className = cls;
+      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props));
       ops.push(createOp);
+
+      // Emit listen ops for all registered event handlers
+      for (const [eventType] of node.listeners) {
+        ops.push({
+          op: "listen",
+          id: node.id,
+          eventType: eventType,
+        });
+      }
       return;
     }
     ops.push({
@@ -383,6 +499,7 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
     if (node.tag === "text") {
       entry.text = node.props.text ?? "";
     }
+    Object.assign(entry, extractTransform(node.props), extractVisual(node.props));
     nodes.push(entry);
     for (const child of node.children) {
       serialize(child, node.id);
@@ -539,6 +656,29 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
       const cls = value == null ? "" : String(value);
       ops.push({ op: "set_class", id: node.id, className: cls });
     }
+  } else if (node.created && transformFields.includes(name as any)) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const payload: MutationOp = { op: "set_transform", id: node.id, [name]: value } as MutationOp;
+      ops.push(payload);
+    }
+  } else if (node.created && visualFields.includes(name as any)) {
+    const payload: MutationOp = { op: "set_visual", id: node.id };
+    if (name === "background" || name === "textColor") {
+      payload[name] = packColor(value as ColorInput);
+    } else if (name === "clipChildren") {
+      payload.clipChildren = Boolean(value);
+    } else if (typeof value === "number" && Number.isFinite(value)) {
+      payload[name] = value;
+    }
+    const hasField =
+      payload.opacity != null ||
+      payload.cornerRadius != null ||
+      payload.background != null ||
+      payload.textColor != null ||
+      payload.clipChildren != null;
+    if (hasField) {
+      ops.push(payload);
+    }
   }
   scheduleFlush();
 },
@@ -569,5 +709,9 @@ export const createSolidNativeHost = (native: RendererAdapter) => {
       return flushPending;
     },
     root,
+    // Expose node index for event polling
+    getNodeIndex() {
+      return nodeIndex;
+    },
   };
 };

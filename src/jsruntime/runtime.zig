@@ -1,10 +1,10 @@
 const std = @import("std");
 
 const alloc = @import("../alloc.zig");
+const solid_events = @import("../solid/events/mod.zig");
 const console = @import("console.zig");
 const hot_reload = @import("hotreload.zig");
 const types = @import("types.zig");
-
 pub const FrameData = types.FrameData;
 pub const FrameResult = types.FrameResult;
 pub const FrameCommand = types.FrameCommand;
@@ -26,6 +26,12 @@ pub const JSRuntime = @This();
 
 allocator: std.mem.Allocator,
 stored_message: []u8 = &.{},
+event_cb: ?EventCallback = null,
+event_ctx: ?*anyopaque = null,
+// Event ring buffer pointer for direct event dispatch (Phase 2)
+event_ring: ?*solid_events.EventRing = null,
+
+pub const EventCallback = fn (ctx: ?*anyopaque, name: []const u8, payload: []const u8) void;
 
 pub const Error = error{
     RuntimeInitFailed,
@@ -37,6 +43,8 @@ pub const Error = error{
 pub fn init(_: []const u8) Error!JSRuntime {
     return JSRuntime{
         .allocator = alloc.allocator(),
+        .event_cb = null,
+        .event_ctx = null,
     };
 }
 

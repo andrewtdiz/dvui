@@ -59,6 +59,23 @@ const nativeSymbols = {
     args: ["ptr", "ptr", "usize"],
     returns: "bool",
   },
+  // Event ring buffer FFI (Phase 2)
+  getEventRingHeader: {
+    args: ["ptr"],
+    returns: "ptr",  // Returns pointer to Header struct (16 bytes)
+  },
+  getEventRingBuffer: {
+    args: ["ptr"],
+    returns: "ptr",  // Returns pointer to event entries
+  },
+  getEventRingDetail: {
+    args: ["ptr"],
+    returns: "ptr",  // Returns pointer to detail string buffer
+  },
+  acknowledgeEvents: {
+    args: ["ptr", "u32"],
+    returns: "void",
+  },
 } as const;
 
 export type NativeLibrary = ReturnType<typeof loadNativeLibrary>;

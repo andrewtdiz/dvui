@@ -1222,15 +1222,9 @@ pub fn timerRemove(self: *Self, id: Id) void {
 ///
 /// Toasts are shown in rect centered horizontally and 70% down vertically.
 pub fn toastsShow(self: *Self, subwindow_id: ?Id, rect: Rect.Natural) void {
+    _ = rect;
     var it = self.toasts.iterator(subwindow_id);
     it.i = self.toasts.indexOfSubwindow(subwindow_id) orelse return;
-    var toast_win = dvui.FloatingWindowWidget.init(@src(), .{ .stay_above_parent_window = subwindow_id != null, .process_events_in_deinit = false }, .{ .background = false, .border = .{} });
-    defer toast_win.deinit();
-
-    toast_win.data().rect = dvui.placeIn(.cast(rect), toast_win.data().rect.size(), .none, .{ .x = 0.5, .y = 0.7 });
-    toast_win.install();
-    toast_win.drawBackground();
-    toast_win.autoSize(); // affects next frame
 
     var vbox = dvui.box(@src(), .{}, .{});
     defer vbox.deinit();

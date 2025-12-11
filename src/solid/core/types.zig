@@ -1,5 +1,8 @@
 const std = @import("std");
-const tailwind = @import("tailwind.zig");
+
+const dvui = @import("dvui");
+const tailwind = @import("../style/tailwind.zig");
+const dirty = @import("dirty.zig");
 
 pub const NodeKind = enum {
     root,
@@ -115,6 +118,19 @@ pub const LayoutCache = struct {
     text_hash: u64 = 0,
 };
 
+pub const PaintCache = struct {
+    vertices: std.ArrayList(dvui.Vertex) = .empty,
+    indices: std.ArrayList(u16) = .empty,
+    version: u64 = 0,
+    paint_dirty: bool = true,
+    painted_rect: ?Rect = null,
+
+    fn deinit(self: *PaintCache, allocator: std.mem.Allocator) void {
+        self.vertices.deinit(allocator);
+        self.indices.deinit(allocator);
+    }
+};
+
 pub const Transform = struct {
     anchor: [2]f32 = .{ 0.5, 0.5 },
     scale: [2]f32 = .{ 1, 1 },
@@ -179,6 +195,7 @@ pub const SolidNode = struct {
     subtree_version: u64 = 0,
     last_render_version: u64 = 0,
     layout: LayoutCache = .{},
+    paint: PaintCache = .{},
     transform: Transform = .{},
     visual: VisualProps = .{},
     interactive_self: bool = false,
@@ -229,6 +246,7 @@ pub const SolidNode = struct {
         if (self.input_state) |*state| {
             state.deinit();
         }
+        self.paint.deinit(allocator);
         self.children.deinit(allocator);
         self.listeners.deinit();
     }
@@ -237,6 +255,7 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, content);
         if (self.text.len > 0) allocator.free(self.text);
         self.text = copy;
+        self.invalidatePaint();
     }
 
     pub fn setTag(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
@@ -258,6 +277,7 @@ pub const SolidNode = struct {
         if (self.class_name.len > 0) allocator.free(self.class_name);
         self.class_name = copy;
         self.class_spec_dirty = true;
+        self.invalidatePaint();
     }
 
     pub fn className(self: *const SolidNode) []const u8 {
@@ -329,6 +349,17 @@ pub const SolidNode = struct {
         self.last_render_version = self.subtree_version;
     }
 
+    pub fn needsPaintUpdate(self: *const SolidNode) bool {
+        if (self.paint.paint_dirty) return true;
+        if (self.paint.version < self.subtree_version) return true;
+        if (self.layout.version > self.paint.version) return true;
+        return false;
+    }
+
+    pub fn invalidatePaint(self: *SolidNode) void {
+        self.paint.paint_dirty = true;
+    }
+
     pub fn interactiveChildCount(self: *const SolidNode) u32 {
         const self_weight: u32 = if (self.interactive_self) 1 else 0;
         if (self.total_interactive <= self_weight) return 0;
@@ -350,6 +381,29 @@ pub const SolidNode = struct {
     pub fn isInteractive(self: *const SolidNode) bool {
         return self.interactive_self or self.listeners.names.items.len > 0;
     }
+
+    /// Returns true if this node's layout needs to be recomputed.
+    /// Layout is dirty when:
+    /// - The cached rect is null (never computed)
+    /// - The layout version is older than the subtree version (something changed)
+    pub fn needsLayoutUpdate(self: *const SolidNode) bool {
+        if (self.layout.rect == null) return true;
+        return self.layout.version < self.subtree_version;
+    }
+
+    /// Explicitly invalidates this node's layout cache.
+    /// Call this when external factors (like window resize) require re-layout.
+    pub fn invalidateLayout(self: *SolidNode) void {
+        self.layout.rect = null;
+    }
+
+    /// Computes a hash of the text content for cache invalidation.
+    pub fn textContentHash(self: *const SolidNode) u64 {
+        if (self.text.len == 0) return 0;
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(self.text);
+        return hasher.final();
+    }
 };
 
 const InsertError = error{
@@ -360,12 +414,13 @@ const InsertError = error{
 pub const NodeStore = struct {
     allocator: std.mem.Allocator,
     nodes: std.AutoHashMap(u32, SolidNode),
-    change_counter: u64 = 0,
+    versions: dirty.VersionTracker = .{},
 
     pub fn init(self: *NodeStore, allocator: std.mem.Allocator) !void {
         self.* = .{
             .allocator = allocator,
             .nodes = std.AutoHashMap(u32, SolidNode).init(allocator),
+            .versions = .{},
         };
         try self.ensureRoot(0);
     }
@@ -505,7 +560,7 @@ pub const NodeStore = struct {
         }
     }
 
-    fn markNodeChanged(self: *NodeStore, id: u32) void {
+    pub fn markNodeChanged(self: *NodeStore, id: u32) void {
         const version = self.nextVersion();
         var current: ?u32 = id;
         var is_self = true;
@@ -513,6 +568,7 @@ pub const NodeStore = struct {
             const _node = self.nodes.getPtr(node_id) orelse break;
             if (is_self) {
                 _node.version = version;
+                _node.invalidatePaint();
                 is_self = false;
             }
             if (_node.subtree_version < version) {
@@ -522,9 +578,12 @@ pub const NodeStore = struct {
         }
     }
 
+    pub fn currentVersion(self: *const NodeStore) u64 {
+        return self.versions.current();
+    }
+
     fn nextVersion(self: *NodeStore) u64 {
-        self.change_counter += 1;
-        return self.change_counter;
+        return self.versions.next();
     }
 
     fn activateInteractive(self: *NodeStore, id: u32) void {
