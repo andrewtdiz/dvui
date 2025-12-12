@@ -1,7 +1,7 @@
 const std = @import("std");
+
 const dvui = @import("../dvui.zig");
 const c = dvui.c;
-
 const Rect = dvui.Rect;
 const Size = dvui.Size;
 const Texture = dvui.Texture;
@@ -18,9 +18,9 @@ id: FontId,
 pub const Error = error{FontError};
 
 // default bytes if font id is not found in database
-pub const default_ttf_bytes = builtin.Vera;
+pub const default_ttf_bytes = builtin.SegoeUI;
 // NOTE: This font name should match the name in the font data base
-pub const default_font_id = FontId.Vera;
+pub const default_font_id = FontId.SegoeUI;
 
 pub fn hash(font: Font) u64 {
     var h = dvui.fnv.init();

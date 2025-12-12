@@ -88,7 +88,17 @@ pub fn renderTriangles(triangles: Triangles, tex: ?Texture) Backend.GenericError
     clipping.h = @max(0, @ceil(clipping.y - @floor(clipping.y) + clipping.h));
     clipping.y = @floor(clipping.y);
 
-    const clipr: ?Rect.Physical = if (triangles.bounds.clippedBy(clipping)) clipping.offsetNegPoint(cw.render_target.offset) else null;
+    // DVUI normally avoids enabling backend scissor if triangle bounds are fully inside the clip.
+    // For Solid integration we rely on clipping for overflow-hidden; if bounds are stale or
+    // underestimated, the scissor gate can be skipped and children bleed. Enabling scissor for
+    // any non-fullscreen clip keeps default behavior identical while guaranteeing clipping works.
+    const screen_clip = cw.rect_pixels;
+    const clip_non_fullscreen = clipping.x != screen_clip.x or clipping.y != screen_clip.y or
+        clipping.w != screen_clip.w or clipping.h != screen_clip.h;
+    const clipr: ?Rect.Physical = if (clip_non_fullscreen or triangles.bounds.clippedBy(clipping))
+        clipping.offsetNegPoint(cw.render_target.offset)
+    else
+        null;
 
     if (cw.render_target.offset.nonZero()) {
         const offset = cw.render_target.offset;

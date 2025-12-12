@@ -35,6 +35,10 @@ pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec
     if (spec.opacity) |opacity| {
         node.visual.opacity = opacity;
     }
+    // Always apply z-index so removing classes resets to default.
+    node.visual.z_index = spec.z_index;
+    // Clip children if overflow-hidden was specified.
+    node.visual.clip_children = spec.clip_children;
 }
 
 pub fn applyVisualToOptions(node: *const types.SolidNode, options: *dvui.Options) void {

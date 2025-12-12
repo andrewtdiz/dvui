@@ -137,9 +137,7 @@ pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
         dirty_tracker.add(screen_rect);
     }
 
-    for (root.children.items) |child_id| {
-        renderNode(runtime, store, child_id, scratch, &dirty_tracker);
-    }
+    renderChildrenOrdered(runtime, store, root, scratch, &dirty_tracker, false);
     return true;
 }
 
@@ -153,15 +151,11 @@ fn renderNode(
     const node = store.node(node_id) orelse return;
     switch (node.kind) {
         .root => {
-            for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator, tracker);
-            }
+            renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
             node.markRendered();
         },
         .slot => {
-            for (node.children.items) |child_id| {
-                renderNode(runtime, store, child_id, allocator, tracker);
-            }
+            renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
             node.markRendered();
         },
         .text => renderText(store, node),
@@ -293,15 +287,36 @@ fn renderParagraphDirect(
                 options.font_style = style_name;
             }
             // Text rendering honors scale/translation via the transformed bounds; rotation is handled for backgrounds only.
-            drawTextDirect(bounds, trimmed, node.visual, options.font_style);
+            // Apply Tailwind padding and horizontal alignment manually for the direct draw path.
+            const scale = dvui.windowNaturalScale();
+            const pad_left = (class_spec.padding.left orelse 0) * scale;
+            const pad_right = (class_spec.padding.right orelse 0) * scale;
+            const pad_top = (class_spec.padding.top orelse 0) * scale;
+            const pad_bottom = (class_spec.padding.bottom orelse 0) * scale;
+
+            var text_rect = bounds;
+            text_rect.x += pad_left;
+            text_rect.y += pad_top;
+            text_rect.w = @max(0.0, text_rect.w - (pad_left + pad_right));
+            text_rect.h = @max(0.0, text_rect.h - (pad_top + pad_bottom));
+
+            if (class_spec.text_align) |text_align| {
+                const font = options.fontGet();
+                const size_nat = font.textSize(trimmed);
+                const text_w = size_nat.w * scale;
+                switch (text_align) {
+                    .center => text_rect.x += (text_rect.w - text_w) / 2.0,
+                    .right => text_rect.x += (text_rect.w - text_w),
+                    else => {},
+                }
+            }
+
+            drawTextDirect(text_rect, trimmed, node.visual, options.font_style);
         }
     }
 
-    for (node.children.items) |child_id| {
-        const child = store.node(child_id) orelse continue;
-        if (child.kind == .text) continue; // already drawn as part of the paragraph
-        renderNode(runtime, store, child_id, allocator, tracker);
-    }
+    // Paragraph already draws its text nodes; render non-text children (z-index ordered).
+    renderChildrenOrdered(runtime, store, node, allocator, tracker, true);
     node.markRendered();
 }
 
@@ -369,9 +384,7 @@ fn renderContainer(
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
 
-    for (node.children.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator, tracker);
-    }
+    renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
     node.markRendered();
 }
 
@@ -419,9 +432,7 @@ fn renderGeneric(
     allocator: std.mem.Allocator,
     tracker: *DirtyRegionTracker,
 ) void {
-    for (node.children.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator, tracker);
-    }
+    renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
 }
 
 fn renderNonInteractiveDirect(
@@ -463,9 +474,7 @@ fn renderNonInteractiveDirect(
 
     if (std.mem.eql(u8, node.tag, "div")) {
         renderCachedOrDirectBackground(node, rect, allocator, class_spec.background);
-        for (node.children.items) |child_id| {
-            renderNode(runtime, store, child_id, allocator, tracker);
-        }
+        renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
         node.markRendered();
         return;
     }
@@ -646,7 +655,7 @@ fn renderButton(
     // DVUI widget ID. This breaks click detection and event dispatch.
     // By using ButtonWidget directly with id_extra set to a hash of node_id, each button
     // gets a unique ID even though they all originate from the same source location.
-    var bw = dvui.ButtonWidget.init(@src(), .{}, options);
+    var bw = dvui.ButtonWidget.init(@src(), .{ .draw_focus = false }, options);
     bw.install();
     bw.processEvents();
     bw.drawBackground();
@@ -885,9 +894,64 @@ fn renderChildElements(
     allocator: std.mem.Allocator,
     tracker: *DirtyRegionTracker,
 ) void {
+    renderChildrenOrdered(runtime, store, node, allocator, tracker, true);
+}
+
+fn renderChildrenOrdered(
+    runtime: ?*jsruntime.JSRuntime,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    allocator: std.mem.Allocator,
+    tracker: *DirtyRegionTracker,
+    skip_text: bool,
+) void {
+    if (node.children.items.len == 0) return;
+
+    var any_z = false;
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;
-        if (child.kind == .text) continue;
+        if (skip_text and child.kind == .text) continue;
+        if (child.visual.z_index != 0) any_z = true;
+    }
+
+    if (!any_z) {
+        for (node.children.items) |child_id| {
+            const child = store.node(child_id) orelse continue;
+            if (skip_text and child.kind == .text) continue;
+            renderNode(runtime, store, child_id, allocator, tracker);
+        }
+        return;
+    }
+
+    var ordered: std.ArrayList(u32) = .empty;
+    defer ordered.deinit(allocator);
+
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        if (skip_text and child.kind == .text) continue;
+        ordered.append(allocator, child_id) catch {};
+    }
+
+    // Stable insertion sort by z_index ascending so higher z renders last/on top.
+    var i: usize = 1;
+    while (i < ordered.items.len) : (i += 1) {
+        const key_id = ordered.items[i];
+        const key_node = store.node(key_id);
+        const key_z: i16 = if (key_node) |kn| kn.visual.z_index else 0;
+
+        var j: usize = i;
+        while (j > 0) {
+            const prev_id = ordered.items[j - 1];
+            const prev_node = store.node(prev_id);
+            const prev_z: i16 = if (prev_node) |pn| pn.visual.z_index else 0;
+            if (prev_z <= key_z) break;
+            ordered.items[j] = prev_id;
+            j -= 1;
+        }
+        ordered.items[j] = key_id;
+    }
+
+    for (ordered.items) |child_id| {
         renderNode(runtime, store, child_id, allocator, tracker);
     }
 }

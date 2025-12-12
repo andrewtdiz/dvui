@@ -23,6 +23,11 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
     defer visible_mask.deinit(std.heap.page_allocator);
     var visible_count: usize = 0;
 
+    // Absolute-positioned children are laid out relative to the flex container
+    // but do not participate in flex flow or gaps.
+    var absolute_children: std.ArrayListUnmanaged(u32) = .{};
+    defer absolute_children.deinit(std.heap.page_allocator);
+
     const available_size = types.Size{ .w = area.w, .h = area.h };
     var total_main: f32 = 0;
     var max_cross: f32 = 0;
@@ -34,6 +39,13 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             if (child_spec.hidden) {
                 child_sizes.append(std.heap.page_allocator, .{}) catch {};
                 visible_mask.append(std.heap.page_allocator, false) catch {};
+                continue;
+            }
+
+            if (child_spec.position != null and child_spec.position.? == .absolute) {
+                child_sizes.append(std.heap.page_allocator, .{}) catch {};
+                visible_mask.append(std.heap.page_allocator, false) catch {};
+                absolute_children.append(std.heap.page_allocator, child_id) catch {};
                 continue;
             }
 
@@ -90,6 +102,15 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
 
         const is_visible = if (idx < visible_mask.items.len) visible_mask.items[idx] else false;
         if (!is_visible) {
+            const child_spec = child_ptr.prepareClassSpec();
+            if (child_spec.hidden) {
+                child_ptr.layout.rect = types.Rect{};
+                continue;
+            }
+            if (child_spec.position != null and child_spec.position.? == .absolute) {
+                // Absolute children are laid out after flex flow.
+                continue;
+            }
             // Hidden or empty text anchor: zero rect and no gap contribution.
             child_ptr.layout.rect = types.Rect{};
             continue;
@@ -123,6 +144,11 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
         }
 
         @call(.auto, computeNodeLayout, .{ store, child_ptr, child_rect });
+    }
+
+    for (absolute_children.items) |child_id| {
+        const child_ptr = store.node(child_id) orelse continue;
+        @call(.auto, computeNodeLayout, .{ store, child_ptr, area });
     }
 }
 

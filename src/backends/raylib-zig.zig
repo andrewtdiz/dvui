@@ -1,8 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
 const dvui = @import("dvui");
-pub const raylib = @import("raylib");
 pub const raygui = @import("raygui");
+pub const raylib = @import("raylib");
 pub const zglfw = @import("zglfw");
 
 pub const kind: dvui.enums.Backend = .raylib_zig;
@@ -202,7 +203,12 @@ pub fn windowSize(_: *RaylibBackend) dvui.Size.Natural {
 }
 
 pub fn contentScale(_: *RaylibBackend) f32 {
-    return 1.0;
+    // On HiDPI displays with window_highdpi flag enabled,
+    // getRenderWidth returns physical pixels and getScreenWidth returns logical size.
+    // The ratio gives us the content scale factor.
+    const render_w: f32 = @floatFromInt(raylib.getRenderWidth());
+    const screen_w: f32 = @floatFromInt(raylib.getScreenWidth());
+    return if (screen_w > 0) render_w / screen_w else 1.0;
 }
 
 pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: []const dvui.Vertex, idx: []const u16, clipr_in: ?dvui.Rect.Physical) !void {

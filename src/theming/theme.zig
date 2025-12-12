@@ -1,6 +1,6 @@
-const dvui = @import("../dvui.zig");
 const std = @import("std");
 
+const dvui = @import("../dvui.zig");
 const Color = dvui.Color;
 const Font = dvui.Font;
 const Options = dvui.Options;
@@ -178,12 +178,6 @@ pub fn picker(src: std.builtin.SourceLocation, themes: []const Theme, opts: Opti
 }
 
 pub const builtin = struct {
-    pub const adwaita_light = @import("presets/Adwaita.zig").light;
-    pub const adwaita_dark = @import("presets/Adwaita.zig").dark;
-    pub const dracula = QuickTheme.builtin.dracula.toTheme(null) catch unreachable;
-    pub const gruvbox = QuickTheme.builtin.gruvbox.toTheme(null) catch unreachable;
-    pub const jungle = QuickTheme.builtin.jungle.toTheme(null) catch unreachable;
-    pub const opendyslexic = QuickTheme.builtin.opendyslexic.toTheme(null) catch unreachable;
     pub const shadcn = QuickTheme.builtin.shadcn.toTheme(null) catch unreachable;
 
     test {
@@ -211,12 +205,6 @@ pub const builtins = blk: {
 
 pub const QuickTheme = struct {
     pub const builtin = struct {
-        pub const adwaita_light: QuickTheme = @import("presets/adwaita_light.zon");
-        pub const adwaita_dark: QuickTheme = @import("presets/adwaita_dark.zon");
-        pub const dracula: QuickTheme = @import("presets/dracula.zon");
-        pub const gruvbox: QuickTheme = @import("presets/gruvbox.zon");
-        pub const jungle: QuickTheme = @import("presets/jungle.zon");
-        pub const opendyslexic: QuickTheme = @import("presets/opendyslexic.zon");
         pub const shadcn: QuickTheme = @import("presets/shadcn.zon");
 
         test {

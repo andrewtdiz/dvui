@@ -4,6 +4,26 @@
 //!
 //! `dvui.currentWindow` returns this when between `begin`/`end`.
 
+const std = @import("std");
+const math = std.math;
+const builtin = @import("builtin");
+
+const dvui = @import("../dvui.zig");
+const Options = dvui.Options;
+const Rect = dvui.Rect;
+const RectScale = dvui.RectScale;
+const Size = dvui.Size;
+const Point = dvui.Point;
+const Event = dvui.Event;
+const WidgetData = dvui.WidgetData;
+const Widget = dvui.Widget;
+const Id = dvui.Id;
+const Animation = dvui.Animation;
+const Theme = dvui.Theme;
+const Dialog = dvui.Dialog;
+const Toast = dvui.Toast;
+const c = dvui.c;
+
 pub const Window = @This();
 const Self = Window;
 
@@ -119,7 +139,7 @@ _widget_stack: std.heap.ArenaAllocator,
 render_target: dvui.RenderTarget = .{ .texture = null, .offset = .{} },
 end_rendering_done: bool = false,
 
-    debug: @import("debug.zig") = .{},
+debug: @import("debug.zig") = .{},
 
 accesskit: dvui.AccessKit,
 
@@ -170,10 +190,7 @@ pub fn init(
         .backend = backend_ctx,
         // TODO: Add some way to opt-out of including the builtin fonts in the built binary
         .fonts = try .initWithBuiltins(gpa),
-        .theme = if (init_opts.theme) |t| t else switch (init_opts.color_scheme orelse backend_ctx.preferredColorScheme() orelse .light) {
-            .light => Theme.builtin.adwaita_light,
-            .dark => Theme.builtin.adwaita_dark,
-        },
+        .theme = if (init_opts.theme) |t| t else Theme.builtin.shadcn,
         .accesskit = .{},
     };
 
@@ -1442,28 +1459,6 @@ pub fn minSizeForChild(self: *Self, s: Size) void {
     _ = self;
     _ = s;
 }
-
-const Options = dvui.Options;
-const Rect = dvui.Rect;
-const RectScale = dvui.RectScale;
-const Size = dvui.Size;
-const Point = dvui.Point;
-const Event = dvui.Event;
-const WidgetData = dvui.WidgetData;
-const Widget = dvui.Widget;
-const Id = dvui.Id;
-
-const Animation = dvui.Animation;
-const Theme = dvui.Theme;
-const Dialog = dvui.Dialog;
-const Toast = dvui.Toast;
-
-const c = dvui.c;
-
-const std = @import("std");
-const math = std.math;
-const builtin = @import("builtin");
-const dvui = @import("../dvui.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

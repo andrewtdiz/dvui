@@ -9,7 +9,7 @@ const screenHeight = 450;
 const renderer = new NativeRenderer({
   callbacks: {
     onLog(level, message) {
-      console.log(`[native:${level}] ${message}`);
+      // console.log(`[native:${level}] ${message}`);
     },
     onEvent(name) {
       if (name === "window_closed") {
@@ -60,20 +60,6 @@ const loop = () => {
 
   host.flush();
   renderer.present();
-
-  // One-time log of render-time class names to verify active bundle.
-  if (frame === 0) {
-    const rootChild = host.root.children[0];
-    if (rootChild) {
-      const cls = rootChild.props.className ?? rootChild.props.class;
-      console.log("[frontend debug] root child className=", cls);
-      const nested = rootChild.children[0];
-      if (nested) {
-        const nestedCls = nested.props.className ?? nested.props.class;
-        console.log("[frontend debug] nested className=", nestedCls);
-      }
-    }
-  }
   
   // Poll event ring buffer and dispatch to Solid handlers
   const nodeIndex = host.getNodeIndex?.() ?? new Map();

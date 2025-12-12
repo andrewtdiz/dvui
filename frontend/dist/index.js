@@ -2357,6 +2357,10 @@ var insert = (parent, value, anchor) => {
     createEffect(() => applyInsertValue(parent, value));
   }
 };
+var effect = (fn, initial) => {
+  fn(initial);
+  return createEffect(() => fn(initial));
+};
 // solid/native/dvui-core.ts
 import { dlopen as dlopen2, ptr as ptr2, suffix as suffix2, CString } from "bun:ffi";
 import { existsSync as existsSync2 } from "fs";
@@ -2588,57 +2592,80 @@ var setTime = (elapsed, dt) => {
 // solid/App.tsx
 var App = () => {
   const [count, setCount] = createSignal(0);
+  const [x, setX] = createSignal(0);
+  const [y, setY] = createSignal(0);
   const elapsed = getElapsedSeconds;
   const delta = getDeltaSeconds;
+  const radius = 50;
+  const center_x = 200;
+  const center_y = 150;
+  const speed = 3;
+  createEffect(() => {
+    const t = elapsed();
+    const angle = t * speed;
+    setX(center_x + Math.cos(angle) * radius);
+    setY(center_y + Math.sin(angle) * radius);
+  });
   return (() => {
-    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("p"), _el$5 = createElement("p"), _el$7 = createElement("p"), _el$9 = createElement("button"), _el$10 = createElement("p"), _el$11 = createTextNode(`Right `);
+    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("p"), _el$5 = createElement("button"), _el$6 = createElement("div"), _el$7 = createElement("div"), _el$8 = createElement("p"), _el$0 = createElement("div"), _el$1 = createElement("p"), _el$11 = createElement("div"), _el$12 = createElement("div"), _el$13 = createElement("p"), _el$17 = createElement("p"), _el$18 = createTextNode(`Right `);
     insertNode(_el$, _el$2);
-    setProp(_el$, "class", "relative w-full h-full bg-gray-500");
+    setProp(_el$, "class", "w-full h-full bg-neutral-900");
     insertNode(_el$2, _el$3);
     insertNode(_el$2, _el$5);
-    insertNode(_el$2, _el$7);
-    insertNode(_el$2, _el$9);
-    insertNode(_el$2, _el$10);
-    setProp(_el$2, "class", "absolute bottom-0 right-0 flex flex-col items-start justify-start gap-3 bg-red-500 border border-red-500 w-64 h-64 p-3 rounded-md");
+    insertNode(_el$2, _el$6);
+    insertNode(_el$2, _el$11);
+    insertNode(_el$2, _el$17);
+    setProp(_el$2, "class", "absolute top-15 left-15 flex flex-col items-start justify-start border-2 border-red-700 gap-3 bg-red-500 w-64 h-64 p-3 rounded-md");
     insertNode(_el$3, createTextNode(`Centered Text`));
-    setProp(_el$3, "class", "bg-blue-400 text-gray-100 rounded-sm px-2 py-1 text-center");
-    insertNode(_el$5, createTextNode(`Does render on the UI`));
-    setProp(_el$5, "class", "bg-green-500 text-white");
-    insertNode(_el$7, createTextNode(`Doesnt render on the UI`));
-    setProp(_el$7, "class", "text-white");
-    setProp(_el$9, "class", "bg-blue-400 text-gray-100 px-4 py-2 rounded");
-    setProp(_el$9, "onClick", (payload) => {
+    setProp(_el$3, "class", "absolute top-0 right-0 bg-blue-400 text-gray-100 px-2 py-1 text-center");
+    setProp(_el$5, "class", "bg-blue-400 text-gray-100 px-4 py-2 rounded");
+    setProp(_el$5, "onClick", (payload) => {
       const view = new DataView(payload.buffer);
       const nodeId = view.getUint32(0, true);
       console.log("[event demo] click payload nodeId=", nodeId);
       setCount((prev) => prev + 1);
     });
-    insert(_el$9, count);
+    insert(_el$5, count);
+    insertNode(_el$6, _el$7);
+    insertNode(_el$6, _el$0);
+    setProp(_el$6, "class", "w-32 h-32 bg-neutral-800 border border-white rounded-sm");
+    insertNode(_el$7, _el$8);
+    setProp(_el$7, "class", "absolute top-6 left-6 w-20 h-20 bg-blue-500 z-20 flex items-center justify-center text-white text-sm rounded-sm");
+    insertNode(_el$8, createTextNode(`z-20`));
+    insertNode(_el$0, _el$1);
+    insertNode(_el$1, createTextNode(`z-0`));
+    insertNode(_el$11, _el$12);
+    insertNode(_el$11, _el$13);
+    setProp(_el$11, "class", "w-32 h-32 bg-neutral-800 border border-white overflow-hidden rounded-sm relative");
+    setProp(_el$12, "class", "absolute top-0 left-0 w-48 h-48 bg-yellow-400");
+    insertNode(_el$13, createTextNode(`clipped`));
+    setProp(_el$13, "class", "absolute bottom-1 right-1 text-black text-xs bg-white px-1 rounded-sm");
     insert(_el$2, createComponent2(Show, {
       get when() {
         return memo2(() => count() > 0)() && count() < 10;
       },
       get children() {
-        var _el$0 = createElement("p"), _el$1 = createTextNode(`Right `);
-        insertNode(_el$0, _el$1);
-        setProp(_el$0, "class", "bg-purple-500 text-white rounded-sm");
-        insert(_el$0, count, null);
-        return _el$0;
+        var _el$15 = createElement("p"), _el$16 = createTextNode(`Right `);
+        insertNode(_el$15, _el$16);
+        setProp(_el$15, "class", "bg-purple-500 text-white rounded-sm");
+        insert(_el$15, count, null);
+        return _el$15;
       }
-    }), _el$10);
+    }), _el$17);
     insert(_el$2, (() => {
       var _c$ = memo2(() => !!(count() > 0 && count() < 10));
       return () => _c$() && (() => {
-        var _el$12 = createElement("p"), _el$13 = createTextNode(`Right `);
-        insertNode(_el$12, _el$13);
-        setProp(_el$12, "class", "bg-purple-500 text-white rounded-sm");
-        insert(_el$12, count, null);
-        return _el$12;
+        var _el$19 = createElement("p"), _el$20 = createTextNode(`Right `);
+        insertNode(_el$19, _el$20);
+        setProp(_el$19, "class", "bg-purple-500 text-white rounded-sm");
+        insert(_el$19, count, null);
+        return _el$19;
       })();
-    })(), _el$10);
-    insertNode(_el$10, _el$11);
-    setProp(_el$10, "class", "bg-purple-500 text-white rounded-sm");
-    insert(_el$10, count, null);
+    })(), _el$17);
+    insertNode(_el$17, _el$18);
+    setProp(_el$17, "class", "bg-purple-500 text-white rounded-sm");
+    insert(_el$17, count, null);
+    effect((_$p) => setProp(_el$0, "class", `absolute top-2 left-2 w-20 h-20 bg-green-400 z-${count()}`, _$p));
     return _el$;
   })();
 };
@@ -2661,9 +2688,7 @@ var screenWidth = 800;
 var screenHeight = 450;
 var renderer = new NativeRenderer({
   callbacks: {
-    onLog(level, message) {
-      console.log(`[native:${level}] ${message}`);
-    },
+    onLog(level, message) {},
     onEvent(name) {
       if (name === "window_closed") {
         shutdown();
@@ -2701,18 +2726,6 @@ var loop = () => {
   setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host2.flush();
   renderer.present();
-  if (frame === 0) {
-    const rootChild = host2.root.children[0];
-    if (rootChild) {
-      const cls = rootChild.props.className ?? rootChild.props.class;
-      console.log("[frontend debug] root child className=", cls);
-      const nested = rootChild.children[0];
-      if (nested) {
-        const nestedCls = nested.props.className ?? nested.props.class;
-        console.log("[frontend debug] nested className=", nestedCls);
-      }
-    }
-  }
   const nodeIndex = host2.getNodeIndex?.() ?? new Map;
   renderer.pollEvents(nodeIndex);
   frame += 1;

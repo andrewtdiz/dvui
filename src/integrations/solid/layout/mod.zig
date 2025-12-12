@@ -79,7 +79,6 @@ fn sideValue(value: ?f32) f32 {
 
 pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
     const prev_rect = node.layout.rect;
-    var rect = parent_rect;
     const spec = node.prepareClassSpec();
     const scale = dvui.windowNaturalScale();
 
@@ -89,38 +88,97 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         return;
     }
 
-    const margin_left = sideValue(spec.margin.left) * scale;
-    const margin_right = sideValue(spec.margin.right) * scale;
-    const margin_top = sideValue(spec.margin.top) * scale;
-    const margin_bottom = sideValue(spec.margin.bottom) * scale;
+    var rect: types.Rect = undefined;
+    const is_absolute = spec.position != null and spec.position.? == .absolute;
 
-    rect.x += margin_left;
-    rect.y += margin_top;
-    rect.w = @max(0.0, rect.w - (margin_left + margin_right));
-    rect.h = @max(0.0, rect.h - (margin_top + margin_bottom));
+    if (is_absolute) {
+        rect = types.Rect{
+            .x = parent_rect.x,
+            .y = parent_rect.y,
+            .w = 0,
+            .h = 0,
+        };
 
-    if (spec.width) |w| {
-        switch (w) {
-            .full => rect.w = @max(0.0, parent_rect.w - (margin_left + margin_right)),
-            .pixels => |px| rect.w = px * scale,
+        const left_offset = sideValue(spec.left) * scale;
+        const right_offset = sideValue(spec.right) * scale;
+        const top_offset = sideValue(spec.top) * scale;
+        const bottom_offset = sideValue(spec.bottom) * scale;
+
+        if (spec.width) |w| {
+            switch (w) {
+                .full => rect.w = parent_rect.w,
+                .pixels => |px| rect.w = px * scale,
+            }
+        } else if (spec.left != null and spec.right != null) {
+            rect.w = @max(0.0, parent_rect.w - left_offset - right_offset);
         }
-    }
-    if (spec.height) |h| {
-        switch (h) {
-            .full => rect.h = @max(0.0, parent_rect.h - (margin_top + margin_bottom)),
-            .pixels => |px| rect.h = px * scale,
-        }
-    }
 
-    if (node.kind == .text) {
-        const measured = measure.measureTextCached(node);
-        if (rect.w == 0) rect.w = measured.w;
-        if (rect.h == 0) rect.h = measured.h;
-    }
-    if (rect.w == 0 or rect.h == 0) {
-        const intrinsic = measure.measureNodeSize(store, node, .{ .w = rect.w, .h = rect.h });
-        if (rect.w == 0) rect.w = intrinsic.w;
-        if (rect.h == 0) rect.h = intrinsic.h;
+        if (spec.height) |h| {
+            switch (h) {
+                .full => rect.h = parent_rect.h,
+                .pixels => |px| rect.h = px * scale,
+            }
+        } else if (spec.top != null and spec.bottom != null) {
+            rect.h = @max(0.0, parent_rect.h - top_offset - bottom_offset);
+        }
+
+        if (node.kind == .text) {
+            const measured = measure.measureTextCached(node);
+            if (rect.w == 0) rect.w = measured.w;
+            if (rect.h == 0) rect.h = measured.h;
+        }
+        if (rect.w == 0 or rect.h == 0) {
+            const intrinsic = measure.measureNodeSize(store, node, .{ .w = parent_rect.w, .h = parent_rect.h });
+            if (rect.w == 0) rect.w = intrinsic.w;
+            if (rect.h == 0) rect.h = intrinsic.h;
+        }
+
+        if (spec.left != null) {
+            rect.x = parent_rect.x + left_offset;
+        } else if (spec.right != null) {
+            rect.x = parent_rect.x + parent_rect.w - right_offset - rect.w;
+        }
+        if (spec.top != null) {
+            rect.y = parent_rect.y + top_offset;
+        } else if (spec.bottom != null) {
+            rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
+        }
+    } else {
+        rect = parent_rect;
+
+        const margin_left = sideValue(spec.margin.left) * scale;
+        const margin_right = sideValue(spec.margin.right) * scale;
+        const margin_top = sideValue(spec.margin.top) * scale;
+        const margin_bottom = sideValue(spec.margin.bottom) * scale;
+
+        rect.x += margin_left;
+        rect.y += margin_top;
+        rect.w = @max(0.0, rect.w - (margin_left + margin_right));
+        rect.h = @max(0.0, rect.h - (margin_top + margin_bottom));
+
+        if (spec.width) |w| {
+            switch (w) {
+                .full => rect.w = @max(0.0, parent_rect.w - (margin_left + margin_right)),
+                .pixels => |px| rect.w = px * scale,
+            }
+        }
+        if (spec.height) |h| {
+            switch (h) {
+                .full => rect.h = @max(0.0, parent_rect.h - (margin_top + margin_bottom)),
+                .pixels => |px| rect.h = px * scale,
+            }
+        }
+
+        if (node.kind == .text) {
+            const measured = measure.measureTextCached(node);
+            if (rect.w == 0) rect.w = measured.w;
+            if (rect.h == 0) rect.h = measured.h;
+        }
+        if (rect.w == 0 or rect.h == 0) {
+            const intrinsic = measure.measureNodeSize(store, node, .{ .w = rect.w, .h = rect.h });
+            if (rect.w == 0) rect.w = intrinsic.w;
+            if (rect.h == 0) rect.h = intrinsic.h;
+        }
     }
 
     node.layout.rect = rect;

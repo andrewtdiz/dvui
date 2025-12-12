@@ -17,6 +17,11 @@ pub const Spec = struct {
     width: ?Width = null,
     height: ?Height = null,
     is_flex: bool = false,
+    position: ?Position = null,
+    top: ?f32 = null,
+    right: ?f32 = null,
+    bottom: ?f32 = null,
+    left: ?f32 = null,
     direction: ?dvui.enums.Direction = null,
     justify: ?dvui.FlexBoxWidget.ContentPosition = null,
     align_items: ?dvui.FlexBoxWidget.AlignItems = null,
@@ -29,6 +34,10 @@ pub const Spec = struct {
     gap_row: ?f32 = null,
     gap_col: ?f32 = null,
     corner_radius: ?f32 = null,
+    // Z-ordering (z-index). Default 0 preserves document order.
+    z_index: i16 = 0,
+    // Clip descendants to this node's bounds (overflow-hidden).
+    clip_children: bool = false,
     // New easy wins
     hidden: bool = false,
     opacity: ?f32 = null,
@@ -46,6 +55,10 @@ pub const Width = union(enum) {
 pub const Height = union(enum) {
     full,
     pixels: f32,
+};
+
+pub const Position = enum {
+    absolute,
 };
 
 const SideTarget = enum {
@@ -96,6 +109,7 @@ const LiteralKind = enum {
     flex_display,
     flex_row,
     flex_col,
+    absolute,
     justify_start,
     justify_center,
     justify_end,
@@ -109,6 +123,7 @@ const LiteralKind = enum {
     align_content_end,
     // Visibility
     hidden,
+    overflow_hidden,
     // Text alignment
     text_left,
     text_center,
@@ -124,6 +139,7 @@ const literal_rules = [_]LiteralRule{
     .{ .token = "flex", .kind = .flex_display },
     .{ .token = "flex-row", .kind = .flex_row },
     .{ .token = "flex-col", .kind = .flex_col },
+    .{ .token = "absolute", .kind = .absolute },
     .{ .token = "justify-start", .kind = .justify_start },
     .{ .token = "justify-center", .kind = .justify_center },
     .{ .token = "justify-end", .kind = .justify_end },
@@ -137,6 +153,7 @@ const literal_rules = [_]LiteralRule{
     .{ .token = "content-end", .kind = .align_content_end },
     // Visibility
     .{ .token = "hidden", .kind = .hidden },
+    .{ .token = "overflow-hidden", .kind = .overflow_hidden },
     // Text alignment
     .{ .token = "text-left", .kind = .text_left },
     .{ .token = "text-center", .kind = .text_center },
@@ -200,11 +217,13 @@ pub fn parse(classes: []const u8) Spec {
         if (token.len == 0) continue;
         if (handleLiteral(&spec, token)) continue;
         if (handleSpacing(&spec, token)) continue;
+        if (handleInset(&spec, token)) continue;
         if (handleGap(&spec, token)) continue;
         if (handleBorder(&spec, token)) continue;
         if (handleRounded(&spec, token)) continue;
         if (handleTypography(&spec, token)) continue;
         if (handleOpacity(&spec, token)) continue;
+        if (handleZIndex(&spec, token)) continue;
         _ = handlePrefixed(&spec, token);
     }
 
@@ -304,6 +323,7 @@ fn applyLiteral(spec: *Spec, kind: LiteralKind) void {
         .flex_display => spec.is_flex = true,
         .flex_row => spec.direction = .horizontal,
         .flex_col => spec.direction = .vertical,
+        .absolute => spec.position = .absolute,
         .justify_start => spec.justify = .start,
         .justify_center => spec.justify = .center,
         .justify_end => spec.justify = .end,
@@ -317,6 +337,7 @@ fn applyLiteral(spec: *Spec, kind: LiteralKind) void {
         .align_content_end => spec.align_content = .end,
         // Visibility
         .hidden => spec.hidden = true,
+        .overflow_hidden => spec.clip_children = true,
         // Text alignment
         .text_left => spec.text_align = .left,
         .text_center => spec.text_align = .center,
@@ -336,6 +357,94 @@ fn handleOpacity(spec: *Spec, token: []const u8) bool {
 
     spec.opacity = @as(f32, @floatFromInt(int_value)) / 100.0;
     return true;
+}
+
+fn handleZIndex(spec: *Spec, token: []const u8) bool {
+    const neg_prefix = "-z-";
+    const prefix = "z-";
+
+    var negative = false;
+    var suffix: []const u8 = undefined;
+
+    if (std.mem.startsWith(u8, token, neg_prefix)) {
+        negative = true;
+        suffix = token[neg_prefix.len..];
+    } else if (std.mem.startsWith(u8, token, prefix)) {
+        suffix = token[prefix.len..];
+    } else {
+        return false;
+    }
+
+    if (suffix.len == 0) return false;
+    if (std.mem.eql(u8, suffix, "auto")) {
+        spec.z_index = 0;
+        return true;
+    }
+
+    if (suffix[0] == '[' and suffix[suffix.len - 1] == ']') {
+        const inner = suffix[1 .. suffix.len - 1];
+        if (inner.len == 0) return false;
+        var value = std.fmt.parseInt(i16, inner, 10) catch return false;
+        if (negative and value > 0) {
+            value = -value;
+        }
+        spec.z_index = value;
+        return true;
+    }
+
+    var value = std.fmt.parseInt(i16, suffix, 10) catch return false;
+    if (negative) {
+        value = -value;
+    }
+    spec.z_index = value;
+    return true;
+}
+
+fn handleInset(spec: *Spec, token: []const u8) bool {
+    const top_prefix = "top-";
+    const right_prefix = "right-";
+    const bottom_prefix = "bottom-";
+    const left_prefix = "left-";
+
+    if (std.mem.startsWith(u8, token, top_prefix)) {
+        const value = parseInsetValue(token[top_prefix.len..]) orelse return false;
+        spec.top = value;
+        return true;
+    }
+    if (std.mem.startsWith(u8, token, right_prefix)) {
+        const value = parseInsetValue(token[right_prefix.len..]) orelse return false;
+        spec.right = value;
+        return true;
+    }
+    if (std.mem.startsWith(u8, token, bottom_prefix)) {
+        const value = parseInsetValue(token[bottom_prefix.len..]) orelse return false;
+        spec.bottom = value;
+        return true;
+    }
+    if (std.mem.startsWith(u8, token, left_prefix)) {
+        const value = parseInsetValue(token[left_prefix.len..]) orelse return false;
+        spec.left = value;
+        return true;
+    }
+
+    return false;
+}
+
+fn parseInsetValue(token: []const u8) ?f32 {
+    if (token.len == 0) return null;
+    if (token[0] == '[' and token[token.len - 1] == ']') {
+        const inner = token[1 .. token.len - 1];
+        if (inner.len == 0) return null;
+
+        var num_slice = inner;
+        if (std.mem.endsWith(u8, inner, "px")) {
+            num_slice = inner[0 .. inner.len - 2];
+        }
+        const value = std.fmt.parseFloat(f32, num_slice) catch return null;
+        if (!std.math.isFinite(value)) return null;
+        return value;
+    }
+    return parseSpacingValue(token);
 }
 
 fn handleBackground(spec: *Spec, suffix: []const u8) void {
@@ -462,6 +571,22 @@ fn handleBorder(spec: *Spec, token: []const u8) bool {
     var suffix = token[(prefix.len + 1)..];
     if (suffix.len == 0) return false;
 
+    if (suffix.len == 1) {
+        const dir_target: ?SideTarget = switch (suffix[0]) {
+            'x' => .horizontal,
+            'y' => .vertical,
+            't' => .top,
+            'r' => .right,
+            'b' => .bottom,
+            'l' => .left,
+            else => null,
+        };
+        if (dir_target) |target| {
+            spec.border.set(target, border_default_width);
+            return true;
+        }
+    }
+
     if (parseDirectionPrefix(suffix)) |dir_info| {
         var rest = suffix[dir_info.consume_len..];
         if (rest.len == 0) {
@@ -473,6 +598,10 @@ fn handleBorder(spec: *Spec, token: []const u8) bool {
         if (rest.len == 0) return false;
         if (parseBorderWidth(rest)) |value| {
             spec.border.set(dir_info.target, value);
+            return true;
+        }
+        if (lookupColor(rest)) |color_value| {
+            spec.border_color = color_value;
             return true;
         }
         return false;
@@ -502,7 +631,7 @@ fn handleRounded(spec: *Spec, token: []const u8) bool {
 }
 
 fn parseDirectionPrefix(suffix: []const u8) ?struct { target: SideTarget, consume_len: usize } {
-    if (suffix.len == 0) return null;
+    if (suffix.len < 2 or suffix[1] != '-') return null;
     return switch (suffix[0]) {
         'x' => .{ .target = .horizontal, .consume_len = 1 },
         'y' => .{ .target = .vertical, .consume_len = 1 },
