@@ -1,7 +1,5 @@
 const jsruntime = @import("jsruntime");
 
-const bridge = @import("bridge/jsc.zig");
-pub const bridge_jsc = bridge;
 const types = @import("core/types.zig");
 pub const NodeStore = types.NodeStore;
 pub const SolidNode = types.SolidNode;

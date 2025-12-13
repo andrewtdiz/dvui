@@ -4,7 +4,6 @@ const dvui = @import("dvui");
 const image_loader = @import("jsruntime").image_loader;
 const jsruntime = @import("jsruntime");
 
-const jsc_bridge = @import("../bridge/jsc.zig");
 const types = @import("../core/types.zig");
 const events = @import("../events/mod.zig");
 const layout = @import("../layout/mod.zig");
@@ -32,6 +31,7 @@ var logged_tree_dump: bool = false;
 var logged_render_state: bool = false;
 var logged_button_render: bool = false;
 var button_debug_count: usize = 0;
+var button_text_error_log_count: usize = 0;
 var paragraph_log_count: usize = 0;
 
 fn physicalToDvuiRect(rect: types.Rect) dvui.Rect {
@@ -638,13 +638,6 @@ fn renderButton(
         options.rect = physicalToDvuiRect(rect);
     }
 
-    var parent_rect_opt: ?types.Rect = null;
-    if (node.parent) |pid| {
-        if (store.node(pid)) |parent| {
-            parent_rect_opt = parent.layout.rect;
-        }
-    }
-
     if (button_debug_count < 5) {
         button_debug_count += 1;
     }
@@ -660,23 +653,34 @@ fn renderButton(
     bw.processEvents();
     bw.drawBackground();
 
-    // Draw caption with a different id_extra to avoid label ID collision
-    const label_id_extra = nodeIdExtra(node_id) +% 0x12345678;
-    var label_options = options.strip().override(bw.style()).override(.{
-        .gravity_x = 0.5,
-        .gravity_y = 0.5,
-        .id_extra = label_id_extra,
-    });
-    if (node.visual.text_color) |tc| {
-        label_options.color_text = packedColorToDvui(tc, node.visual.opacity);
-    }
+    // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
+    // This fixes cases where button text doesn't appear until a later repaint.
+    const content_rs = bw.data().contentRectScale();
+    const text_style = options.strip().override(bw.style());
+    const font = text_style.fontGet();
+    const size_nat = font.textSize(caption);
+    const text_w = size_nat.w * content_rs.s;
+    const text_h = size_nat.h * content_rs.s;
 
-    dvui.labelNoFmt(
-        @src(),
-        caption,
-        .{ .align_x = 0.5, .align_y = 0.5 },
-        label_options,
-    );
+    var text_rs = content_rs;
+    if (text_w < text_rs.r.w) text_rs.r.x += (text_rs.r.w - text_w) * 0.5;
+    if (text_h < text_rs.r.h) text_rs.r.y += (text_rs.r.h - text_h) * 0.5;
+    text_rs.r.w = text_w;
+    text_rs.r.h = text_h;
+
+    const prev_clip = dvui.clip(content_rs.r);
+    defer dvui.clipSet(prev_clip);
+    dvui.renderText(.{
+        .font = font,
+        .text = caption,
+        .rs = text_rs,
+        .color = text_style.color(.text),
+    }) catch |err| {
+        if (button_text_error_log_count < 8) {
+            button_text_error_log_count += 1;
+            log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
+        }
+    };
 
     bw.drawFocus();
     const pressed = bw.clicked();
@@ -686,18 +690,10 @@ fn renderButton(
         log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListener("click") });
         if (node.hasListener("click")) {
             if (runtime) |rt| {
-                // Use event ring buffer if available, otherwise fall back to callback
                 if (rt.event_ring) |ring| {
                     const ok = ring.pushClick(node_id);
                     log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
-                } else {
-                    jsc_bridge.dispatchEvent(rt, node_id, "click", null) catch |err| {
-                        log.err("Solid click dispatch failed: {s}", .{@errorName(err)});
-                    };
-                    log.info("button dispatched via callback node={d}", .{node_id});
                 }
-            } else {
-                log.info("button pressed but runtime missing node={d}", .{node_id});
             }
         }
     }
@@ -856,32 +852,16 @@ fn renderInput(
     direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
 
     if (runtime) |rt| {
-        if (!prev_focused and focused_now and node.hasListener("focus")) {
-            if (rt.event_ring) |ring| {
+        if (rt.event_ring) |ring| {
+            if (!prev_focused and focused_now and node.hasListener("focus")) {
                 _ = ring.pushFocus(node_id);
-            } else {
-                jsc_bridge.dispatchEvent(rt, node_id, "focus", null) catch |err| {
-                    log.err("Solid focus dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
-                };
-            }
-        } else if (prev_focused and !focused_now and node.hasListener("blur")) {
-            if (rt.event_ring) |ring| {
+            } else if (prev_focused and !focused_now and node.hasListener("blur")) {
                 _ = ring.pushBlur(node_id);
-            } else {
-                jsc_bridge.dispatchEvent(rt, node_id, "blur", null) catch |err| {
-                    log.err("Solid blur dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
-                };
             }
-        }
 
-        if (text_changed and node.hasListener("input")) {
-            const payload = state.currentText();
-            if (rt.event_ring) |ring| {
+            if (text_changed and node.hasListener("input")) {
+                const payload = state.currentText();
                 _ = ring.pushInput(node_id, payload);
-            } else {
-                jsc_bridge.dispatchEvent(rt, node_id, "input", payload) catch |err| {
-                    log.err("Solid input dispatch failed for node {d}: {s}", .{ node_id, @errorName(err) });
-                };
             }
         }
     }

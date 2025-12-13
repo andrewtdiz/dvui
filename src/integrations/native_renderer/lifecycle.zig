@@ -57,21 +57,6 @@ pub fn sendWindowClosedEvent(renderer: *Renderer) void {
     }
 }
 
-pub fn forwardEvent(ctx: ?*anyopaque, name: []const u8, payload: []const u8) void {
-    const renderer = ctx orelse return;
-    const typed: *Renderer = @ptrCast(@alignCast(renderer));
-    if (typed.event_cb) |event_fn| {
-        const name_ptr: [*]const u8 = @ptrCast(name.ptr);
-        const payload_ptr: [*]const u8 = @ptrCast(payload.ptr);
-        typed.callback_depth += 1;
-        defer {
-            typed.callback_depth -= 1;
-            tryFinalize(typed);
-        }
-        event_fn(name_ptr, name.len, payload_ptr, payload.len);
-    }
-}
-
 // ============================================================
 // Finalization & Destruction
 // ============================================================
@@ -169,8 +154,6 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
-    runtime_instance.event_cb = &forwardEvent;
-    runtime_instance.event_ctx = renderer;
 
     // Initialize event ring buffer for Zig→JS event dispatch
     const ring_instance = renderer.allocator.create(solid.EventRing) catch {

@@ -203,12 +203,9 @@ pub fn windowSize(_: *RaylibBackend) dvui.Size.Natural {
 }
 
 pub fn contentScale(_: *RaylibBackend) f32 {
-    // On HiDPI displays with window_highdpi flag enabled,
-    // getRenderWidth returns physical pixels and getScreenWidth returns logical size.
-    // The ratio gives us the content scale factor.
-    const render_w: f32 = @floatFromInt(raylib.getRenderWidth());
-    const screen_w: f32 = @floatFromInt(raylib.getScreenWidth());
-    return if (screen_w > 0) render_w / screen_w else 1.0;
+    // DVUI already derives `Window.natural_scale` from `pixelSize()/windowSize()`.
+    // Returning the HiDPI ratio here would double-apply scaling in `Window.begin`.
+    return 1.0;
 }
 
 pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: []const dvui.Vertex, idx: []const u16, clipr_in: ?dvui.Rect.Physical) !void {
@@ -219,11 +216,30 @@ pub fn drawClippedTriangles(self: *RaylibBackend, texture: ?dvui.Texture, vtx: [
 
     if (clipr_in) |clip_rect| {
         if (self.fb_width == null) {
+            // raylib's BeginScissorMode expects coordinates in screen-space (GetScreenWidth/Height).
+            // dvui supplies clip rects in render pixels (GetRenderWidth/Height), so convert.
+            const render_w: f32 = @floatFromInt(raylib.getRenderWidth());
+            const render_h: f32 = @floatFromInt(raylib.getRenderHeight());
+            const screen_w: f32 = @floatFromInt(raylib.getScreenWidth());
+            const screen_h: f32 = @floatFromInt(raylib.getScreenHeight());
+            const scale_x: f32 = if (screen_w > 0) render_w / screen_w else 1.0;
+            const scale_y: f32 = if (screen_h > 0) render_h / screen_h else 1.0;
+
+            const x0 = clip_rect.x / scale_x;
+            const y0 = clip_rect.y / scale_y;
+            const x1 = (clip_rect.x + clip_rect.w) / scale_x;
+            const y1 = (clip_rect.y + clip_rect.h) / scale_y;
+
+            const sx = @floor(x0);
+            const sy = @floor(y0);
+            const sw = @max(0.0, @ceil(x1) - sx);
+            const sh = @max(0.0, @ceil(y1) - sy);
+
             raylib.beginScissorMode(
-                @intFromFloat(clip_rect.x),
-                @intFromFloat(clip_rect.y),
-                @intFromFloat(clip_rect.w),
-                @intFromFloat(clip_rect.h),
+                @intFromFloat(sx),
+                @intFromFloat(sy),
+                @intFromFloat(sw),
+                @intFromFloat(sh),
             );
         } else {
             // need to swap y

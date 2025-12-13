@@ -23,11 +23,8 @@ src/integrations/
 │   │   ├── direct.zig        # Direct triangle/text draws (non-interactive)
 │   │   ├── widgets.zig       # DVUI widget entry point (interactive only)
 │   │   └── cache.zig         # Paint cache + DirtyRegionTracker
-│   ├── events/
-│   │   ├── mod.zig           # Re-exports
-│   │   └── ring.zig          # EventRing buffer for click/input/focus events
-│   └── bridge/
-│       └── jsc.zig           # QuickJS/Bun bridge stub
+│   └── events/
+│       └── mod.zig           # EventRing buffer for Zig→JS event dispatch
 │
 ├── native_renderer/          # FFI layer for JS↔Zig
 │   ├── mod.zig               # Re-exports + comptime force-export block
@@ -39,10 +36,11 @@ src/integrations/
 │   ├── events.zig            # Event ring buffer helpers
 │   └── solid_sync.zig        # Solid tree sync (snapshot & ops)
 │
-└── jsruntime/                # JS runtime utilities
-    ├── mod.zig               # Re-exports
-    ├── alloc.zig             # Allocator for JS interop
-    └── runtime.zig           # JSRuntime state
+└── jsruntime/                # Minimal JS interop utilities
+    ├── mod.zig               # Re-exports JSRuntime + image_loader
+    ├── alloc.zig             # Allocator for interop
+    ├── runtime.zig           # JSRuntime struct (allocator + event_ring)
+    └── image_loader.zig      # Image file loading and caching
 ```
 
 Additional core types live in:
