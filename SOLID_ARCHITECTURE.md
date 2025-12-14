@@ -2,7 +2,7 @@
 
 ## Current Structure
 
-The Solid integration lives under `src/integrations/` with three main modules:
+The Solid integration lives under `src/integrations/` with two main modules:
 
 ```
 src/integrations/
@@ -22,25 +22,20 @@ src/integrations/
 │   │   ├── mod.zig           # Render dispatch + dirty-region orchestration
 │   │   ├── direct.zig        # Direct triangle/text draws (non-interactive)
 │   │   ├── widgets.zig       # DVUI widget entry point (interactive only)
-│   │   └── cache.zig         # Paint cache + DirtyRegionTracker
+│   │   ├── cache.zig         # Paint cache + DirtyRegionTracker
+│   │   └── image_loader.zig  # Image file loading and caching
 │   └── events/
 │       └── mod.zig           # EventRing buffer for Zig→JS event dispatch
 │
-├── native_renderer/          # FFI layer for JS↔Zig
-│   ├── mod.zig               # Re-exports + comptime force-export block
-│   ├── types.zig             # Renderer, CommandHeader, EventFn, LogFn
-│   ├── exports.zig           # All FFI export functions
-│   ├── lifecycle.zig         # Renderer creation, destruction, logging
-│   ├── window.zig            # Window lifecycle and frame rendering
-│   ├── commands.zig          # Command buffer handling
-│   ├── events.zig            # Event ring buffer helpers
-│   └── solid_sync.zig        # Solid tree sync (snapshot & ops)
-│
-└── jsruntime/                # Minimal JS interop utilities
-    ├── mod.zig               # Re-exports JSRuntime + image_loader
-    ├── alloc.zig             # Allocator for interop
-    ├── runtime.zig           # JSRuntime struct (allocator + event_ring)
-    └── image_loader.zig      # Image file loading and caching
+└── native_renderer/          # FFI layer for JS↔Zig
+    ├── mod.zig               # Re-exports + comptime force-export block
+    ├── types.zig             # Renderer, CommandHeader, EventFn, LogFn
+    ├── exports.zig           # All FFI export functions
+    ├── lifecycle.zig         # Renderer creation, destruction, logging
+    ├── window.zig            # Window lifecycle and frame rendering
+    ├── commands.zig          # Command buffer handling
+    ├── events.zig            # Event ring buffer helpers
+    └── solid_sync.zig        # Solid tree sync (snapshot & ops)
 ```
 
 Additional core types live in:

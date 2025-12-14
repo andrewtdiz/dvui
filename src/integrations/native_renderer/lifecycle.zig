@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const jsruntime = @import("jsruntime");
 const solid = @import("solid");
 
 const types = @import("types.zig");
@@ -73,7 +72,6 @@ pub fn deinitRenderer(renderer: *Renderer) void {
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
-    renderer.runtime.deinit(renderer.allocator);
     if (renderer.solid_store_ready) {
         if (types.solidStore(renderer)) |store| {
             store.deinit();
@@ -133,33 +131,13 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .frame_count = 0,
         .event_ring_ptr = null,
         .event_ring_ready = false,
-        .runtime = .{},
     };
 
     renderer.allocator = renderer.gpa_instance.allocator();
     renderer.frame_arena = std.heap.ArenaAllocator.init(renderer.allocator);
 
-    const runtime_instance = renderer.allocator.create(jsruntime.JSRuntime) catch {
-        renderer.frame_arena.deinit();
-        _ = renderer.gpa_instance.deinit();
-        std.heap.c_allocator.destroy(renderer);
-        return null;
-    };
-    renderer.runtime.set(runtime_instance);
-    runtime_instance.* = jsruntime.JSRuntime.init("") catch {
-        renderer.runtime.clear();
-        renderer.allocator.destroy(runtime_instance);
-        renderer.frame_arena.deinit();
-        _ = renderer.gpa_instance.deinit();
-        std.heap.c_allocator.destroy(renderer);
-        return null;
-    };
-
     // Initialize event ring buffer for Zig→JS event dispatch
     const ring_instance = renderer.allocator.create(solid.EventRing) catch {
-        runtime_instance.deinit();
-        renderer.allocator.destroy(runtime_instance);
-        renderer.runtime.clear();
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
@@ -169,18 +147,12 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
     ring_instance.* = solid.EventRing.init(renderer.allocator) catch {
         renderer.allocator.destroy(ring_instance);
         renderer.event_ring_ptr = null;
-        runtime_instance.deinit();
-        renderer.allocator.destroy(runtime_instance);
-        renderer.runtime.clear();
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
     renderer.event_ring_ready = true;
-
-    // Link event ring to runtime so render code can push events directly
-    runtime_instance.event_ring = ring_instance;
 
     return renderer;
 }

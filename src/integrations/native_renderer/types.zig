@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const dvui = @import("dvui");
-const jsruntime = @import("jsruntime");
 const RaylibBackend = @import("raylib-backend");
 const solid = @import("solid");
 
@@ -33,37 +32,6 @@ pub const CommandHeader = extern struct {
 };
 
 // ============================================================
-// Runtime Handle (Safe FFI wrapper)
-// ============================================================
-
-pub const RuntimeHandle = struct {
-    raw: ?*anyopaque = null,
-
-    pub fn get(self: *const RuntimeHandle) ?*jsruntime.JSRuntime {
-        if (self.raw) |ptr| {
-            return @ptrCast(@alignCast(ptr));
-        }
-        return null;
-    }
-
-    pub fn set(self: *RuntimeHandle, ptr: *jsruntime.JSRuntime) void {
-        self.raw = ptr;
-    }
-
-    pub fn clear(self: *RuntimeHandle) void {
-        self.raw = null;
-    }
-
-    pub fn deinit(self: *RuntimeHandle, allocator: std.mem.Allocator) void {
-        if (self.get()) |rt| {
-            rt.deinit();
-            allocator.destroy(rt);
-        }
-        self.raw = null;
-    }
-};
-
-// ============================================================
 // Core Renderer State
 // ============================================================
 
@@ -87,8 +55,6 @@ pub const Renderer = struct {
     solid_store_ptr: ?*anyopaque = null,
     solid_seq_last: u64 = 0,
     frame_count: u64 = 0,
-    // Safe Runtime Handle
-    runtime: RuntimeHandle = .{},
     // Event ring buffer for Zig→JS event dispatch
     event_ring_ptr: ?*anyopaque = null,
     event_ring_ready: bool = false,

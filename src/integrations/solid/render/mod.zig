@@ -1,8 +1,6 @@
 const std = @import("std");
 
 const dvui = @import("dvui");
-const image_loader = @import("jsruntime").image_loader;
-const jsruntime = @import("jsruntime");
 
 const types = @import("../core/types.zig");
 const events = @import("../events/mod.zig");
@@ -18,6 +16,7 @@ const transformedRect = direct.transformedRect;
 const drawTextDirect = direct.drawTextDirect;
 const shouldDirectDraw = direct.shouldDirectDraw;
 const packedColorToDvui = direct.packedColorToDvui;
+const image_loader = @import("image_loader.zig");
 const paint_cache = @import("cache.zig");
 const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 const renderCachedOrDirectBackground = paint_cache.renderCachedOrDirectBackground;
@@ -101,7 +100,7 @@ pub fn takeGizmoRectUpdate() ?types.GizmoRect {
     return next;
 }
 
-pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
+pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore) bool {
     const root = store.node(0) orelse return false;
 
     layout.updateLayouts(store);
@@ -137,12 +136,12 @@ pub fn render(runtime: ?*jsruntime.JSRuntime, store: *types.NodeStore) bool {
         dirty_tracker.add(screen_rect);
     }
 
-    renderChildrenOrdered(runtime, store, root, scratch, &dirty_tracker, false);
+    renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, false);
     return true;
 }
 
 fn renderNode(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     allocator: std.mem.Allocator,
@@ -151,20 +150,20 @@ fn renderNode(
     const node = store.node(node_id) orelse return;
     switch (node.kind) {
         .root => {
-            renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
+            renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
             node.markRendered();
         },
         .slot => {
-            renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
+            renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
             node.markRendered();
         },
         .text => renderText(store, node),
-        .element => renderElement(runtime, store, node_id, node, allocator, tracker),
+        .element => renderElement(event_ring, store, node_id, node, allocator, tracker),
     }
 }
 
 fn renderElement(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -191,14 +190,14 @@ fn renderElement(
     }
 
     if (node.isInteractive()) {
-        renderInteractiveElement(runtime, store, node_id, node, allocator, class_spec, tracker);
+        renderInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker);
     } else {
-        renderNonInteractiveElement(runtime, store, node_id, node, allocator, class_spec, tracker);
+        renderNonInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker);
     }
 }
 
 fn renderElementBody(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -207,56 +206,56 @@ fn renderElementBody(
     tracker: *DirtyRegionTracker,
 ) void {
     if (std.mem.eql(u8, node.tag, "div")) {
-        renderContainer(runtime, store, node, allocator, class_spec, tracker);
+        renderContainer(event_ring, store, node, allocator, class_spec, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "button")) {
-        renderButton(runtime, store, node_id, node, allocator, class_spec, tracker);
+        renderButton(event_ring, store, node_id, node, allocator, class_spec, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "input")) {
-        renderInput(runtime, store, node_id, node, class_spec);
+        renderInput(event_ring, store, node_id, node, class_spec);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "image")) {
-        renderImage(runtime, store, node_id, node, class_spec, allocator, tracker);
+        renderImage(event_ring, store, node_id, node, class_spec, allocator, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "gizmo")) {
-        renderGizmo(runtime, store, node_id, node, class_spec);
+        renderGizmo(event_ring, store, node_id, node, class_spec);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "p")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, null, tracker);
+        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, null, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h1")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title, tracker);
+        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h2")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_1, tracker);
+        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title_1, tracker);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h3")) {
-        renderParagraph(runtime, store, node_id, node, allocator, class_spec, .title_2, tracker);
+        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title_2, tracker);
         node.markRendered();
         return;
     }
-    renderGeneric(runtime, store, node, allocator, tracker);
+    renderGeneric(event_ring, store, node, allocator, tracker);
     node.markRendered();
 }
 
 fn renderParagraphDirect(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -316,12 +315,12 @@ fn renderParagraphDirect(
     }
 
     // Paragraph already draws its text nodes; render non-text children (z-index ordered).
-    renderChildrenOrdered(runtime, store, node, allocator, tracker, true);
+    renderChildrenOrdered(event_ring, store, node, allocator, tracker, true);
     node.markRendered();
 }
 
 fn renderInteractiveElement(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -331,11 +330,11 @@ fn renderInteractiveElement(
 ) void {
     // Placeholder: today interactive and non-interactive elements use the same DVUI path.
     // This wrapper marks the split point for routing to DVUI widgets to preserve focus/input.
-    renderElementBody(runtime, store, node_id, node, allocator, class_spec, tracker);
+    renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker);
 }
 
 fn renderNonInteractiveElement(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -345,11 +344,11 @@ fn renderNonInteractiveElement(
 ) void {
     // Always draw non-interactive elements directly so backgrounds are guaranteed,
     // then recurse into children. This bypasses DVUI background handling.
-    renderNonInteractiveDirect(runtime, store, node_id, node, allocator, class_spec, tracker);
+    renderNonInteractiveDirect(event_ring, store, node_id, node, allocator, class_spec, tracker);
 }
 
 fn renderContainer(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
@@ -384,12 +383,12 @@ fn renderContainer(
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
 
-    renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
+    renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
     node.markRendered();
 }
 
 fn renderFlexChildren(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
@@ -417,26 +416,26 @@ fn renderFlexChildren(
                 .{ .margin = margin, .background = false, .name = "solid-gap", .id_extra = nodeIdExtra(node.id ^ _child_index) },
             );
             defer spacer.deinit();
-            renderNode(runtime, store, child_id, allocator, tracker);
+            renderNode(event_ring, store, child_id, allocator, tracker);
         } else {
-            renderNode(runtime, store, child_id, allocator, tracker);
+            renderNode(event_ring, store, child_id, allocator, tracker);
         }
         child_index += 1;
     }
 }
 
 fn renderGeneric(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
     tracker: *DirtyRegionTracker,
 ) void {
-    renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
+    renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
 }
 
 fn renderNonInteractiveDirect(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -466,7 +465,7 @@ fn renderNonInteractiveDirect(
     }
 
     const rect = rect_opt orelse {
-        renderElementBody(runtime, store, node_id, node, allocator, class_spec, tracker);
+        renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker);
         return;
     };
 
@@ -474,40 +473,40 @@ fn renderNonInteractiveDirect(
 
     if (std.mem.eql(u8, node.tag, "div")) {
         renderCachedOrDirectBackground(node, rect, allocator, class_spec.background);
-        renderChildrenOrdered(runtime, store, node, allocator, tracker, false);
+        renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
         node.markRendered();
         return;
     }
 
     if (std.mem.eql(u8, node.tag, "p")) {
-        renderParagraphDirect(runtime, store, node_id, node, allocator, class_spec, null, rect, tracker);
+        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, null, rect, tracker);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h1")) {
-        renderParagraphDirect(runtime, store, node_id, node, allocator, class_spec, .title, rect, tracker);
+        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title, rect, tracker);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h2")) {
-        renderParagraphDirect(runtime, store, node_id, node, allocator, class_spec, .title_1, rect, tracker);
+        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title_1, rect, tracker);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h3")) {
-        renderParagraphDirect(runtime, store, node_id, node, allocator, class_spec, .title_2, rect, tracker);
+        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title_2, rect, tracker);
         return;
     }
 
     // Fallback to DVUI path for tags without a direct draw handler.
-    renderElementBody(runtime, store, node_id, node, allocator, class_spec, tracker);
+    renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker);
 }
 
 fn renderGizmo(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
     class_spec: tailwind.Spec,
 ) void {
-    _ = runtime;
+    _ = event_ring;
     _ = store;
     _ = node_id;
     _ = class_spec;
@@ -515,7 +514,7 @@ fn renderGizmo(
 }
 
 fn renderParagraph(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -550,7 +549,7 @@ fn renderParagraph(
         }
     }
 
-    renderChildElements(runtime, store, node, allocator, tracker);
+    renderChildElements(event_ring, store, node, allocator, tracker);
 }
 
 fn applyGizmoProp(node: *types.SolidNode) void {
@@ -589,7 +588,7 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode) void {
 }
 
 fn renderButton(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -689,20 +688,18 @@ fn renderButton(
     if (pressed) {
         log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListener("click") });
         if (node.hasListener("click")) {
-            if (runtime) |rt| {
-                if (rt.event_ring) |ring| {
-                    const ok = ring.pushClick(node_id);
-                    log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
-                }
+            if (event_ring) |ring| {
+                const ok = ring.pushClick(node_id);
+                log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
             }
         }
     }
 
-    renderChildElements(runtime, store, node, allocator, tracker);
+    renderChildElements(event_ring, store, node, allocator, tracker);
 }
 
 fn renderImage(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -732,11 +729,11 @@ fn renderImage(
     const image_source = image_loader.imageSource(resource);
     _ = dvui.image(@src(), .{ .source = image_source }, options);
 
-    renderChildElements(runtime, store, node, allocator, tracker);
+    renderChildElements(event_ring, store, node, allocator, tracker);
 }
 
 fn renderInput(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
     node: *types.SolidNode,
@@ -851,34 +848,32 @@ fn renderInput(
     const text_slice = state.currentText();
     direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
 
-    if (runtime) |rt| {
-        if (rt.event_ring) |ring| {
-            if (!prev_focused and focused_now and node.hasListener("focus")) {
-                _ = ring.pushFocus(node_id);
-            } else if (prev_focused and !focused_now and node.hasListener("blur")) {
-                _ = ring.pushBlur(node_id);
-            }
+    if (event_ring) |ring| {
+        if (!prev_focused and focused_now and node.hasListener("focus")) {
+            _ = ring.pushFocus(node_id);
+        } else if (prev_focused and !focused_now and node.hasListener("blur")) {
+            _ = ring.pushBlur(node_id);
+        }
 
-            if (text_changed and node.hasListener("input")) {
-                const payload = state.currentText();
-                _ = ring.pushInput(node_id, payload);
-            }
+        if (text_changed and node.hasListener("input")) {
+            const payload = state.currentText();
+            _ = ring.pushInput(node_id, payload);
         }
     }
 }
 
 fn renderChildElements(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
     tracker: *DirtyRegionTracker,
 ) void {
-    renderChildrenOrdered(runtime, store, node, allocator, tracker, true);
+    renderChildrenOrdered(event_ring, store, node, allocator, tracker, true);
 }
 
 fn renderChildrenOrdered(
-    runtime: ?*jsruntime.JSRuntime,
+    event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
@@ -898,7 +893,7 @@ fn renderChildrenOrdered(
         for (node.children.items) |child_id| {
             const child = store.node(child_id) orelse continue;
             if (skip_text and child.kind == .text) continue;
-            renderNode(runtime, store, child_id, allocator, tracker);
+            renderNode(event_ring, store, child_id, allocator, tracker);
         }
         return;
     }
@@ -932,7 +927,7 @@ fn renderChildrenOrdered(
     }
 
     for (ordered.items) |child_id| {
-        renderNode(runtime, store, child_id, allocator, tracker);
+        renderNode(event_ring, store, child_id, allocator, tracker);
     }
 }
 

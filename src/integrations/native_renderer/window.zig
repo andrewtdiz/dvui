@@ -125,9 +125,9 @@ pub fn renderFrame(renderer: *Renderer) void {
             }
         }
 
-        const runtime_ptr = renderer.runtime.get();
+        const event_ring_ptr = types.eventRing(renderer);
         const store = types.solidStore(renderer);
-        const drew_solid = renderer.solid_store_ready and store != null and solid.render(runtime_ptr, store.?);
+        const drew_solid = renderer.solid_store_ready and store != null and solid.render(event_ring_ptr, store.?);
         if (!drew_solid) {
             commands.renderCommandsDvui(renderer, win);
         }
