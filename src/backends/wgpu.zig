@@ -344,7 +344,7 @@ pub fn textureUpdate(
     texture: dvui.Texture,
     pixels: [*]const u8,
 ) dvui.Backend.TextureError!void {
-    if (texture.ptr == null) return dvui.Backend.TextureError.TextureUpdate;
+    if (@intFromPtr(texture.ptr) == 0) return dvui.Backend.TextureError.TextureUpdate;
     const resource: *TextureResource = @ptrCast(@alignCast(texture.ptr));
     const texture_bytes: usize = @intCast(@as(u64, texture.width) * @as(u64, texture.height) * 4);
     const copy_texture = wgpu.TexelCopyTextureInfo{
@@ -585,29 +585,39 @@ fn uploadGeometry(self: *WgpuBackend) !void {
 
     const vertex_bytes: usize = self.vertex_data.items.len * @sizeOf(Vertex);
     const index_bytes: usize = self.index_data.items.len * @sizeOf(u16);
-    const vertex_buffer_size = std.mem.alignForward(usize, vertex_bytes, 4);
-    const index_buffer_size = std.mem.alignForward(usize, index_bytes, 4);
+    const vertex_buffer_size: u64 = @intCast(std.mem.alignForward(usize, vertex_bytes, 4));
+    const index_buffer_size: u64 = @intCast(std.mem.alignForward(usize, index_bytes, 4));
 
     if (self.vertex_buffer) |buffer| {
-        buffer.release();
+        if (buffer.getSize() < vertex_buffer_size) {
+            buffer.release();
+            self.vertex_buffer = null;
+        }
     }
     if (self.index_buffer) |buffer| {
-        buffer.release();
+        if (buffer.getSize() < index_buffer_size) {
+            buffer.release();
+            self.index_buffer = null;
+        }
     }
 
-    self.vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
-        .label = wgpu.StringView.fromSlice("dvui vertices"),
-        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
-        .size = vertex_buffer_size,
-        .mapped_at_creation = @intFromBool(false),
-    }) orelse return dvui.Backend.GenericError.BackendError;
+    if (self.vertex_buffer == null) {
+        self.vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui vertices"),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .size = vertex_buffer_size,
+            .mapped_at_creation = @intFromBool(false),
+        }) orelse return dvui.Backend.GenericError.BackendError;
+    }
 
-    self.index_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
-        .label = wgpu.StringView.fromSlice("dvui indices"),
-        .usage = wgpu.BufferUsages.index | wgpu.BufferUsages.copy_dst,
-        .size = index_buffer_size,
-        .mapped_at_creation = @intFromBool(false),
-    }) orelse return dvui.Backend.GenericError.BackendError;
+    if (self.index_buffer == null) {
+        self.index_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui indices"),
+            .usage = wgpu.BufferUsages.index | wgpu.BufferUsages.copy_dst,
+            .size = index_buffer_size,
+            .mapped_at_creation = @intFromBool(false),
+        }) orelse return dvui.Backend.GenericError.BackendError;
+    }
 
     const vertex_bytes_slice = std.mem.sliceAsBytes(self.vertex_data.items);
     try self.writeBufferAligned(self.vertex_buffer.?, vertex_bytes_slice);
