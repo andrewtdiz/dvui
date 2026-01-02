@@ -28,7 +28,7 @@
             .lazy = true,
         },
         .wgpu_native_zig = .{
-            .path = "./deps/wgpu_native_zig",
+            .path = "../wgpu_native_zig",
         },
         // for rendering tvg icons
         .svg2tvg = .{
