@@ -703,10 +703,18 @@ fn applyClip(
 }
 
 fn viewportRect(self: *const WgpuBackend) struct { x: i32, y: i32, width: i32, height: i32 } {
-    const width: i32 = if (self.surface.pixel_size.w <= 0) 0 else @intFromFloat(self.surface.pixel_size.w);
-    const height: i32 = if (self.surface.pixel_size.h <= 0) 0 else @intFromFloat(self.surface.pixel_size.h);
-    const x: i32 = if (self.surface.viewport_origin.x <= 0) 0 else @intFromFloat(self.surface.viewport_origin.x);
-    const y: i32 = if (self.surface.viewport_origin.y <= 0) 0 else @intFromFloat(self.surface.viewport_origin.y);
+    const pixel_width: i32 = if (self.surface.pixel_size.w <= 0) 0 else @intFromFloat(self.surface.pixel_size.w);
+    const pixel_height: i32 = if (self.surface.pixel_size.h <= 0) 0 else @intFromFloat(self.surface.pixel_size.h);
+    const surface_width: i32 = if (self.surface.surface_size.w <= 0) 0 else @intFromFloat(self.surface.surface_size.w);
+    const surface_height: i32 = if (self.surface.surface_size.h <= 0) 0 else @intFromFloat(self.surface.surface_size.h);
+    const origin_x: i32 = if (self.surface.viewport_origin.x <= 0) 0 else @intFromFloat(self.surface.viewport_origin.x);
+    const origin_y: i32 = if (self.surface.viewport_origin.y <= 0) 0 else @intFromFloat(self.surface.viewport_origin.y);
+    const x: i32 = @min(@max(origin_x, 0), surface_width);
+    const y: i32 = @min(@max(origin_y, 0), surface_height);
+    const max_width: i32 = surface_width - x;
+    const max_height: i32 = surface_height - y;
+    const width: i32 = @min(@max(pixel_width, 0), max_width);
+    const height: i32 = @min(@max(pixel_height, 0), max_height);
     return .{ .x = x, .y = y, .width = width, .height = height };
 }
 
