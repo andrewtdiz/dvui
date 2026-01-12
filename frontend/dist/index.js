@@ -849,32 +849,6 @@ function splitProps(props, ...keys) {
   }
   return objects;
 }
-var narrowedError = (name) => `Attempting to access a stale value from <${name}> that could possibly be undefined. This may occur because you are reading the accessor returned from the component at a time where it has already been unmounted. We recommend cleaning up any stale timers or async, or reading from the initial condition.`;
-function Show(props) {
-  const keyed = props.keyed;
-  const conditionValue = createMemo(() => props.when, undefined, {
-    name: "condition value"
-  });
-  const condition = keyed ? conditionValue : createMemo(conditionValue, undefined, {
-    equals: (a, b) => !a === !b,
-    name: "condition"
-  });
-  return createMemo(() => {
-    const c = condition();
-    if (c) {
-      const child = props.children;
-      const fn = typeof child === "function" && child.length > 0;
-      return fn ? untrack(() => child(keyed ? c : () => {
-        if (!untrack(condition))
-          throw narrowedError("Show");
-        return conditionValue();
-      })) : child;
-    }
-    return props.fallback;
-  }, undefined, {
-    name: "value"
-  });
-}
 if (globalThis) {
   if (!globalThis.Solid$$)
     globalThis.Solid$$ = true;
@@ -2226,18 +2200,23 @@ class NativeRenderer {
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
             detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
-          const payload = new Uint8Array(4);
-          new DataView(payload.buffer).setUint32(0, nodeId, true);
+          const eventObj = {
+            type: eventName,
+            target: { id: nodeId, value: detail, tagName: node.tag },
+            currentTarget: { id: nodeId, value: detail, tagName: node.tag },
+            detail,
+            _nativePayload: new Uint8Array([nodeId & 255, nodeId >> 8 & 255, nodeId >> 16 & 255, nodeId >> 24 & 255])
+          };
           for (const handler of handlers) {
             try {
-              handler(payload);
+              handler(eventObj);
             } catch (err) {
               console.error(`Event handler error for ${eventName} on node ${nodeId}:`, err);
             }
           }
           dispatched++;
-        }
-      }
+        } else {}
+      } else {}
       current++;
     }
     if (current !== readHead) {
@@ -2263,7 +2242,6 @@ class NativeRenderer {
   }
 }
 // solid/runtime/index.ts
-var memo2 = (fn) => createMemo(() => fn());
 var createElement = (tag) => {
   const hostOps = getRuntimeHostOps();
   if (hostOps?.createElement) {
@@ -2653,17 +2631,17 @@ var createFrameScheduler = (options = {}) => {
 };
 // solid/components/index.tsx
 var buttonVariantClasses = {
-  default: "bg-primary text-primary-foreground hover:bg-primary/90",
-  destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-  outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-  ghost: "hover:bg-accent hover:text-accent-foreground",
-  link: "text-primary underline-offset-4 hover:underline"
+  default: "bg-primary text-primary-foreground hover:bg-neutral-300",
+  destructive: "bg-destructive text-destructive-foreground hover:bg-red-500",
+  outline: "border border-input bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
+  secondary: "bg-secondary text-secondary-foreground hover:bg-neutral-800",
+  ghost: "bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
+  link: "bg-transparent text-foreground"
 };
 var buttonSizeClasses = {
   default: "h-10 px-4 py-2",
-  sm: "h-9 rounded-md px-3",
-  lg: "h-11 rounded-md px-8",
+  sm: "h-9 px-3 rounded-md",
+  lg: "h-11 px-8 rounded-md",
   icon: "h-10 w-10"
 };
 var Button = (props) => {
@@ -2673,11 +2651,13 @@ var Button = (props) => {
     size: "default"
   }, local);
   const computedClass = () => {
+    const userClass = local.class ?? props.className ?? "";
     return [
-      "inline-flex items-center justify-center rounded-md text-sm font-medium disabled:opacity-50",
+      "inline-flex items-center justify-center rounded-md text-sm",
       buttonVariantClasses[merged.variant],
       buttonSizeClasses[merged.size],
-      local.class
+      props.disabled ? "opacity-50" : "",
+      userClass
     ].filter(Boolean).join(" ");
   };
   return (() => {
@@ -2691,78 +2671,203 @@ var Button = (props) => {
     return _el$;
   })();
 };
-var Checkbox = (props) => {
-  const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false);
-  const isChecked = () => props.checked !== undefined ? props.checked : internalChecked();
-  const handleClick = () => {
-    if (props.disabled)
-      return;
-    const newValue = !isChecked();
-    if (props.checked === undefined) {
-      setInternalChecked(newValue);
+var Input = (props) => {
+  const [localValue, setLocalValue] = createSignal(props.value ?? "");
+  const displayValue = () => props.value !== undefined ? props.value : localValue();
+  const handleInput = (e) => {
+    let newValue;
+    if (e?.target?.value !== undefined) {
+      newValue = e.target.value;
+    } else if (e?.detail !== undefined) {
+      newValue = e.detail;
+    } else if (e instanceof Uint8Array) {
+      newValue = new TextDecoder().decode(e);
+    } else {
+      newValue = String(e ?? "");
     }
+    setLocalValue(newValue);
     props.onChange?.(newValue);
   };
-  const boxClasses = () => {
-    const base = "flex items-center justify-center w-5 h-5 rounded";
-    const checked = isChecked() ? "bg-blue-600" : "bg-gray-700";
+  const computedClass = () => {
     const disabled = props.disabled ? "opacity-50" : "";
-    return `${base} ${checked} ${disabled}`;
+    return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
   };
   return (() => {
-    var _el$2 = createElement("div"), _el$3 = createElement("div");
-    insertNode(_el$2, _el$3);
-    setProp(_el$2, "onClick", handleClick);
-    insert(_el$3, createComponent2(Show, {
-      get when() {
-        return isChecked();
-      },
-      get children() {
-        var _el$4 = createElement("p");
-        insertNode(_el$4, createTextNode(`\u2713`));
-        setProp(_el$4, "class", "text-white text-xs");
-        return _el$4;
-      }
-    }));
-    insert(_el$2, createComponent2(Show, {
-      get when() {
-        return props.label;
-      },
-      get children() {
-        var _el$6 = createElement("p");
-        setProp(_el$6, "class", "text-sm text-gray-300");
-        insert(_el$6, () => props.label);
-        return _el$6;
-      }
-    }), null);
+    var _el$11 = createElement("input");
+    setProp(_el$11, "onInput", handleInput);
     effect((_p$) => {
-      var _v$ = `flex items-center gap-2 ${props.class ?? ""}`, _v$2 = boxClasses();
-      _v$ !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$, _p$.e));
-      _v$2 !== _p$.t && (_p$.t = setProp(_el$3, "class", _v$2, _p$.t));
+      var _v$6 = computedClass(), _v$7 = displayValue(), _v$8 = props.placeholder, _v$9 = props.disabled;
+      _v$6 !== _p$.e && (_p$.e = setProp(_el$11, "class", _v$6, _p$.e));
+      _v$7 !== _p$.t && (_p$.t = setProp(_el$11, "value", _v$7, _p$.t));
+      _v$8 !== _p$.a && (_p$.a = setProp(_el$11, "placeholder", _v$8, _p$.a));
+      _v$9 !== _p$.o && (_p$.o = setProp(_el$11, "disabled", _v$9, _p$.o));
       return _p$;
     }, {
       e: undefined,
-      t: undefined
+      t: undefined,
+      a: undefined,
+      o: undefined
     });
-    return _el$2;
+    return _el$11;
+  })();
+};
+var Card = (props) => {
+  return (() => {
+    var _el$12 = createElement("div");
+    setProp(_el$12, "class", "rounded-lg border border-border bg-neutral-900 text-foreground p-6 w-96");
+    insert(_el$12, () => props.children);
+    return _el$12;
+  })();
+};
+var CardHeader = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$13 = createElement("div");
+    setProp(_el$13, "class", `flex flex-row justify-between items-start pb-4 ${cls}`);
+    insert(_el$13, () => props.children);
+    return _el$13;
+  })();
+};
+var CardHeaderContent = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$14 = createElement("div");
+    setProp(_el$14, "class", `flex flex-col gap-1 ${cls}`);
+    insert(_el$14, () => props.children);
+    return _el$14;
+  })();
+};
+var CardTitle = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$15 = createElement("p");
+    setProp(_el$15, "class", `text-lg text-foreground ${cls}`);
+    insert(_el$15, () => props.children);
+    return _el$15;
+  })();
+};
+var CardDescription = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$16 = createElement("p");
+    setProp(_el$16, "class", `text-sm text-muted-foreground ${cls}`);
+    insert(_el$16, () => props.children);
+    return _el$16;
+  })();
+};
+var CardAction = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$17 = createElement("div");
+    setProp(_el$17, "class", cls);
+    insert(_el$17, () => props.children);
+    return _el$17;
+  })();
+};
+var CardContent = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$18 = createElement("div");
+    setProp(_el$18, "class", `gap-4 ${cls}`);
+    insert(_el$18, () => props.children);
+    return _el$18;
+  })();
+};
+var CardFooter = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$19 = createElement("div");
+    setProp(_el$19, "class", `gap-2 pt-4 ${cls}`);
+    insert(_el$19, () => props.children);
+    return _el$19;
+  })();
+};
+var Label = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$20 = createElement("p");
+    setProp(_el$20, "class", `text-sm text-foreground ${cls}`);
+    insert(_el$20, () => props.children);
+    return _el$20;
   })();
 };
 
 // solid/App.tsx
 var App = () => {
-  const [count, setCount] = createSignal(0);
-  return (() => {
-    var _el$ = createElement("div");
-    insert(_el$, createComponent2(Button, {
-      variant: "default",
-      onClick: () => setCount(count() + 1),
-      get children() {
-        return ["Count: ", memo2(() => count())];
-      }
-    }), null);
-    insert(_el$, createComponent2(Checkbox, {}), null);
-    return _el$;
-  })();
+  return createComponent2(Card, {
+    className: "w-full max-w-sm",
+    get children() {
+      return [createComponent2(CardHeader, {
+        get children() {
+          return [createComponent2(CardHeaderContent, {
+            get children() {
+              return [createComponent2(CardTitle, {
+                children: "Login to your account"
+              }), createComponent2(CardDescription, {
+                children: "Enter your email below to login to your account"
+              })];
+            }
+          }), createComponent2(CardAction, {
+            get children() {
+              return createComponent2(Button, {
+                variant: "link",
+                children: "Sign Up"
+              });
+            }
+          })];
+        }
+      }), createComponent2(CardContent, {
+        get children() {
+          var _el$ = createElement("form"), _el$2 = createElement("div"), _el$3 = createElement("div"), _el$4 = createElement("div"), _el$5 = createElement("div"), _el$6 = createElement("a");
+          insertNode(_el$, _el$2);
+          insertNode(_el$2, _el$3);
+          insertNode(_el$2, _el$4);
+          setProp(_el$2, "className", "flex flex-col gap-6");
+          setProp(_el$3, "className", "grid gap-2");
+          insert(_el$3, createComponent2(Label, {
+            htmlFor: "email",
+            children: "Email"
+          }), null);
+          insert(_el$3, createComponent2(Input, {
+            id: "email",
+            type: "email",
+            placeholder: "m@example.com",
+            required: true
+          }), null);
+          insertNode(_el$4, _el$5);
+          setProp(_el$4, "className", "grid gap-2");
+          insertNode(_el$5, _el$6);
+          setProp(_el$5, "className", "flex items-center");
+          insert(_el$5, createComponent2(Label, {
+            htmlFor: "password",
+            children: "Password"
+          }), _el$6);
+          insertNode(_el$6, createTextNode(`Forgot your password?`));
+          setProp(_el$6, "href", "#");
+          setProp(_el$6, "className", "ml-auto inline-block text-sm underline-offset-4 hover:underline");
+          insert(_el$4, createComponent2(Input, {
+            id: "password",
+            type: "password",
+            required: true
+          }), null);
+          return _el$;
+        }
+      }), createComponent2(CardFooter, {
+        className: "flex-col gap-2",
+        get children() {
+          return [createComponent2(Button, {
+            type: "submit",
+            className: "w-full",
+            children: "Login"
+          }), createComponent2(Button, {
+            variant: "outline",
+            className: "w-full",
+            children: "Login with Google"
+          })];
+        }
+      })];
+    }
+  });
 };
 
 // solid/solid-entry.tsx

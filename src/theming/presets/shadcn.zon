@@ -1,19 +1,19 @@
-.{ 
+.{
     .name = "Shadcn Dark",
     .font_size = 16,
-    .font_name_body = "SegoeUI",
-    .font_name_heading = "SegoeUIBd",
-    .font_name_caption = "SegoeUI",
-    .font_name_title = "SegoeUIBd",
+    .font_name_body = "Inter",
+    .font_name_heading = "InterBd",
+    .font_name_caption = "Inter",
+    .font_name_title = "InterBd",
 
-    .focus = "#5E9ED6",
+    .focus = "#fafafa",
     .text = "#fafafa",
     .text_hover = "#a1a1a1",
     .text_press = "#171717",
     .fill = "#0a0a0a",
     .fill_hover = "#171717",
     .fill_press = "#262626",
-    .border = "#282828",
+    .border = "#262626",
 
     .control = .{
         .fill = "#e5e5e5",

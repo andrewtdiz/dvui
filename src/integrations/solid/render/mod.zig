@@ -148,6 +148,7 @@ fn renderNode(
     tracker: *DirtyRegionTracker,
 ) void {
     const node = store.node(node_id) orelse return;
+    // log.info("renderNode node={d} kind={any}", .{ node_id, node.kind });
     switch (node.kind) {
         .root => {
             renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
@@ -596,12 +597,10 @@ fn renderButton(
     class_spec: tailwind.Spec,
     tracker: *DirtyRegionTracker,
 ) void {
+    // log.info("renderButton node={d} tag={s}", .{ node_id, node.tag });
     const text = buildText(store, node, allocator);
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
     const caption = if (trimmed.len == 0) "Button" else trimmed;
-    if (!logged_button_render) {
-        logged_button_render = true;
-    }
 
     // Ensure we have a concrete rect; if layout is missing, compute a fallback using the parent rect/screen.
     var rect_opt = node.layout.rect;
@@ -635,10 +634,6 @@ fn renderButton(
     applyTransformToOptions(node, &options);
     if (rect_opt) |rect| {
         options.rect = physicalToDvuiRect(rect);
-    }
-
-    if (button_debug_count < 5) {
-        button_debug_count += 1;
     }
 
     // Use ButtonWidget directly instead of dvui.button() to ensure unique widget IDs.
@@ -686,8 +681,9 @@ fn renderButton(
     bw.deinit();
 
     if (pressed) {
-        log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListener("click") });
-        if (node.hasListener("click")) {
+        const has_listener = node.hasListener("click");
+        log.info("button pressed node={d} has_listener={}", .{ node_id, has_listener });
+        if (has_listener) {
             if (event_ring) |ring| {
                 const ok = ring.pushClick(node_id);
                 log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
@@ -695,6 +691,7 @@ fn renderButton(
         }
     }
 
+    // log.info("renderButton node={d} render children", .{node_id});
     renderChildElements(event_ring, store, node, allocator, tracker);
 }
 

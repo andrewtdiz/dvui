@@ -13,7 +13,9 @@ pub const TextAlign = enum {
 
 pub const Spec = struct {
     background: ?dvui.Color = null,
+    background_hover: ?dvui.Color = null,
     text: ?dvui.Color = null,
+    text_hover: ?dvui.Color = null,
     width: ?Width = null,
     height: ?Height = null,
     is_flex: bool = false,
@@ -109,6 +111,8 @@ const SideValues = struct {
 const LiteralKind = enum {
     flex_display,
     flex_inline,
+    flex_wrap,
+    flex_one,
     flex_row,
     flex_col,
     absolute,
@@ -140,6 +144,8 @@ const LiteralRule = struct {
 const literal_rules = [_]LiteralRule{
     .{ .token = "flex", .kind = .flex_display },
     .{ .token = "inline-flex", .kind = .flex_inline },
+    .{ .token = "flex-wrap", .kind = .flex_wrap },
+    .{ .token = "flex-1", .kind = .flex_one },
     .{ .token = "flex-row", .kind = .flex_row },
     .{ .token = "flex-col", .kind = .flex_col },
     .{ .token = "absolute", .kind = .absolute },
@@ -185,9 +191,11 @@ const PrefixRule = struct {
     handler: fn (*Spec, []const u8) void,
 };
 
-const prefix_rules: [4]PrefixRule = .{
+const prefix_rules = [_]PrefixRule{
     .{ .prefix = "bg-", .handler = handleBackground },
     .{ .prefix = "text-", .handler = handleText },
+    .{ .prefix = "hover:bg-", .handler = handleHoverBackground },
+    .{ .prefix = "hover:text-", .handler = handleHoverText },
     .{ .prefix = "w-", .handler = handleWidth },
     .{ .prefix = "h-", .handler = handleHeight },
 };
@@ -328,6 +336,12 @@ fn applyLiteral(spec: *Spec, kind: LiteralKind) void {
             spec.is_flex = true;
             spec.is_inline = true;
         },
+        .flex_wrap => {
+            // No wrapping in basic flex yet
+        },
+        .flex_one => {
+            // No flex-grow support yet
+        },
         .flex_row => spec.direction = .horizontal,
         .flex_col => spec.direction = .vertical,
         .absolute => spec.position = .absolute,
@@ -460,9 +474,21 @@ fn handleBackground(spec: *Spec, suffix: []const u8) void {
     }
 }
 
+fn handleHoverBackground(spec: *Spec, suffix: []const u8) void {
+    if (lookupColor(suffix)) |color_value| {
+        spec.background_hover = color_value;
+    }
+}
+
 fn handleText(spec: *Spec, suffix: []const u8) void {
     if (lookupColor(suffix)) |color_value| {
         spec.text = color_value;
+    }
+}
+
+fn handleHoverText(spec: *Spec, suffix: []const u8) void {
+    if (lookupColor(suffix)) |color_value| {
+        spec.text_hover = color_value;
     }
 }
 

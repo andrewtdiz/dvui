@@ -12,21 +12,24 @@ export type ButtonProps = JSX.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: ButtonVariant;
     size?: ButtonSize;
     class?: string;
+    className?: string;
 };
 
+// Map variants to classes that the Zig Tailwind parser supports
+// Using shadcn semantic colors: primary, secondary, destructive, accent, muted, etc.
 const buttonVariantClasses: Record<ButtonVariant, string> = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-    link: "text-primary underline-offset-4 hover:underline",
+    default: "bg-primary text-primary-foreground hover:bg-neutral-300",
+    destructive: "bg-destructive text-destructive-foreground hover:bg-red-500",
+    outline: "border border-input bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
+    secondary: "bg-secondary text-secondary-foreground hover:bg-neutral-800",
+    ghost: "bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
+    link: "bg-transparent text-foreground",
 };
 
 const buttonSizeClasses: Record<ButtonSize, string> = {
     default: "h-10 px-4 py-2",
-    sm: "h-9 rounded-md px-3",
-    lg: "h-11 rounded-md px-8",
+    sm: "h-9 px-3 rounded-md",
+    lg: "h-11 px-8 rounded-md",
     icon: "h-10 w-10",
 };
 
@@ -39,12 +42,15 @@ export const Button = (props: ButtonProps) => {
     );
 
     const computedClass = () => {
+        const userClass = local.class ?? (props as any).className ?? "";
         return [
             // Base styles
-            "inline-flex items-center justify-center rounded-md text-sm font-medium disabled:opacity-50",
+            "inline-flex items-center justify-center rounded-md text-sm",
             buttonVariantClasses[merged.variant],
             buttonSizeClasses[merged.size],
-            local.class
+            // Add disabled opacity through class
+            props.disabled ? "opacity-50" : "",
+            userClass
         ].filter(Boolean).join(" ");
     };
 
@@ -60,7 +66,7 @@ export const Button = (props: ButtonProps) => {
 
 // ============================================================================
 // Checkbox Component  
-// Uses styled div with click handler for toggle behavior
+// Uses a button element for proper native click handling
 // ============================================================================
 export type CheckboxProps = {
     checked?: boolean;
@@ -86,21 +92,24 @@ export const Checkbox = (props: CheckboxProps) => {
     };
 
     const boxClasses = () => {
-        const base = "flex items-center justify-center w-5 h-5 rounded";
-        const checked = isChecked() ? "bg-blue-600" : "bg-gray-700";
+        const base = isChecked()
+            ? "bg-primary text-primary-foreground border border-primary"
+            : "bg-transparent border border-input";
+        const size = "h-4 w-4 rounded-sm";
         const disabled = props.disabled ? "opacity-50" : "";
-        return `${base} ${checked} ${disabled}`;
+        return `flex items-center justify-center ${size} ${base} ${disabled}`;
     };
 
+    // Use text symbol that's always present to avoid DVUI rendering "button" as text
+    const checkSymbol = () => isChecked() ? "✓" : " ";
+
     return (
-        <div class={`flex items-center gap-2 ${props.class ?? ""}`} onClick={handleClick}>
-            <div class={boxClasses()}>
-                <Show when={isChecked()}>
-                    <p class="text-white text-xs">✓</p>
-                </Show>
-            </div>
+        <div class={`flex items-center gap-2 ${props.class ?? ""}`}>
+            <button class={boxClasses()} onClick={handleClick} disabled={props.disabled}>
+                <p class="text-foreground text-xs">{checkSymbol()}</p>
+            </button>
             <Show when={props.label}>
-                <p class="text-sm text-gray-300">{props.label}</p>
+                <p class={`text-sm text-foreground ${props.disabled ? "opacity-50" : ""}`}>{props.label}</p>
             </Show>
         </div>
     );
@@ -120,10 +129,10 @@ export type AlertProps = {
 };
 
 const alertVariantClasses: Record<AlertVariant, string> = {
-    default: "bg-gray-800 text-gray-300",
-    destructive: "bg-red-900 text-red-200",
-    success: "bg-green-900 text-green-200",
-    warning: "bg-amber-900 text-amber-200",
+    default: "bg-background text-foreground border border-border",
+    destructive: "bg-background text-destructive border border-destructive",
+    success: "bg-background text-emerald-500 border border-emerald-500",
+    warning: "bg-background text-amber-500 border border-amber-500",
 };
 
 export const Alert = (props: AlertProps) => {
@@ -131,7 +140,7 @@ export const Alert = (props: AlertProps) => {
 
     const computedClass = () => {
         const variant = alertVariantClasses[merged.variant];
-        return `flex flex-col gap-1 p-4 rounded-md ${variant} ${props.class ?? ""}`;
+        return `flex flex-col gap-1 rounded-lg p-4 ${variant} ${props.class ?? ""}`;
     };
 
     return (
@@ -139,7 +148,7 @@ export const Alert = (props: AlertProps) => {
             <Show when={props.title}>
                 <p class="text-sm">{props.title}</p>
             </Show>
-            <p class="text-sm">{props.children}</p>
+            <p class="text-sm text-muted-foreground">{props.children}</p>
         </div>
     );
 };
@@ -156,10 +165,10 @@ export type BadgeProps = {
 };
 
 const badgeVariantClasses: Record<BadgeVariant, string> = {
-    default: "bg-blue-600 text-white",
-    secondary: "bg-gray-700 text-gray-300",
-    destructive: "bg-red-600 text-white",
-    outline: "bg-gray-800 text-gray-300",
+    default: "bg-primary text-primary-foreground",
+    secondary: "bg-secondary text-secondary-foreground",
+    destructive: "bg-destructive text-destructive-foreground",
+    outline: "bg-transparent text-foreground border border-border",
 };
 
 export const Badge = (props: BadgeProps) => {
@@ -167,7 +176,7 @@ export const Badge = (props: BadgeProps) => {
 
     const computedClass = () => {
         const variant = badgeVariantClasses[merged.variant];
-        return `flex items-center justify-center px-2 py-1 rounded-full text-xs ${variant} ${props.class ?? ""}`;
+        return `inline-flex items-center rounded-full px-2 py-1 text-xs ${variant} ${props.class ?? ""}`;
     };
 
     return (
@@ -179,7 +188,7 @@ export const Badge = (props: BadgeProps) => {
 
 // ============================================================================
 // Progress Component
-// Uses nested divs for track and fill
+// Uses nested divs for track and fill with inline style for precise control
 // ============================================================================
 export type ProgressProps = {
     value?: number;  // 0-100
@@ -192,19 +201,19 @@ export const Progress = (props: ProgressProps) => {
 
     const percentage = () => Math.min(100, Math.max(0, (merged.value / merged.max) * 100));
 
-    // Calculate fill width as pixels (assuming a standard 200px width container)
-    const fillWidth = () => `w-${Math.round(percentage() * 2)}`;
-
     return (
-        <div class={`flex w-full h-2 bg-gray-700 rounded-full overflow-hidden ${props.class ?? ""}`}>
-            <div class={`bg-blue-600 h-2 rounded-full ${fillWidth()}`} />
+        <div class={`h-2 w-full overflow-hidden rounded-full bg-secondary ${props.class ?? ""}`}>
+            <div
+                class="h-full bg-primary"
+                style={{ width: `${percentage()}%` }}
+            />
         </div>
     );
 };
 
 // ============================================================================
 // Input Component
-// Uses native <input> tag - maps to dvui input handling
+// Uses native <input> tag - receives input events from native backend
 // ============================================================================
 export type InputProps = {
     value?: string;
@@ -215,16 +224,316 @@ export type InputProps = {
 };
 
 export const Input = (props: InputProps) => {
+    const [localValue, setLocalValue] = createSignal(props.value ?? "");
+
+    // Sync with external value prop
+    const displayValue = () => props.value !== undefined ? props.value : localValue();
+
+    const handleInput = (e: any) => {
+        // Handle both DOM-style events and native events
+        let newValue: string;
+        if (e?.target?.value !== undefined) {
+            newValue = e.target.value;
+        } else if (e?.detail !== undefined) {
+            newValue = e.detail;
+        } else if (e instanceof Uint8Array) {
+            // Native event payload - decode as text
+            newValue = new TextDecoder().decode(e);
+        } else {
+            newValue = String(e ?? "");
+        }
+
+        setLocalValue(newValue);
+        props.onChange?.(newValue);
+    };
+
     const computedClass = () => {
         const disabled = props.disabled ? "opacity-50" : "";
-        return `bg-gray-800 text-gray-300 px-3 py-2 rounded-md text-sm ${disabled} ${props.class ?? ""}`;
+        return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
     };
 
     return (
         <input
             class={computedClass()}
-            value={props.value ?? ""}
-            onInput={(e: any) => props.onChange?.(e.target?.value ?? "")}
+            value={displayValue()}
+            placeholder={props.placeholder}
+            onInput={handleInput}
+            disabled={props.disabled}
+        />
+    );
+};
+
+// ============================================================================
+// Card Component
+// Basic card container with shadcn styling
+// ============================================================================
+export type CardProps = {
+    children?: JSX.Element;
+    class?: string;
+    className?: string;
+};
+
+// Card with fixed width using w-96 (384px) - DVUI parses width as value * 4px
+export const Card = (props: CardProps) => {
+    return (
+        <div class="rounded-lg border border-border bg-neutral-900 text-foreground p-6 w-96">
+            {props.children}
+        </div>
+    );
+};
+
+// CardHeader - row layout with title/description on left, action on right
+export const CardHeader = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`flex flex-row justify-between items-start pb-4 ${cls}`}>
+            {props.children}
+        </div>
+    );
+};
+
+// CardHeaderContent - wrapper for title and description
+export const CardHeaderContent = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`flex flex-col gap-1 ${cls}`}>
+            {props.children}
+        </div>
+    );
+};
+
+export const CardTitle = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <p class={`text-lg text-foreground ${cls}`}>
+            {props.children}
+        </p>
+    );
+};
+
+export const CardDescription = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <p class={`text-sm text-muted-foreground ${cls}`}>
+            {props.children}
+        </p>
+    );
+};
+
+// CardAction - renders inline in the header row
+export const CardAction = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={cls}>
+            {props.children}
+        </div>
+    );
+};
+
+export const CardContent = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`gap-4 ${cls}`}>
+            {props.children}
+        </div>
+    );
+};
+
+export const CardFooter = (props: { children?: JSX.Element; class?: string; className?: string }) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`gap-2 pt-4 ${cls}`}>
+            {props.children}
+        </div>
+    );
+};
+
+// ============================================================================
+// Label Component
+// Simple styled label
+// ============================================================================
+export type LabelProps = {
+    children?: JSX.Element;
+    class?: string;
+    className?: string;
+    for?: string;
+    htmlFor?: string;
+};
+
+export const Label = (props: LabelProps) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <p class={`text-sm text-foreground ${cls}`}>
+            {props.children}
+        </p>
+    );
+};
+
+// ============================================================================
+// Separator Component
+// Horizontal or vertical divider
+// ============================================================================
+export type SeparatorProps = {
+    orientation?: "horizontal" | "vertical";
+    class?: string;
+};
+
+export const Separator = (props: SeparatorProps) => {
+    const isHorizontal = () => (props.orientation ?? "horizontal") === "horizontal";
+
+    const separatorClass = () => {
+        if (isHorizontal()) {
+            return `h-px w-full bg-border ${props.class ?? ""}`;
+        }
+        return `h-full w-px bg-border ${props.class ?? ""}`;
+    };
+
+    return <div class={separatorClass()} />;
+};
+
+// ============================================================================
+// Switch Component
+// Toggle switch with on/off state - uses button for proper click handling
+// ============================================================================
+export type SwitchProps = {
+    checked?: boolean;
+    defaultChecked?: boolean;
+    onChange?: (checked: boolean) => void;
+    disabled?: boolean;
+    class?: string;
+};
+
+export const Switch = (props: SwitchProps) => {
+    const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false);
+
+    const isChecked = () => props.checked !== undefined ? props.checked : internalChecked();
+
+    const handleClick = () => {
+        if (props.disabled) return;
+        const newValue = !isChecked();
+        if (props.checked === undefined) {
+            setInternalChecked(newValue);
+        }
+        props.onChange?.(newValue);
+    };
+
+    const trackClass = () => {
+        const base = isChecked() ? "bg-primary" : "bg-input";
+        const disabled = props.disabled ? "opacity-50" : "";
+        return `flex flex-row items-center h-6 w-11 rounded-full ${base} ${disabled} ${props.class ?? ""}`;
+    };
+
+    // Thumb: white circle, positioned left when off, right when on
+    const thumbClass = () => {
+        return "h-5 w-5 rounded-full bg-white";
+    };
+
+    // Spacer to push thumb to the right when checked
+    const spacerClass = () => {
+        return isChecked() ? "w-5" : "w-px";
+    };
+
+    return (
+        <button class={trackClass()} onClick={handleClick} disabled={props.disabled}>
+            <div class={spacerClass()}> </div>
+            <div class={thumbClass()}> </div>
+        </button>
+    );
+};
+
+// ============================================================================
+// Avatar Component
+// Display user avatar with fallback
+// ============================================================================
+export type AvatarProps = {
+    src?: string;
+    alt?: string;
+    fallback?: string;
+    class?: string;
+};
+
+export const Avatar = (props: AvatarProps) => {
+    const [imageError, setImageError] = createSignal(false);
+
+    const showFallback = () => !props.src || imageError();
+
+    return (
+        <div class={`flex h-10 w-10 items-center justify-center rounded-full bg-muted overflow-hidden ${props.class ?? ""}`}>
+            <Show when={!showFallback()} fallback={
+                <p class="text-sm text-muted-foreground">{props.fallback ?? "?"}</p>
+            }>
+                <img
+                    src={props.src}
+                    alt={props.alt ?? ""}
+                    class="h-full w-full"
+                    onError={() => setImageError(true)}
+                />
+            </Show>
+        </div>
+    );
+};
+
+// ============================================================================
+// Skeleton Component
+// Loading placeholder with animation
+// ============================================================================
+export type SkeletonProps = {
+    class?: string;
+};
+
+export const Skeleton = (props: SkeletonProps) => {
+    return (
+        <div class={`bg-muted rounded-md ${props.class ?? ""}`} />
+    );
+};
+
+// ============================================================================
+// Textarea Component
+// Multi-line text input - receives input events from native backend
+// ============================================================================
+export type TextareaProps = {
+    value?: string;
+    placeholder?: string;
+    onChange?: (value: string) => void;
+    disabled?: boolean;
+    rows?: number;
+    class?: string;
+};
+
+export const Textarea = (props: TextareaProps) => {
+    const [localValue, setLocalValue] = createSignal(props.value ?? "");
+
+    const displayValue = () => props.value !== undefined ? props.value : localValue();
+
+    const handleInput = (e: any) => {
+        let newValue: string;
+        if (e?.target?.value !== undefined) {
+            newValue = e.target.value;
+        } else if (e?.detail !== undefined) {
+            newValue = e.detail;
+        } else if (e instanceof Uint8Array) {
+            newValue = new TextDecoder().decode(e);
+        } else {
+            newValue = String(e ?? "");
+        }
+
+        setLocalValue(newValue);
+        props.onChange?.(newValue);
+    };
+
+    const computedClass = () => {
+        const disabled = props.disabled ? "opacity-50" : "";
+        return `flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
+    };
+
+    return (
+        <textarea
+            class={computedClass()}
+            value={displayValue()}
+            placeholder={props.placeholder}
+            rows={props.rows ?? 3}
+            onInput={handleInput}
+            disabled={props.disabled}
         />
     );
 };

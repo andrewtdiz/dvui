@@ -59,26 +59,37 @@ pub fn measureNodeSize(store: *types.NodeStore, node: *types.SolidNode, parent_a
         }
 
         if (size.w == 0 or size.h == 0) {
+            const dir = spec.direction orelse (if (spec.is_flex) dvui.enums.Direction.horizontal else dvui.enums.Direction.vertical); // Default to horizontal for flex, vertical for block
+            var total_main: f32 = 0;
+            var max_cross: f32 = 0;
+            var visible_count: usize = 0;
+
             for (node.children.items) |child_id| {
-                if (store.node(child_id)) |child| {
-                    if (child.kind == .text) {
-                        const text_size = measureTextCached(child);
-                        if (size.w == 0) size.w = text_size.w;
-                        if (size.h == 0) size.h = text_size.h;
-                        break;
-                    }
-                }
+                const child = store.node(child_id) orelse continue;
+                const child_spec = child.prepareClassSpec();
+                if (child_spec.hidden) continue;
+
+                // Absolute children don't contribute to intrinsic size
+                if (child_spec.position != null and child_spec.position.? == .absolute) continue;
+
+                const child_size = measureNodeSize(store, child, parent_available);
+                if (child.kind == .text and child_size.w == 0 and child_size.h == 0) continue;
+
+                visible_count += 1;
+                const main = if (dir == .horizontal) child_size.w else child_size.h;
+                const cross = if (dir == .horizontal) child_size.h else child_size.w;
+
+                total_main += main;
+                if (cross > max_cross) max_cross = cross;
             }
-        }
-        if (size.w == 0 or size.h == 0) {
-            for (node.children.items) |child_id| {
-                if (store.node(child_id)) |child| {
-                    const child_size = measureNodeSize(store, child, parent_available);
-                    if (size.w == 0) size.w = child_size.w;
-                    if (size.h == 0) size.h = child_size.h;
-                    break;
-                }
+
+            if (visible_count > 0) {
+                const gap = (if (dir == .horizontal) spec.gap_col else spec.gap_row) orelse 0;
+                total_main += gap * scale * @as(f32, @floatFromInt(visible_count - 1));
             }
+
+            if (size.w == 0) size.w = if (dir == .horizontal) total_main else max_cross;
+            if (size.h == 0) size.h = if (dir == .horizontal) max_cross else total_main;
         }
         const pad_left = sideValue(spec.padding.left) * scale;
         const pad_right = sideValue(spec.padding.right) * scale;

@@ -205,18 +205,34 @@ export class NativeRenderer implements RendererAdapter {
             detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
 
-          const payload = new Uint8Array(4);
-          new DataView(payload.buffer).setUint32(0, nodeId, true);
+          // Construct a mock event object that SolidJS expects
+          // We include 'target' and 'currentTarget' which point to an object with properties
+          // like 'value' for input elements.
+          const eventObj = {
+            type: eventName,
+            target: { id: nodeId, value: detail, tagName: node.tag },
+            currentTarget: { id: nodeId, value: detail, tagName: node.tag },
+            detail: detail,
+            // Fallback for handlers that still expect Uint8Array for some reason
+            _nativePayload: new Uint8Array([nodeId & 0xff, (nodeId >> 8) & 0xff, (nodeId >> 16) & 0xff, (nodeId >> 24) & 0xff]),
+          };
+
+          // console.log(`[JS Event] Dispatching ${eventName} to node ${nodeId} (detail=${detail})`);
 
           for (const handler of handlers) {
             try {
-              handler(payload);
+              // Cast to any because our InternalEventHandler type in host might be too strict
+              (handler as any)(eventObj);
             } catch (err) {
               console.error(`Event handler error for ${eventName} on node ${nodeId}:`, err);
             }
           }
           dispatched++;
+        } else {
+          // console.warn(`[JS Event] Received ${eventName} for node ${nodeId} but no JS listeners found`);
         }
+      } else {
+        // console.warn(`[JS Event] Received ${eventName} for unknown node ${nodeId}`);
       }
       current++;
     }

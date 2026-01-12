@@ -18,9 +18,9 @@ id: FontId,
 pub const Error = error{FontError};
 
 // default bytes if font id is not found in database
-pub const default_ttf_bytes = builtin.SegoeUI;
+pub const default_ttf_bytes = builtin.Inter;
 // NOTE: This font name should match the name in the font data base
-pub const default_font_id = FontId.SegoeUI;
+pub const default_font_id = FontId.Inter;
 
 pub fn hash(font: Font) u64 {
     var h = dvui.fnv.init();
@@ -164,6 +164,8 @@ pub const FontId = enum(u64) {
     SegoeUIBd = dvui.fnv.hash("SegoeUIBd"),
     SegoeUIIl = dvui.fnv.hash("SegoeUIIl"),
     SegoeUILt = dvui.fnv.hash("SegoeUILt"),
+    Inter = dvui.fnv.hash("Inter"),
+    InterBd = dvui.fnv.hash("InterBd"),
     // Not included in TTFBytes but should still be named
     Noto = dvui.fnv.hash("Noto"),
     _,
@@ -228,6 +230,8 @@ pub const builtin = struct {
     pub const SegoeUIBd = @embedFile("../fonts/Segoe/Segoe-UI-Bold.TTF");
     pub const SegoeUIIl = @embedFile("../fonts/Segoe/Segoe-UI-Italic.TTF");
     pub const SegoeUILt = @embedFile("../fonts/Segoe/Segoe-UI-Light.TTF");
+    pub const Inter = @embedFile("../fonts/Inter/Inter-Regular.ttf");
+    pub const InterBd = @embedFile("../fonts/Inter/Inter-Bold.ttf");
 };
 
 pub const Cache = struct {

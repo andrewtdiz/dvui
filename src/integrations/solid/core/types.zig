@@ -141,7 +141,9 @@ pub const Transform = struct {
 
 pub const VisualProps = struct {
     background: ?PackedColor = null,
+    background_hover: ?PackedColor = null,
     text_color: ?PackedColor = null,
+    text_color_hover: ?PackedColor = null,
     opacity: f32 = 1.0,
     corner_radius: f32 = 0,
     clip_children: bool = false,

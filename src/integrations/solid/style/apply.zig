@@ -25,8 +25,14 @@ pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec
     if (spec.background) |bg| {
         node.visual.background = dvuiColorToPacked(bg);
     }
+    if (spec.background_hover) |bg| {
+        node.visual.background_hover = dvuiColorToPacked(bg);
+    }
     if (spec.text) |tc| {
         node.visual.text_color = dvuiColorToPacked(tc);
+    }
+    if (spec.text_hover) |tc| {
+        node.visual.text_color_hover = dvuiColorToPacked(tc);
     }
     if (spec.corner_radius) |radius| {
         node.visual.corner_radius = radius;
@@ -47,13 +53,13 @@ pub fn applyVisualToOptions(node: *const types.SolidNode, options: *dvui.Options
         const color = packedColorToDvui(bg, opacity);
         options.background = true;
         options.color_fill = color;
-        options.color_fill_hover = color;
+        options.color_fill_hover = if (node.visual.background_hover) |hbg| packedColorToDvui(hbg, opacity) else color;
         options.color_fill_press = color;
     }
     if (node.visual.text_color) |tc| {
         const color = packedColorToDvui(tc, opacity);
         options.color_text = color;
-        options.color_text_hover = color;
+        options.color_text_hover = if (node.visual.text_color_hover) |htc| packedColorToDvui(htc, opacity) else color;
         options.color_text_press = color;
     }
     if (node.visual.corner_radius != 0) {

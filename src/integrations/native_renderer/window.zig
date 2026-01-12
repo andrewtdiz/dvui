@@ -141,7 +141,6 @@ pub fn renderFrame(renderer: *Renderer) void {
         }
     }
 
-    ray.drawFPS(10, 10);
     renderer.frame_count +%= 1;
     if (types.frame_event_interval == 0 or renderer.frame_count % types.frame_event_interval == 0) {
         lifecycle.sendFrameEvent(renderer);
