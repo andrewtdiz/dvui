@@ -19,6 +19,16 @@ const EVENT_KIND_TO_NAME: Record<number, string> = {
   7: "keyup",
   8: "change",
   9: "submit",
+  10: "pointerdown",
+  11: "pointermove",
+  12: "pointerup",
+  13: "pointercancel",
+  14: "dragstart",
+  15: "drag",
+  16: "dragend",
+  17: "dragenter",
+  18: "dragleave",
+  19: "drop",
   20: "scroll",
 };
 

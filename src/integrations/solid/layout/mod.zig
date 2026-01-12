@@ -216,15 +216,85 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     child_rect.w = @max(0.0, child_rect.w - (pad_left + pad_right));
     child_rect.h = @max(0.0, child_rect.h - (pad_top + pad_bottom));
 
+    var layout_rect = child_rect;
+    if (node.scroll.enabled) {
+        var content_w = child_rect.w;
+        var content_h = child_rect.h;
+        if (node.scroll.canvas_width > 0) {
+            content_w = @max(content_w, node.scroll.canvas_width);
+        }
+        if (node.scroll.canvas_height > 0) {
+            content_h = @max(content_h, node.scroll.canvas_height);
+        }
+        layout_rect.w = content_w;
+        layout_rect.h = content_h;
+        layout_rect.x -= node.scroll.offset_x;
+        layout_rect.y -= node.scroll.offset_y;
+    }
+
     if (spec.is_flex) {
-        flex.layoutFlexChildren(store, node, child_rect, spec);
+        flex.layoutFlexChildren(store, node, layout_rect, spec);
     } else {
         for (node.children.items) |child_id| {
             if (store.node(child_id)) |child| {
-                updateLayoutIfDirty(store, child, child_rect);
+                updateLayoutIfDirty(store, child, layout_rect);
             }
         }
     }
+
+    if (node.scroll.enabled) {
+        updateScrollContentSize(store, node, child_rect);
+    }
+}
+
+fn updateScrollContentSize(store: *types.NodeStore, node: *types.SolidNode, viewport: types.Rect) void {
+    var content_w = viewport.w;
+    var content_h = viewport.h;
+    if (node.scroll.canvas_width > 0) {
+        content_w = @max(content_w, node.scroll.canvas_width);
+    }
+    if (node.scroll.canvas_height > 0) {
+        content_h = @max(content_h, node.scroll.canvas_height);
+    }
+    if (node.scroll.auto_canvas) {
+        const auto_size = computeScrollAutoSize(store, node, viewport);
+        content_w = @max(content_w, auto_size.w);
+        content_h = @max(content_h, auto_size.h);
+    }
+    node.scroll.content_width = content_w;
+    node.scroll.content_height = content_h;
+}
+
+fn computeScrollAutoSize(store: *types.NodeStore, node: *types.SolidNode, viewport: types.Rect) types.Size {
+    var min_x = viewport.x;
+    var min_y = viewport.y;
+    var max_x = viewport.x + viewport.w;
+    var max_y = viewport.y + viewport.h;
+    var saw = false;
+
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        const rect_opt = child.layout.rect;
+        if (rect_opt) |rect| {
+            if (rect.w == 0 and rect.h == 0) continue;
+            const x = rect.x + node.scroll.offset_x;
+            const y = rect.y + node.scroll.offset_y;
+            min_x = @min(min_x, x);
+            min_y = @min(min_y, y);
+            max_x = @max(max_x, x + rect.w);
+            max_y = @max(max_y, y + rect.h);
+            saw = true;
+        }
+    }
+
+    if (!saw) {
+        return types.Size{ .w = viewport.w, .h = viewport.h };
+    }
+
+    return types.Size{
+        .w = @max(0.0, max_x - min_x),
+        .h = @max(0.0, max_y - min_y),
+    };
 }
 
 fn offsetLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode, dx: f32, dy: f32, version: u64) void {

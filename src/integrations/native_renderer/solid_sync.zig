@@ -37,6 +37,13 @@ pub const SolidOp = struct {
     background: ?u32 = null,
     textColor: ?u32 = null,
     clipChildren: ?bool = null,
+    // Scroll fields
+    scroll: ?bool = null,
+    scrollX: ?f32 = null,
+    scrollY: ?f32 = null,
+    canvasWidth: ?f32 = null,
+    canvasHeight: ?f32 = null,
+    autoCanvas: ?bool = null,
     anchorId: ?u32 = null,
     anchorSide: ?[]const u8 = null,
     anchorAlign: ?[]const u8 = null,
@@ -118,6 +125,38 @@ pub fn applyVisualFields(store: *solid.NodeStore, id: u32, op: SolidOp) OpError!
     }
     if (op.clipChildren) |flag| {
         target.visual.clip_children = flag;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
+pub fn applyScrollFields(store: *solid.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.scroll) |flag| {
+        target.scroll.enabled = flag;
+        changed = true;
+    }
+    if (op.scrollX) |value| {
+        target.scroll.offset_x = value;
+        changed = true;
+    }
+    if (op.scrollY) |value| {
+        target.scroll.offset_y = value;
+        changed = true;
+    }
+    if (op.canvasWidth) |value| {
+        target.scroll.canvas_width = value;
+        changed = true;
+    }
+    if (op.canvasHeight) |value| {
+        target.scroll.canvas_height = value;
+        changed = true;
+    }
+    if (op.autoCanvas) |flag| {
+        target.scroll.auto_canvas = flag;
         changed = true;
     }
     if (changed) {
@@ -249,6 +288,13 @@ pub fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8, lo
         background: ?u32 = null,
         textColor: ?u32 = null,
         clipChildren: ?bool = null,
+        // Scroll fields
+        scroll: ?bool = null,
+        scrollX: ?f32 = null,
+        scrollY: ?f32 = null,
+        canvasWidth: ?f32 = null,
+        canvasHeight: ?f32 = null,
+        autoCanvas: ?bool = null,
         anchorId: ?u32 = null,
         anchorSide: ?[]const u8 = null,
         anchorAlign: ?[]const u8 = null,
@@ -344,6 +390,30 @@ pub fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8, lo
                 target.visual.clip_children = flag;
                 touched = true;
             }
+            if (node.scroll) |flag| {
+                target.scroll.enabled = flag;
+                touched = true;
+            }
+            if (node.scrollX) |value| {
+                target.scroll.offset_x = value;
+                touched = true;
+            }
+            if (node.scrollY) |value| {
+                target.scroll.offset_y = value;
+                touched = true;
+            }
+            if (node.canvasWidth) |value| {
+                target.scroll.canvas_width = value;
+                touched = true;
+            }
+            if (node.canvasHeight) |value| {
+                target.scroll.canvas_height = value;
+                touched = true;
+            }
+            if (node.autoCanvas) |flag| {
+                target.scroll.auto_canvas = flag;
+                touched = true;
+            }
             if (node.anchorId) |value| {
                 target.anchor_id = value;
                 touched = true;
@@ -409,6 +479,7 @@ pub fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
         // Apply inline transform/visual props carried with create, so nodes are born with correct style.
         try applyTransformFields(store, op.id, op);
         try applyVisualFields(store, op.id, op);
+        try applyScrollFields(store, op.id, op);
         try applyAnchorFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
@@ -452,6 +523,12 @@ pub fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_visual")) {
         if (op.id == 0) return error.MissingId;
         try applyVisualFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_scroll")) {
+        if (op.id == 0) return error.MissingId;
+        try applyScrollFields(store, op.id, op);
         return;
     }
 

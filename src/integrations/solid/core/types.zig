@@ -154,6 +154,18 @@ pub const VisualProps = struct {
     z_index: i16 = 0,
 };
 
+pub const ScrollState = struct {
+    enabled: bool = false,
+    offset_x: f32 = 0,
+    offset_y: f32 = 0,
+    canvas_width: f32 = 0,
+    canvas_height: f32 = 0,
+    auto_canvas: bool = false,
+    content_width: f32 = 0,
+    content_height: f32 = 0,
+    scrollbar_thickness: f32 = 10,
+};
+
 const ListenerSet = struct {
     allocator: std.mem.Allocator,
     names: std.ArrayList([]u8),
@@ -204,6 +216,7 @@ pub const SolidNode = struct {
     paint: PaintCache = .{},
     transform: Transform = .{},
     visual: VisualProps = .{},
+    scroll: ScrollState = .{},
     interactive_self: bool = false,
     total_interactive: u32 = 0,
     anchor_id: ?u32 = null,

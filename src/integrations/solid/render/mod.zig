@@ -104,6 +104,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore) bool {
     const root = store.node(0) orelse return false;
 
     layout.updateLayouts(store);
+    cancelDragIfMissing(event_ring, store);
 
     // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
     syncVisualsFromClasses(store, root);
@@ -384,7 +385,14 @@ fn renderContainer(
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
 
+    if (node.scroll.enabled) {
+        if (node.layout.rect) |rect| {
+            handleScrollContainer(event_ring, store, node, rect);
+        }
+    }
+
     renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
+    handlePointerDragEvents(event_ring, store, node, box.data());
     node.markRendered();
 }
 
@@ -971,4 +979,415 @@ fn nodeIdExtra(id: u32) usize {
     var hasher = std.hash.Wyhash.init(0);
     hasher.update(std.mem.asBytes(&id));
     return @intCast(hasher.final());
+}
+
+fn scrollContentId(node_id: u32) dvui.Id {
+    return dvui.Id.extendId(null, @src(), nodeIdExtra(node_id));
+}
+
+fn handleScrollContainer(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    rect: types.Rect,
+) void {
+    const content_w = if (node.scroll.content_width > 0) node.scroll.content_width else rect.w;
+    const content_h = if (node.scroll.content_height > 0) node.scroll.content_height else rect.h;
+
+    var scroll_info = dvui.ScrollInfo{
+        .vertical = if (content_h > rect.h) .auto else .none,
+        .horizontal = if (content_w > rect.w) .auto else .none,
+        .virtual_size = .{ .w = content_w, .h = content_h },
+        .viewport = .{ .x = node.scroll.offset_x, .y = node.scroll.offset_y, .w = rect.w, .h = rect.h },
+    };
+    scroll_info.scrollToOffset(.vertical, scroll_info.viewport.y);
+    scroll_info.scrollToOffset(.horizontal, scroll_info.viewport.x);
+
+    const scroll_id = scrollContentId(node.id);
+    const hit_rect = transformedRect(node, rect) orelse rect;
+    const prev_x = node.scroll.offset_x;
+    const prev_y = node.scroll.offset_y;
+
+    _ = handleScrollInput(hit_rect, &scroll_info, scroll_id);
+
+    node.scroll.offset_x = scroll_info.viewport.x;
+    node.scroll.offset_y = scroll_info.viewport.y;
+
+    if (scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y) {
+        store.markNodeChanged(node.id);
+        if (event_ring) |ring| {
+            if (node.hasListener("scroll")) {
+                var detail_buffer: [192]u8 = undefined;
+                const detail: []const u8 = std.fmt.bufPrint(
+                    &detail_buffer,
+                    "{{\"x\":{},\"y\":{},\"viewportW\":{},\"viewportH\":{},\"contentW\":{},\"contentH\":{}}}",
+                    .{
+                        scroll_info.viewport.x,
+                        scroll_info.viewport.y,
+                        scroll_info.viewport.w,
+                        scroll_info.viewport.h,
+                        scroll_info.virtual_size.w,
+                        scroll_info.virtual_size.h,
+                    },
+                ) catch "";
+                _ = ring.pushScroll(node.id, detail);
+            }
+        }
+    }
+}
+
+fn handleScrollInput(hit_rect: types.Rect, scroll_info: *dvui.ScrollInfo, scroll_id: dvui.Id) bool {
+    const rect_phys = direct.rectToPhysical(hit_rect);
+    const allow_vertical = scroll_info.scrollMax(.vertical) > 0;
+    const allow_horizontal = scroll_info.scrollMax(.horizontal) > 0;
+    var changed = false;
+
+    for (dvui.events()) |*e| {
+        if (!dvui.eventMatch(e, .{ .id = scroll_id, .r = rect_phys })) continue;
+
+        switch (e.evt) {
+            .mouse => |me| {
+                switch (me.action) {
+                    .wheel_y => |ticks| {
+                        if (!allow_vertical) break;
+                        scroll_info.scrollByOffset(.vertical, -ticks);
+                        changed = true;
+                        e.handled = true;
+                        dvui.refresh(null, @src(), scroll_id);
+                    },
+                    .wheel_x => |ticks| {
+                        if (!allow_horizontal) break;
+                        scroll_info.scrollByOffset(.horizontal, ticks);
+                        changed = true;
+                        e.handled = true;
+                        dvui.refresh(null, @src(), scroll_id);
+                    },
+                    .press => {
+                        if (me.button.touch() and (allow_vertical or allow_horizontal)) {
+                            const capture = dvui.CaptureMouse{
+                                .id = scroll_id,
+                                .rect = rect_phys,
+                                .subwindow_id = dvui.subwindowCurrentId(),
+                            };
+                            dvui.captureMouseCustom(capture, e.num);
+                            dvui.dragPreStart(me.p, .{});
+                            e.handled = true;
+                        }
+                    },
+                    .release => {
+                        if (me.button.touch() and dvui.captured(scroll_id)) {
+                            dvui.captureMouseCustom(null, e.num);
+                            dvui.dragEnd();
+                            e.handled = true;
+                        }
+                    },
+                    .motion => {
+                        if (dvui.captured(scroll_id)) {
+                            if (dvui.dragging(me.p, null)) |dp| {
+                                if (allow_horizontal) {
+                                    scroll_info.scrollByOffset(.horizontal, -dp.x);
+                                }
+                                if (allow_vertical) {
+                                    scroll_info.scrollByOffset(.vertical, -dp.y);
+                                }
+                                changed = true;
+                                e.handled = true;
+                                dvui.refresh(null, @src(), scroll_id);
+                            }
+                        }
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+
+    return changed;
+}
+
+const PointerPayload = extern struct {
+    x: f32,
+    y: f32,
+    button: u8,
+    modifiers: u8,
+    pad: u16,
+};
+
+const DragState = struct {
+    active: bool = false,
+    source_id: u32 = 0,
+    button: u8 = 0,
+    start: dvui.Point.Physical = .{},
+    last: dvui.Point.Physical = .{},
+    hover_target: ?u32 = null,
+};
+
+var drag_state: DragState = .{};
+
+fn cancelDragIfMissing(event_ring: ?*events.EventRing, store: *types.NodeStore) void {
+    if (!drag_state.active) return;
+    if (store.node(drag_state.source_id) != null) return;
+    if (drag_state.hover_target) |target_id| {
+        dispatchDragLeave(event_ring, store, target_id, drag_state.last);
+    }
+    drag_state = .{};
+    dvui.captureMouse(null, 0);
+}
+
+fn handlePointerDragEvents(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    wd: *dvui.WidgetData,
+) void {
+    if (event_ring == null) return;
+    const wants_pointer = node.hasListener("pointerdown") or node.hasListener("pointermove") or node.hasListener("pointerup") or node.hasListener("pointercancel");
+    const wants_drag = node.hasListener("dragstart") or node.hasListener("drag") or node.hasListener("dragend");
+    if (!wants_pointer and !wants_drag) return;
+
+    const rect = wd.borderRectScale().r;
+    for (dvui.events()) |*event| {
+        if (!dvui.eventMatch(event, .{ .id = wd.id, .r = rect })) continue;
+        switch (event.evt) {
+            .mouse => |mouse| handlePointerMouse(event_ring, store, node, wd, event, mouse, wants_pointer, wants_drag),
+            else => {},
+        }
+    }
+}
+
+fn handlePointerMouse(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    wd: *dvui.WidgetData,
+    event: *dvui.Event,
+    mouse: dvui.Event.Mouse,
+    wants_pointer: bool,
+    wants_drag: bool,
+) void {
+    const is_source = drag_state.active and drag_state.source_id == node.id;
+    switch (mouse.action) {
+        .press => {
+            if (!mouse.button.pointer()) return;
+            var handled = false;
+            if (wants_pointer and node.hasListener("pointerdown")) {
+                pushPointerEvent(event_ring, .pointerdown, node.id, mouse);
+                handled = true;
+            }
+            if (!drag_state.active and wants_drag) {
+                startDrag(node.id, mouse, wd, event.num);
+                if (node.hasListener("dragstart")) {
+                    pushPointerEvent(event_ring, .dragstart, node.id, mouse);
+                }
+                updateHoverTarget(event_ring, store, mouse.p);
+                handled = true;
+            }
+            if (handled) {
+                event.handle(@src(), wd);
+            }
+        },
+        .release => {
+            if (!mouse.button.pointer()) return;
+            var handled = false;
+            if (wants_pointer and node.hasListener("pointerup")) {
+                pushPointerEvent(event_ring, .pointerup, node.id, mouse);
+                handled = true;
+            }
+            if (is_source) {
+                updateHoverTarget(event_ring, store, mouse.p);
+                if (drag_state.hover_target) |target_id| {
+                    dispatchDrop(event_ring, store, target_id, mouse);
+                }
+                if (node.hasListener("dragend")) {
+                    pushPointerEvent(event_ring, .dragend, node.id, mouse);
+                }
+                clearHover(event_ring, store, mouse.p);
+                drag_state = .{};
+                dvui.captureMouse(null, event.num);
+                handled = true;
+            }
+            if (handled) {
+                event.handle(@src(), wd);
+            }
+        },
+        .motion => {
+            var handled = false;
+            if (is_source) {
+                drag_state.last = mouse.p;
+                if (node.hasListener("pointermove")) {
+                    pushPointerEvent(event_ring, .pointermove, node.id, mouse);
+                }
+                if (node.hasListener("drag")) {
+                    pushPointerEvent(event_ring, .drag, node.id, mouse);
+                }
+                updateHoverTarget(event_ring, store, mouse.p);
+                handled = true;
+            } else if (wants_pointer and node.hasListener("pointermove")) {
+                pushPointerEvent(event_ring, .pointermove, node.id, mouse);
+                handled = true;
+            }
+            if (handled) {
+                event.handle(@src(), wd);
+            }
+        },
+        else => {},
+    }
+}
+
+fn startDrag(node_id: u32, mouse: dvui.Event.Mouse, wd: *dvui.WidgetData, event_num: u16) void {
+    drag_state.active = true;
+    drag_state.source_id = node_id;
+    drag_state.start = mouse.p;
+    drag_state.last = mouse.p;
+    drag_state.button = mapButton(mouse.button);
+    drag_state.hover_target = null;
+    dvui.captureMouse(wd, event_num);
+}
+
+fn pushPointerEvent(
+    event_ring: ?*events.EventRing,
+    kind: events.EventKind,
+    node_id: u32,
+    mouse: dvui.Event.Mouse,
+) void {
+    if (event_ring) |ring| {
+        const payload = pointerPayload(mouse);
+        _ = ring.push(kind, node_id, std.mem.asBytes(&payload));
+    }
+}
+
+fn pointerPayload(mouse: dvui.Event.Mouse) PointerPayload {
+    return .{
+        .x = mouse.p.x,
+        .y = mouse.p.y,
+        .button = mapButton(mouse.button),
+        .modifiers = modMask(mouse.mod),
+        .pad = 0,
+    };
+}
+
+fn mapButton(button: dvui.enums.Button) u8 {
+    return switch (button) {
+        .left => 0,
+        .middle => 1,
+        .right => 2,
+        .four => 3,
+        .five => 4,
+        else => 255,
+    };
+}
+
+fn modMask(mods: dvui.enums.Mod) u8 {
+    var mask: u8 = 0;
+    if (mods.shift()) mask |= 1;
+    if (mods.control()) mask |= 2;
+    if (mods.alt()) mask |= 4;
+    if (mods.command()) mask |= 8;
+    return mask;
+}
+
+fn updateHoverTarget(event_ring: ?*events.EventRing, store: *types.NodeStore, point: dvui.Point.Physical) void {
+    const target = findDropTarget(store, point, drag_state.source_id);
+    if (target == drag_state.hover_target) return;
+    if (drag_state.hover_target) |prev_id| {
+        dispatchDragLeave(event_ring, store, prev_id, point);
+    }
+    if (target) |next_id| {
+        dispatchDragEnter(event_ring, store, next_id, point);
+    }
+    drag_state.hover_target = target;
+}
+
+fn clearHover(event_ring: ?*events.EventRing, store: *types.NodeStore, point: dvui.Point.Physical) void {
+    if (drag_state.hover_target) |target_id| {
+        dispatchDragLeave(event_ring, store, target_id, point);
+        drag_state.hover_target = null;
+    }
+}
+
+fn dispatchDragEnter(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, point: dvui.Point.Physical) void {
+    if (event_ring == null) return;
+    const target = store.node(target_id) orelse return;
+    if (!target.hasListener("dragenter")) return;
+    const mouse = dvui.Event.Mouse{
+        .action = .position,
+        .button = .none,
+        .mod = .none,
+        .p = point,
+        .floating_win = dvui.subwindowCurrentId(),
+    };
+    pushPointerEvent(event_ring, .dragenter, target_id, mouse);
+}
+
+fn dispatchDragLeave(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, point: dvui.Point.Physical) void {
+    if (event_ring == null) return;
+    const target = store.node(target_id) orelse return;
+    if (!target.hasListener("dragleave")) return;
+    const mouse = dvui.Event.Mouse{
+        .action = .position,
+        .button = .none,
+        .mod = .none,
+        .p = point,
+        .floating_win = dvui.subwindowCurrentId(),
+    };
+    pushPointerEvent(event_ring, .dragleave, target_id, mouse);
+}
+
+fn dispatchDrop(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, mouse: dvui.Event.Mouse) void {
+    if (event_ring == null) return;
+    const target = store.node(target_id) orelse return;
+    if (!target.hasListener("drop")) return;
+    pushPointerEvent(event_ring, .drop, target_id, mouse);
+}
+
+fn findDropTarget(store: *types.NodeStore, point: dvui.Point.Physical, source_id: u32) ?u32 {
+    const root = store.node(0) orelse return null;
+    var best_id: ?u32 = null;
+    var best_z: i16 = std.math.minInt(i16);
+    var best_order: u32 = 0;
+    var order: u32 = 0;
+    scanNode(store, root, point, source_id, &best_id, &best_z, &best_order, &order);
+    return best_id;
+}
+
+fn scanNode(
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    point: dvui.Point.Physical,
+    source_id: u32,
+    best_id: *?u32,
+    best_z: *i16,
+    best_order: *u32,
+    order: *u32,
+) void {
+    if (node.kind == .element and node.id != source_id and std.mem.eql(u8, node.tag, "div")) {
+        const wants_drop = node.hasListener("dragenter") or node.hasListener("dragleave") or node.hasListener("drop");
+        if (wants_drop) {
+            const spec = node.prepareClassSpec();
+            if (!spec.hidden) {
+                if (node.layout.rect) |rect| {
+                    if (rectContains(rect, point)) {
+                        order.* += 1;
+                        const z = node.visual.z_index;
+                        if (z > best_z.* or (z == best_z.* and order.* >= best_order.*)) {
+                            best_z.* = z;
+                            best_order.* = order.*;
+                            best_id.* = node.id;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            scanNode(store, child, point, source_id, best_id, best_z, best_order, order);
+        }
+    }
+}
+
+fn rectContains(rect: types.Rect, point: dvui.Point.Physical) bool {
+    return point.x >= rect.x and point.x <= (rect.x + rect.w) and point.y >= rect.y and point.y <= (rect.y + rect.h);
 }
