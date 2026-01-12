@@ -190,6 +190,43 @@ const resolveValue = (input: any): any => {
   return resolved;
 };
 
+type InsertItem = HostNode | string | number;
+
+type NormalizedInsertValue = InsertItem | InsertItem[] | null;
+
+const normalizeResolvedValue = (resolved: any): InsertItem | null => {
+  if (resolved == null || resolved === true || resolved === false) return null;
+  if (typeof resolved === "string" || typeof resolved === "number") return resolved;
+  if (resolved instanceof HostNode) return resolved;
+  return null;
+};
+
+const normalizeInsertValue = (value: any): NormalizedInsertValue => {
+  const resolved = resolveValue(value);
+  if (Array.isArray(resolved)) {
+    const items: InsertItem[] = [];
+    for (const entry of resolved) {
+      const normalized = normalizeResolvedValue(resolveValue(entry));
+      if (normalized != null) items.push(normalized);
+    }
+    return items;
+  }
+  return normalizeResolvedValue(resolved);
+};
+
+const updateTextNode = (node: HostNode, value: string | number): boolean => {
+  if (node.tag !== "text") return false;
+  const nextValue = String(value);
+  if (node.props.text === nextValue) return false;
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.replaceText) {
+    hostOps.replaceText(node, nextValue);
+  } else {
+    node.props.text = nextValue;
+  }
+  return true;
+};
+
 const appendContent = (parent: HostNode, value: any): boolean => {
   if (value == null || value === true || value === false) return false;
 
@@ -214,19 +251,84 @@ const clearChildren = (node: HostNode) => {
   }
 };
 
-const applyInsertValue = (parent: HostNode, value: any) => {
-  const resolved = resolveValue(value);
-  clearChildren(parent);
-
-  if (Array.isArray(resolved)) {
-    for (const item of resolved) {
-      appendContent(parent, resolveValue(item));
+const syncInsertSingle = (parent: HostNode, value: InsertItem): boolean => {
+  const children = parent.children;
+  if (children.length === 1) {
+    const existing = children[0];
+    if (value instanceof HostNode) {
+      if (existing === value) return false;
+    } else if (existing.tag === "text") {
+      return updateTextNode(existing, value);
     }
-  } else {
-    appendContent(parent, resolved);
+  }
+  clearChildren(parent);
+  appendContent(parent, value);
+  return true;
+};
+
+const syncInsertArray = (parent: HostNode, values: InsertItem[]): boolean => {
+  const children = parent.children;
+  if (values.length === 0) {
+    if (children.length === 0) return false;
+    clearChildren(parent);
+    return true;
+  }
+  if (children.length !== values.length) {
+    clearChildren(parent);
+    for (const item of values) {
+      appendContent(parent, item);
+    }
+    return true;
   }
 
-  notifyRuntimePropChange();
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    const child = children[i];
+    if (value instanceof HostNode) {
+      if (child !== value) {
+        clearChildren(parent);
+        for (const item of values) {
+          appendContent(parent, item);
+        }
+        return true;
+      }
+    } else if (child.tag !== "text") {
+      clearChildren(parent);
+      for (const item of values) {
+        appendContent(parent, item);
+      }
+      return true;
+    }
+  }
+
+  let changed = false;
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (typeof value === "string" || typeof value === "number") {
+      if (updateTextNode(children[i], value)) changed = true;
+    }
+  }
+  return changed;
+};
+
+const syncInsertValue = (parent: HostNode, value: NormalizedInsertValue): boolean => {
+  if (value == null) {
+    if (parent.children.length === 0) return false;
+    clearChildren(parent);
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return syncInsertArray(parent, value);
+  }
+  return syncInsertSingle(parent, value);
+};
+
+const applyInsertValue = (parent: HostNode, value: any) => {
+  const normalized = normalizeInsertValue(value);
+  const changed = syncInsertValue(parent, normalized);
+  if (changed) {
+    notifyRuntimePropChange();
+  }
 };
 
 export const insert = (parent: HostNode, value: any, anchor?: HostNode) => {
@@ -332,11 +434,10 @@ const tokenize = (source: string): Token[] => {
   return tokens;
 };
 
-const buildTreeFromTemplate = (source: string): HostNode => {
+const buildTreeFromTokens = (tokens: readonly Token[]): HostNode => {
   const fragment = createSlotNode();
   const stack: HostNode[] = [fragment];
 
-  const tokens = tokenize(source);
   for (const tok of tokens) {
     switch (tok.kind) {
       case "open": {
@@ -368,8 +469,13 @@ const buildTreeFromTemplate = (source: string): HostNode => {
   return fragment.children.length === 1 ? fragment.children[0] : fragment;
 };
 
+const buildTreeFromTemplate = (source: string): HostNode => {
+  return buildTreeFromTokens(tokenize(source));
+};
+
 export const template = (source: string) => {
-  return () => buildTreeFromTemplate(source);
+  const tokens = tokenize(source);
+  return () => buildTreeFromTokens(tokens);
 };
 
 export const addEventListener = (node: HostNode, name: string, handler: EventHandler) => {
