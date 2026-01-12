@@ -54,6 +54,7 @@ export class NativeRenderer implements RendererAdapter {
   private closeDeferred = false;
   private lastEventOverflow = 0;
   private lastDetailOverflow = 0;
+  private headerMismatchLogged = false;
   readonly encoder: CommandEncoder;
   readonly capabilities: RendererCapabilities = { window: true };
   disposed = false;
@@ -166,19 +167,27 @@ export class NativeRenderer implements RendererAdapter {
   pollEvents(nodeIndex: Map<number, import("../host/node").HostNode>): number {
     if (this.disposed) return 0;
 
-    const headerBuffer = new Uint8Array(24);
-    const copied = this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length);
-    if (Number(copied) !== headerBuffer.length) return 0;
+    const expectedHeaderSize = 24;
+    const minimumHeaderSize = 16;
+    const headerBuffer = new Uint8Array(expectedHeaderSize);
+    const copied = Number(this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length));
+    if (copied === 0) return 0;
+    if (copied !== expectedHeaderSize && !this.headerMismatchLogged) {
+      console.warn(`[native] Event ring header size mismatch (expected ${expectedHeaderSize}, got ${copied}).`);
+      this.headerMismatchLogged = true;
+    }
+    if (copied < minimumHeaderSize) return 0;
 
-    const headerView = new DataView(headerBuffer.buffer);
+    const headerView = new DataView(headerBuffer.buffer, 0, copied);
     const readHead = headerView.getUint32(0, true);
     const writeHead = headerView.getUint32(4, true);
     const capacity = headerView.getUint32(8, true);
     const detailCapacity = headerView.getUint32(12, true);
-    const droppedEvents = headerView.getUint32(16, true);
-    const droppedDetails = headerView.getUint32(20, true);
+    const hasDroppedCounters = copied >= expectedHeaderSize;
+    const droppedEvents = hasDroppedCounters ? headerView.getUint32(16, true) : 0;
+    const droppedDetails = hasDroppedCounters ? headerView.getUint32(20, true) : 0;
 
-    if (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow) {
+    if (hasDroppedCounters && (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow)) {
       const eventDelta =
         droppedEvents >= this.lastEventOverflow ? droppedEvents - this.lastEventOverflow : droppedEvents;
       const detailDelta =
