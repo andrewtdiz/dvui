@@ -99,6 +99,7 @@ pub fn init() void {
 pub fn deinit() void {
     render_mod.deinit();
     layout.deinit();
+    deinitRetainedState();
 }
 
 pub const PickResult = struct {
@@ -557,4 +558,133 @@ fn intersectRect(rect_a: types.Rect, rect_b: types.Rect) ?types.Rect {
         .w = max_x - min_x,
         .h = max_y - min_y,
     };
+}
+
+const RectOut = extern struct {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+};
+
+var retained_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var retained_allocator: std.mem.Allocator = undefined;
+var retained_allocator_ready: bool = false;
+var retained_store: types.NodeStore = undefined;
+var retained_store_initialized: bool = false;
+var retained_event_ring: EventRing = undefined;
+var retained_event_ring_initialized: bool = false;
+var retained_seq_last: u64 = 0;
+
+fn retainedAllocator() std.mem.Allocator {
+    if (!retained_allocator_ready) {
+        retained_allocator = retained_gpa.allocator();
+        retained_allocator_ready = true;
+    }
+    return retained_allocator;
+}
+
+fn ensureRetainedStore() ?*types.NodeStore {
+    if (retained_store_initialized) return &retained_store;
+    const allocator = retainedAllocator();
+    retained_store.init(allocator) catch return null;
+    retained_store_initialized = true;
+    retained_seq_last = 0;
+    return &retained_store;
+}
+
+fn ensureRetainedEventRing() ?*EventRing {
+    if (retained_event_ring_initialized) return &retained_event_ring;
+    const allocator = retainedAllocator();
+    retained_event_ring = EventRing.init(allocator) catch return null;
+    retained_event_ring_initialized = true;
+    return &retained_event_ring;
+}
+
+fn retainedEventRing() ?*EventRing {
+    if (retained_event_ring_initialized) return &retained_event_ring;
+    return null;
+}
+
+fn writeRectOut(rect: types.Rect, out_ptr: [*]u8, out_len: usize) bool {
+    if (out_len < @sizeOf(RectOut)) return false;
+    const out = RectOut{
+        .x = rect.x,
+        .y = rect.y,
+        .w = rect.w,
+        .h = rect.h,
+    };
+    const bytes = std.mem.asBytes(&out);
+    const dest = out_ptr[0..@sizeOf(RectOut)];
+    @memcpy(dest, bytes);
+    return true;
+}
+
+pub export fn dvui_retained_set_snapshot(json_ptr: [*]const u8, json_len: usize) callconv(.c) void {
+    const store = ensureRetainedStore() orelse return;
+    const ring = ensureRetainedEventRing();
+    retained_seq_last = 0;
+    const json_bytes = json_ptr[0..json_len];
+    _ = setSnapshot(store, ring, json_bytes);
+}
+
+pub export fn dvui_retained_apply_ops(json_ptr: [*]const u8, json_len: usize) callconv(.c) bool {
+    const store = ensureRetainedStore() orelse return false;
+    const json_bytes = json_ptr[0..json_len];
+    return applyOps(store, &retained_seq_last, json_bytes);
+}
+
+pub export fn dvui_retained_get_event_ring_header(out_ptr: [*]u8, out_len: usize) callconv(.c) usize {
+    const ring = ensureRetainedEventRing() orelse return 0;
+    if (out_len < @sizeOf(EventRing.Header)) return 0;
+    const header = ring.snapshotHeader();
+    const bytes = std.mem.asBytes(&header);
+    const dest = out_ptr[0..@sizeOf(EventRing.Header)];
+    @memcpy(dest, bytes);
+    return @sizeOf(EventRing.Header);
+}
+
+pub export fn dvui_retained_get_event_ring_buffer() callconv(.c) ?[*]EventEntry {
+    const ring = ensureRetainedEventRing() orelse return null;
+    return ring.getBufferPtr();
+}
+
+pub export fn dvui_retained_get_event_ring_detail() callconv(.c) ?[*]u8 {
+    const ring = ensureRetainedEventRing() orelse return null;
+    return ring.getDetailPtr();
+}
+
+pub export fn dvui_retained_ack_events(new_read_head: u32) callconv(.c) void {
+    const ring = retainedEventRing() orelse return;
+    ring.setReadHead(new_read_head);
+}
+
+pub export fn dvui_retained_pick_node_at(
+    x_pos: f32,
+    y_pos: f32,
+    out_ptr: [*]u8,
+    out_len: usize,
+) callconv(.c) u32 {
+    const store = ensureRetainedStore() orelse return 0;
+    const result = pickNodeAt(store, x_pos, y_pos) orelse return 0;
+    _ = writeRectOut(result.rect, out_ptr, out_len);
+    return result.id;
+}
+
+pub export fn dvui_retained_get_node_rect(node_id: u32, out_ptr: [*]u8, out_len: usize) callconv(.c) bool {
+    const store = ensureRetainedStore() orelse return false;
+    const rect = getNodeRect(store, node_id) orelse return false;
+    return writeRectOut(rect, out_ptr, out_len);
+}
+
+fn deinitRetainedState() void {
+    if (retained_store_initialized) {
+        retained_store.deinit();
+        retained_store_initialized = false;
+    }
+    if (retained_event_ring_initialized) {
+        retained_event_ring.deinit();
+        retained_event_ring_initialized = false;
+    }
+    retained_seq_last = 0;
 }
