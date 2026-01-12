@@ -1,11 +1,13 @@
 import type { HostNode } from "./node";
-import { extractTransform, extractVisual } from "./props";
+import { extractScroll, extractTransform, extractVisual } from "./props";
 
 export type SerializedNode = {
   id: number;
   tag: string;
   parent?: number;
   text?: string;
+  value?: string;
+  src?: string;
   className?: string;
   rotation?: number;
   scaleX?: number;
@@ -19,6 +21,12 @@ export type SerializedNode = {
   background?: number;
   textColor?: number;
   clipChildren?: boolean;
+  scroll?: boolean;
+  scrollX?: number;
+  scrollY?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  autoCanvas?: boolean;
 };
 
 export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
@@ -34,7 +42,9 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
     if (node.tag === "text") {
       entry.text = node.props.text ?? "";
     }
-    Object.assign(entry, extractTransform(node.props), extractVisual(node.props));
+    if (node.props.value != null) entry.value = String(node.props.value);
+    if (node.props.src != null) entry.src = String(node.props.src);
+    Object.assign(entry, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props));
     nodes.push(entry);
     for (const child of node.children) {
       serialize(child, node.id);

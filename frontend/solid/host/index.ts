@@ -3,10 +3,18 @@ import { createRenderer } from "solid-js/universal";
 import { registerRuntimeBridge } from "../runtime/bridge";
 import type { RendererAdapter } from "../native/adapter";
 import { CommandEncoder } from "../native/encoder";
-import { applyTransformMutation, applyVisualMutation, createFlushController, isTransformField, isVisualField } from "./flush";
+import {
+  applyScrollMutation,
+  applyTransformMutation,
+  applyVisualMutation,
+  createFlushController,
+  isScrollField,
+  isTransformField,
+  isVisualField,
+} from "./flush";
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
-import { extractTransform, extractVisual } from "./props";
+import { extractScroll, extractTransform, extractVisual } from "./props";
 
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
@@ -16,6 +24,11 @@ const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
 };
 
 const nodeClass = (node: HostNode) => node.props.className ?? node.props.class;
+
+const normalizeTag = (tagName: string) => {
+  if (tagName === "img") return "image";
+  return tagName;
+};
 
 export const createSolidHost = (native: RendererAdapter) => {
   const encoder: CommandEncoder = native.encoder;
@@ -45,7 +58,9 @@ export const createSolidHost = (native: RendererAdapter) => {
       if (node.tag === "text") createOp.text = node.props.text ?? "";
       const cls = nodeClass(node);
       if (cls) createOp.className = cls;
-      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props));
+      if (node.props.src != null) createOp.src = String(node.props.src);
+      if (node.props.value != null) createOp.value = String(node.props.value);
+      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props));
       push(createOp);
 
       for (const [eventType] of node.listeners) {
@@ -83,7 +98,7 @@ export const createSolidHost = (native: RendererAdapter) => {
 
   const runtimeOps = {
     createElement(tagName: string) {
-      return registerNode(new HostNode(tagName));
+      return registerNode(new HostNode(normalizeTag(tagName)));
     },
     createTextNode(value: string | number) {
       const node = registerNode(new HostNode("text"));
@@ -140,10 +155,22 @@ export const createSolidHost = (native: RendererAdapter) => {
           const cls = value == null ? "" : String(value);
           push({ op: "set_class", id: node.id, className: cls });
         }
+      } else if (name === "src") {
+        if (node.created) {
+          const src = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "src", src });
+        }
+      } else if (name === "value") {
+        if (node.created) {
+          const nextValue = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "value", value: nextValue });
+        }
       } else if (node.created && isTransformField(name)) {
         applyTransformMutation(node, name, value, ops);
       } else if (node.created && isVisualField(name)) {
         applyVisualMutation(node, name, value, ops);
+      } else if (node.created && isScrollField(name)) {
+        applyScrollMutation(node, name, value, ops);
       }
       flushController.scheduleFlush();
     },

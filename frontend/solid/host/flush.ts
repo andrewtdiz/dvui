@@ -8,6 +8,7 @@ import {
   frameFromProps,
   hasAbsoluteClass,
   packColor,
+  scrollFields,
   transformFields,
   visualFields,
 } from "./props";
@@ -114,6 +115,26 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           tag: n.tag,
           className: n.className,
           text: n.text,
+          src: n.src,
+          value: n.value,
+          rotation: n.rotation,
+          scaleX: n.scaleX,
+          scaleY: n.scaleY,
+          anchorX: n.anchorX,
+          anchorY: n.anchorY,
+          translateX: n.translateX,
+          translateY: n.translateY,
+          opacity: n.opacity,
+          cornerRadius: n.cornerRadius,
+          background: n.background,
+          textColor: n.textColor,
+          clipChildren: n.clipChildren,
+          scroll: n.scroll,
+          scrollX: n.scrollX,
+          scrollY: n.scrollY,
+          canvasWidth: n.canvasWidth,
+          canvasHeight: n.canvasHeight,
+          autoCanvas: n.autoCanvas,
         };
         ops.push(createOp);
       }
@@ -210,6 +231,30 @@ export const applyVisualMutation = (node: HostNode, name: string, value: unknown
   }
 };
 
+export const applyScrollMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
+  const payload: MutationOp = { op: "set_scroll", id: node.id };
+  if (name === "scroll") {
+    payload.scroll = Boolean(value);
+  } else if (name === "autoCanvas") {
+    payload.autoCanvas = Boolean(value);
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    if (name === "scrollX") payload.scrollX = value;
+    if (name === "scrollY") payload.scrollY = value;
+    if (name === "canvasWidth") payload.canvasWidth = value;
+    if (name === "canvasHeight") payload.canvasHeight = value;
+  }
+  const hasField =
+    payload.scroll != null ||
+    payload.scrollX != null ||
+    payload.scrollY != null ||
+    payload.canvasWidth != null ||
+    payload.canvasHeight != null ||
+    payload.autoCanvas != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+
 export const applyTransformMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     const payload: MutationOp = { op: "set_transform", id: node.id, [name]: value } as MutationOp;
@@ -223,4 +268,8 @@ export const isTransformField = (name: string): name is (typeof transformFields)
 
 export const isVisualField = (name: string): name is (typeof visualFields)[number] => {
   return (visualFields as readonly string[]).includes(name);
+};
+
+export const isScrollField = (name: string): name is (typeof scrollFields)[number] => {
+  return (scrollFields as readonly string[]).includes(name);
 };

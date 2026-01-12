@@ -50,6 +50,8 @@ export const transformFields = [
 
 export const visualFields = ["opacity", "cornerRadius", "background", "textColor", "clipChildren"] as const;
 
+export const scrollFields = ["scroll", "scrollX", "scrollY", "canvasWidth", "canvasHeight", "autoCanvas"] as const;
+
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
   if (!raw) return false;
@@ -142,4 +144,20 @@ export const extractVisual = (props: NodeProps) => {
     }
   }
   return v;
+};
+
+export const extractScroll = (props: NodeProps) => {
+  const s: Partial<Record<(typeof scrollFields)[number], number | boolean>> = {};
+  for (const key of scrollFields) {
+    const raw = props[key];
+    if (raw == null) continue;
+    if (key === "scroll" || key === "autoCanvas") {
+      s[key] = Boolean(raw);
+      continue;
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      s[key] = raw;
+    }
+  }
+  return s;
 };

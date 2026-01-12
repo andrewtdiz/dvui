@@ -327,6 +327,7 @@ pub const SolidNode = struct {
     pub fn setInputValue(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
         var state = try self.ensureInputState(allocator);
         try state.setValue(value);
+        self.invalidatePaint();
     }
 
     pub fn currentInputValue(self: *SolidNode) []const u8 {

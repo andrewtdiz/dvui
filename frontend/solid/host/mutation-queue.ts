@@ -9,6 +9,7 @@ export type MutationOp = {
     | "set_class"
     | "set_transform"
     | "set_visual"
+    | "set_scroll"
     | "listen"
     | "set";
   id: number;
@@ -33,6 +34,12 @@ export type MutationOp = {
   background?: number;
   textColor?: number;
   clipChildren?: boolean;
+  scroll?: boolean;
+  scrollX?: number;
+  scrollY?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  autoCanvas?: boolean;
 };
 
 export const createMutationQueue = () => {

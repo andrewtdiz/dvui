@@ -13,6 +13,8 @@ export type NodeProps = {
   height?: number;
   color?: ColorInput;
   text?: string;
+  value?: string | number;
+  src?: string;
   class?: string;
   className?: string;
   rotation?: number;
@@ -27,6 +29,12 @@ export type NodeProps = {
   background?: ColorInput;
   textColor?: ColorInput;
   clipChildren?: boolean;
+  scroll?: boolean;
+  scrollX?: number;
+  scrollY?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  autoCanvas?: boolean;
 };
 
 export type EventHandler = (payload: Uint8Array) => void;

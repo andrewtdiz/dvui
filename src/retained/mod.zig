@@ -19,6 +19,7 @@ const SolidSnapshotNode = struct {
     tag: []const u8,
     parent: ?u32 = null,
     text: ?[]const u8 = null,
+    value: ?[]const u8 = null,
     src: ?[]const u8 = null,
     className: ?[]const u8 = null,
     rotation: ?f32 = null,
@@ -155,6 +156,9 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
         }
         if (node.src) |src| {
             store.setImageSource(node.id, src) catch {};
+        }
+        if (node.value) |value| {
+            store.setInputValue(node.id, value) catch {};
         }
         if (store.node(node.id)) |target| {
             var touched = false;
@@ -380,6 +384,12 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         }
         if (op.className) |cls| {
             try store.setClassName(op.id, cls);
+        }
+        if (op.src) |src| {
+            try store.setImageSource(op.id, src);
+        }
+        if (op.value) |value| {
+            try store.setInputValue(op.id, value);
         }
         try applyTransformFields(store, op.id, op);
         try applyVisualFields(store, op.id, op);
