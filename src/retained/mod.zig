@@ -67,6 +67,113 @@ const SolidSnapshot = struct {
     nodes: []const SolidSnapshotNode = &.{},
 };
 
+const RuntimeScrollState = struct {
+    offset_x: f32,
+    offset_y: f32,
+    content_width: f32,
+    content_height: f32,
+};
+
+const RuntimeState = struct {
+    has_input: bool = false,
+    input_text: []u8 = &.{},
+    input_focused: bool = false,
+    scroll: ?RuntimeScrollState = null,
+
+    fn hasData(self: *const RuntimeState) bool {
+        return self.has_input or self.scroll != null;
+    }
+
+    fn deinit(self: *RuntimeState, allocator: std.mem.Allocator) void {
+        if (self.has_input and self.input_text.len > 0) {
+            allocator.free(self.input_text);
+        }
+        self.* = .{};
+    }
+};
+
+const RuntimeStateMap = std.AutoHashMap(u32, RuntimeState);
+
+fn captureRuntimeState(store: *types.NodeStore) RuntimeStateMap {
+    const allocator = store.allocator;
+    var states = RuntimeStateMap.init(allocator);
+    var iter = store.nodes.iterator();
+    while (iter.next()) |entry| {
+        const node = entry.value_ptr;
+        var runtime = RuntimeState{};
+        if (node.input_state) |state| {
+            runtime.has_input = true;
+            runtime.input_focused = state.focused;
+            const text = state.currentText();
+            if (text.len > 0) {
+                runtime.input_text = allocator.dupe(u8, text) catch {
+                    runtime.has_input = false;
+                    runtime.input_text = &.{};
+                };
+            }
+        }
+        if (node.scroll.enabled) {
+            runtime.scroll = .{
+                .offset_x = node.scroll.offset_x,
+                .offset_y = node.scroll.offset_y,
+                .content_width = node.scroll.content_width,
+                .content_height = node.scroll.content_height,
+            };
+        }
+        if (!runtime.hasData()) continue;
+        states.put(entry.key_ptr.*, runtime) catch {
+            runtime.deinit(allocator);
+            continue;
+        };
+    }
+    return states;
+}
+
+fn discardRuntimeState(allocator: std.mem.Allocator, states: *RuntimeStateMap) void {
+    var iter = states.iterator();
+    while (iter.next()) |entry| {
+        entry.value_ptr.deinit(allocator);
+    }
+    states.deinit();
+}
+
+fn restoreRuntimeState(store: *types.NodeStore, states: *RuntimeStateMap) void {
+    const allocator = store.allocator;
+    var iter = states.iterator();
+    while (iter.next()) |entry| {
+        const node_id = entry.key_ptr.*;
+        const runtime = entry.value_ptr;
+        if (store.node(node_id)) |node| {
+            if (runtime.has_input) {
+                store.setInputValue(node_id, runtime.input_text) catch {};
+                if (store.node(node_id)) |target| {
+                    if (target.input_state) |*state| {
+                        state.focused = runtime.input_focused;
+                    }
+                }
+            }
+            if (runtime.scroll) |scroll| {
+                if (node.scroll.enabled) {
+                    const prev_x = node.scroll.offset_x;
+                    const prev_y = node.scroll.offset_y;
+                    const prev_content_w = node.scroll.content_width;
+                    const prev_content_h = node.scroll.content_height;
+                    node.scroll.offset_x = scroll.offset_x;
+                    node.scroll.offset_y = scroll.offset_y;
+                    node.scroll.content_width = scroll.content_width;
+                    node.scroll.content_height = scroll.content_height;
+                    if (prev_x != scroll.offset_x or prev_y != scroll.offset_y or prev_content_w != scroll.content_width or prev_content_h != scroll.content_height) {
+                        layout.invalidateLayoutSubtree(store, node);
+                        store.markNodeChanged(node_id);
+                    }
+                }
+            }
+        }
+        runtime.deinit(allocator);
+    }
+    states.deinit();
+}
+
 const SolidOp = struct {
     op: []const u8,
     id: u32 = 0,
@@ -170,15 +277,22 @@ pub fn takeGizmoRectUpdate() ?types.GizmoRect {
 
 pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes: []const u8) bool {
     const store_allocator = store.allocator;
+    var runtime_states = captureRuntimeState(store);
     store.deinit();
     if (event_ring) |ring| {
         ring.reset();
     }
-    store.init(store_allocator) catch return false;
+    store.init(store_allocator) catch {
+        discardRuntimeState(store_allocator, &runtime_states);
+        return false;
+    };
 
     var parsed = std.json.parseFromSlice(SolidSnapshot, store_allocator, json_bytes, .{
         .ignore_unknown_fields = true,
-    }) catch return false;
+    }) catch {
+        discardRuntimeState(store_allocator, &runtime_states);
+        return false;
+    };
     defer parsed.deinit();
 
     const snapshot = parsed.value;
@@ -191,7 +305,10 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
         } else if (std.mem.eql(u8, node.tag, "slot")) {
             store.upsertSlot(node.id) catch {};
         } else {
-            store.upsertElement(node.id, node.tag) catch return false;
+            store.upsertElement(node.id, node.tag) catch {
+                discardRuntimeState(store_allocator, &runtime_states);
+                return false;
+            };
         }
         if (node.className) |cls| {
             store.setClassName(node.id, cls) catch {};
@@ -389,6 +506,8 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
         const parent_id: u32 = node.parent orelse 0;
         store.insert(parent_id, node.id, null) catch {};
     }
+
+    restoreRuntimeState(store, &runtime_states);
 
     if (store.node(0)) |root_node| {
         return root_node.children.items.len > 0;
