@@ -87,15 +87,6 @@ export const createSolidHost = (native: RendererAdapter) => {
       );
       push(createOp);
 
-      for (const [eventType] of node.listeners) {
-        push({
-          op: "listen",
-          id: node.id,
-          eventType: eventType,
-        });
-        node.sentListeners.add(eventType);
-      }
-      node.listenersDirty = false;
       return;
     }
     push({

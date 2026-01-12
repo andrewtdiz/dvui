@@ -596,7 +596,13 @@ pub fn applySolidOps(renderer: *Renderer, json_bytes: []const u8, logMessage: an
         logMessage(renderer, 2, "solid ops dropped stale batch seq={d} last={d}", .{ seq, renderer.solid_seq_last });
         return false;
     }
-    logMessage(renderer, 1, "solid ops seq={d} count={d}", .{ seq, batch.ops.len });
+    var listen_ops: usize = 0;
+    for (batch.ops) |op| {
+        if (std.mem.eql(u8, op.op, "listen")) {
+            listen_ops += 1;
+        }
+    }
+    logMessage(renderer, 1, "solid ops seq={d} count={d} listen={d}", .{ seq, batch.ops.len, listen_ops });
     for (batch.ops) |op| {
         applySolidOp(store, op) catch |err| {
             logMessage(renderer, 3, "solid op failed: {s} op={s} id={d} parent={?d} before={?d}", .{

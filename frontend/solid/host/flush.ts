@@ -53,13 +53,31 @@ const markCreated = (node: HostNode) => {
   }
 };
 
-const emitPendingListeners = (node: HostNode, ops: MutationOp[]) => {
+type PendingListener = {
+  node: HostNode;
+  eventType: string;
+};
+
+const queuePendingListeners = (node: HostNode, ops: MutationOp[], pending: PendingListener[]) => {
   for (const [eventType] of node.listeners) {
     if (node.sentListeners.has(eventType)) continue;
     ops.push({ op: "listen", id: node.id, eventType });
-    node.sentListeners.add(eventType);
+    pending.push({ node, eventType });
   }
-  node.listenersDirty = false;
+};
+
+const commitPendingListeners = (pending: PendingListener[]) => {
+  if (pending.length === 0) return;
+  const touched = new Set<HostNode>();
+  for (const entry of pending) {
+    entry.node.sentListeners.add(entry.eventType);
+    touched.add(entry.node);
+  }
+  for (const node of touched) {
+    if (node.sentListeners.size >= node.listeners.size) {
+      node.listenersDirty = false;
+    }
+  }
 };
 
 export type FlushController = {
@@ -103,10 +121,11 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       return nodes;
     };
     let shouldEncodeCommands = native.setSolidTree == null;
+    const pendingListeners: PendingListener[] = [];
 
     for (const node of nodeIndex.values()) {
       if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
-        emitPendingListeners(node, ops);
+        queuePendingListeners(node, ops, pendingListeners);
       }
     }
 
@@ -173,13 +192,19 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       const payloadObj = { seq: ++seq, ops };
       const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       const ok = native.applyOps(payload);
-      ops.length = 0;
-      if (!ok) {
+      if (ok) {
+        commitPendingListeners(pendingListeners);
+        if (mutationsOnlyAfterSnapshot) {
+          mutationsOnlySynced = true;
+        }
+      } else {
+        const resyncRequested = !needFullSync;
         needFullSync = true;
-      } else if (mutationsOnlyAfterSnapshot) {
-        mutationsOnlySynced = true;
+        if (resyncRequested) scheduleFlush();
       }
+      ops.length = 0;
     }
+    pendingListeners.length = 0;
 
     const shouldSnapshot =
       !syncedOnce || snapshotEveryFlush || needFullSync || (!mutationsSupported && native.setSolidTree != null);
@@ -208,21 +233,26 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
     }
 
     if (sentSnapshot && mutationsSupported && native.applyOps) {
+      pendingListeners.length = 0;
       for (const node of nodeIndex.values()) {
         if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
-          emitPendingListeners(node, ops);
+          queuePendingListeners(node, ops, pendingListeners);
         }
       }
-      const listenOps = ops.filter((op) => op.op === "listen");
-      if (listenOps.length > 0) {
-        const payloadObj = { seq: ++seq, ops: listenOps };
+      if (ops.length > 0) {
+        const payloadObj = { seq: ++seq, ops };
         const payload = treeEncoder.encode(JSON.stringify(payloadObj));
         const ok = native.applyOps(payload);
-        if (!ok) {
+        if (ok) {
+          commitPendingListeners(pendingListeners);
+        } else {
+          const resyncRequested = !needFullSync;
           needFullSync = true;
+          if (resyncRequested) scheduleFlush();
         }
       }
       ops.length = 0;
+      pendingListeners.length = 0;
     }
 
     if (shouldEncodeCommands) {
