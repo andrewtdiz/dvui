@@ -165,7 +165,7 @@ pub export fn applyRendererSolidOps(
 // Event Ring Buffer FFI Exports
 // ============================================================
 
-/// Copy event ring header (read_head, write_head, capacity, detail_capacity) into out buffer.
+/// Copy event ring header (read_head, write_head, capacity, detail_capacity, dropped counts) into out buffer.
 pub export fn getEventRingHeader(renderer: ?*Renderer, out_ptr: [*]u8, out_len: usize) callconv(.c) usize {
     const std = @import("std");
     if (renderer == null or out_len < @sizeOf(solid.EventRing.Header)) return 0;

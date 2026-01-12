@@ -45,9 +45,18 @@ pub const EventRing = struct {
     read_head: u32 = 0,
     write_head: u32 = 0,
     detail_write: u32 = 0,
+    dropped_events: u32 = 0,
+    dropped_details: u32 = 0,
     capacity: u32,
     detail_capacity: u32,
-    header_cache: Header = .{ .read_head = 0, .write_head = 0, .capacity = 0, .detail_capacity = 0 },
+    header_cache: Header = .{
+        .read_head = 0,
+        .write_head = 0,
+        .capacity = 0,
+        .detail_capacity = 0,
+        .dropped_events = 0,
+        .dropped_details = 0,
+    },
 
     const DEFAULT_CAPACITY: u32 = 256;
     const DEFAULT_DETAIL_CAPACITY: u32 = 4096;
@@ -82,6 +91,7 @@ pub const EventRing = struct {
     pub fn push(self: *EventRing, kind: EventKind, node_id: u32, detail: ?[]const u8) bool {
         // Check if buffer is full
         if (self.write_head - self.read_head >= self.capacity) {
+            self.dropped_events +%= 1;
             log.warn("EventRing full! kind={d} node={d}", .{ @intFromEnum(kind), node_id });
             return false;
         }
@@ -102,6 +112,8 @@ pub const EventRing = struct {
                 entry.detail_offset = self.detail_write;
                 entry.detail_len = @intCast(d.len);
                 self.detail_write += @intCast(d.len);
+            } else {
+                self.dropped_details +%= 1;
             }
         }
 
@@ -170,6 +182,8 @@ pub const EventRing = struct {
         write_head: u32,
         capacity: u32,
         detail_capacity: u32,
+        dropped_events: u32,
+        dropped_details: u32,
     };
 
     pub fn getHeader(self: *const EventRing) Header {
@@ -178,6 +192,8 @@ pub const EventRing = struct {
             .write_head = self.write_head,
             .capacity = self.capacity,
             .detail_capacity = self.detail_capacity,
+            .dropped_events = self.dropped_events,
+            .dropped_details = self.dropped_details,
         };
     }
 

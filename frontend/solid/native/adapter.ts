@@ -36,6 +36,8 @@ export class NativeRenderer implements RendererAdapter {
   private readonly textEncoder = new TextEncoder();
   private callbackDepth = 0;
   private closeDeferred = false;
+  private lastEventOverflow = 0;
+  private lastDetailOverflow = 0;
   readonly encoder: CommandEncoder;
   readonly capabilities: RendererCapabilities = { window: true };
   disposed = false;
@@ -148,7 +150,7 @@ export class NativeRenderer implements RendererAdapter {
   pollEvents(nodeIndex: Map<number, import("../host/node").HostNode>): number {
     if (this.disposed) return 0;
 
-    const headerBuffer = new Uint8Array(16);
+    const headerBuffer = new Uint8Array(24);
     const copied = this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length);
     if (Number(copied) !== headerBuffer.length) return 0;
 
@@ -157,6 +159,23 @@ export class NativeRenderer implements RendererAdapter {
     const writeHead = headerView.getUint32(4, true);
     const capacity = headerView.getUint32(8, true);
     const detailCapacity = headerView.getUint32(12, true);
+    const droppedEvents = headerView.getUint32(16, true);
+    const droppedDetails = headerView.getUint32(20, true);
+
+    if (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow) {
+      const eventDelta =
+        droppedEvents >= this.lastEventOverflow ? droppedEvents - this.lastEventOverflow : droppedEvents;
+      const detailDelta =
+        droppedDetails >= this.lastDetailOverflow ? droppedDetails - this.lastDetailOverflow : droppedDetails;
+      if (eventDelta > 0 || detailDelta > 0) {
+        const parts: string[] = [];
+        if (eventDelta > 0) parts.push(`${eventDelta} events`);
+        if (detailDelta > 0) parts.push(`${detailDelta} detail payloads`);
+        console.warn(`[native] Event ring overflow: dropped ${parts.join(" and ")}.`);
+      }
+      this.lastEventOverflow = droppedEvents;
+      this.lastDetailOverflow = droppedDetails;
+    }
 
     if (readHead === writeHead || capacity === 0) return 0;
 
