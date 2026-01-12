@@ -439,6 +439,24 @@ fn syncVisualLayer(
     }
 }
 
+const OrderedNode = struct {
+    id: u32,
+    z_index: i16,
+    order: usize,
+};
+
+fn orderedNodeLessThan(_: void, lhs: OrderedNode, rhs: OrderedNode) bool {
+    if (lhs.z_index == rhs.z_index) {
+        return lhs.order < rhs.order;
+    }
+    return lhs.z_index < rhs.z_index;
+}
+
+fn sortOrderedNodes(nodes: []OrderedNode) void {
+    if (nodes.len < 2) return;
+    std.sort.pdq(OrderedNode, nodes, {}, orderedNodeLessThan);
+}
+
 fn renderPortalNodesOrdered(
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
@@ -447,45 +465,31 @@ fn renderPortalNodesOrdered(
     tracker: *DirtyRegionTracker,
 ) void {
     if (portal_ids.len == 0) return;
-    var ordered: std.ArrayList(u32) = .empty;
+    var ordered: std.ArrayList(OrderedNode) = .empty;
     defer ordered.deinit(allocator);
-    for (portal_ids) |portal_id| {
-        if (store.node(portal_id) == null) continue;
-        ordered.append(allocator, portal_id) catch {};
-    }
-    if (ordered.items.len == 0) return;
 
     var any_z = false;
-    for (ordered.items) |portal_id| {
+    for (portal_ids, 0..) |portal_id, order_index| {
         const portal = store.node(portal_id) orelse continue;
-        if (portal.visual.z_index != 0) {
+        const z_index = portal.visual.z_index;
+        if (z_index != 0) {
             any_z = true;
-            break;
         }
+        ordered.append(allocator, .{
+            .id = portal_id,
+            .z_index = z_index,
+            .order = order_index,
+        }) catch {};
     }
+
+    if (ordered.items.len == 0) return;
 
     if (any_z) {
-        var i: usize = 1;
-        while (i < ordered.items.len) : (i += 1) {
-            const key_id = ordered.items[i];
-            const key_node = store.node(key_id);
-            const key_z: i16 = if (key_node) |kn| kn.visual.z_index else 0;
-
-            var j: usize = i;
-            while (j > 0) {
-                const prev_id = ordered.items[j - 1];
-                const prev_node = store.node(prev_id);
-                const prev_z: i16 = if (prev_node) |pn| pn.visual.z_index else 0;
-                if (prev_z <= key_z) break;
-                ordered.items[j] = prev_id;
-                j -= 1;
-            }
-            ordered.items[j] = key_id;
-        }
+        sortOrderedNodes(ordered.items);
     }
 
-    for (ordered.items) |portal_id| {
-        renderNode(event_ring, store, portal_id, allocator, tracker);
+    for (ordered.items) |entry| {
+        renderNode(event_ring, store, entry.id, allocator, tracker);
     }
 }
 
@@ -2226,36 +2230,25 @@ fn renderChildrenOrdered(
         return;
     }
 
-    var ordered: std.ArrayList(u32) = .empty;
+    var ordered: std.ArrayList(OrderedNode) = .empty;
     defer ordered.deinit(allocator);
 
-    for (node.children.items) |child_id| {
+    for (node.children.items, 0..) |child_id, order_index| {
         const child = store.node(child_id) orelse continue;
         if (skip_text and child.kind == .text) continue;
-        ordered.append(allocator, child_id) catch {};
+        const z_index = child.visual.z_index;
+        ordered.append(allocator, .{
+            .id = child_id,
+            .z_index = z_index,
+            .order = order_index,
+        }) catch {};
     }
 
-    // Stable insertion sort by z_index ascending so higher z renders last/on top.
-    var i: usize = 1;
-    while (i < ordered.items.len) : (i += 1) {
-        const key_id = ordered.items[i];
-        const key_node = store.node(key_id);
-        const key_z: i16 = if (key_node) |kn| kn.visual.z_index else 0;
+    if (ordered.items.len == 0) return;
+    sortOrderedNodes(ordered.items);
 
-        var j: usize = i;
-        while (j > 0) {
-            const prev_id = ordered.items[j - 1];
-            const prev_node = store.node(prev_id);
-            const prev_z: i16 = if (prev_node) |pn| pn.visual.z_index else 0;
-            if (prev_z <= key_z) break;
-            ordered.items[j] = prev_id;
-            j -= 1;
-        }
-        ordered.items[j] = key_id;
-    }
-
-    for (ordered.items) |child_id| {
-        renderNode(event_ring, store, child_id, allocator, tracker);
+    for (ordered.items) |entry| {
+        renderNode(event_ring, store, entry.id, allocator, tracker);
     }
 }
 
