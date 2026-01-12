@@ -892,7 +892,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
 
         dvui.subwindowAdd(overlay_id, overlay_rect_nat, overlay_rect_phys, overlay_state.modal, null, overlay_mouse_events);
         const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_natural);
-        defer dvui.subwindowCurrentSet(prev.id, prev.rect);
+        defer _ = dvui.subwindowCurrentSet(prev.id, prev.rect);
 
         render_layer = .overlay;
         renderPortalNodesOrdered(event_ring, store, portal_ids, scratch, &dirty_tracker);

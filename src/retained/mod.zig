@@ -106,10 +106,12 @@ fn captureRuntimeState(store: *types.NodeStore) RuntimeStateMap {
             runtime.input_focused = state.focused;
             const text = state.currentText();
             if (text.len > 0) {
-                runtime.input_text = allocator.dupe(u8, text) catch {
+                if (allocator.dupe(u8, text)) |copy| {
+                    runtime.input_text = copy;
+                } else |_| {
                     runtime.has_input = false;
                     runtime.input_text = &.{};
-                };
+                }
             }
         }
         if (node.scroll.enabled) {
