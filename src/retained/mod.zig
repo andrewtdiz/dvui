@@ -581,6 +581,9 @@ fn parseAccessRole(value: []const u8) ?dvui.AccessKit.Role {
     if (std.mem.eql(u8, normalized, "menuitem")) return .menu_item;
     if (std.mem.eql(u8, normalized, "menuitemcheckbox")) return .menu_item;
     if (std.mem.eql(u8, normalized, "menuitemradio")) return .menu_item;
+    if (std.mem.eql(u8, normalized, "checkbox")) return .check_box;
+    if (std.mem.eql(u8, normalized, "radio")) return .radio_button;
+    if (std.mem.eql(u8, normalized, "radiogroup")) return .radio_group;
     if (std.mem.eql(u8, normalized, "menubar")) return .menu_bar;
     if (std.mem.eql(u8, normalized, "listbox")) return .list_box;
     if (std.mem.eql(u8, normalized, "listitem")) return .list_item;

@@ -18,6 +18,8 @@ import {
   List,
   Pagination,
   Progress,
+  Radio,
+  RadioGroup,
   Separator,
   Skeleton,
   Stepper,
@@ -38,6 +40,7 @@ export const App = () => {
   const [activeTab, setActiveTab] = createSignal("account");
   const [activePage, setActivePage] = createSignal(3);
   const [activeStep, setActiveStep] = createSignal(1);
+  const [activeRadio, setActiveRadio] = createSignal("email");
 
   const decodePayload = (payload?: Uint8Array) => {
     if (!payload || payload.length === 0) return "";
@@ -144,6 +147,10 @@ export const App = () => {
             <h2 class="text-sm text-foreground">Inputs + Toggles</h2>
             <div class="flex flex-col gap-3">
               <Checkbox label="Receive updates" />
+              <RadioGroup value={activeRadio()} onChange={setActiveRadio}>
+                <Radio value="email" label="Email alerts" />
+                <Radio value="sms" label="SMS alerts" />
+              </RadioGroup>
               <div class="flex flex-row items-center gap-3">
                 <Switch />
                 <p class="text-sm text-muted-foreground">Enable preview</p>
