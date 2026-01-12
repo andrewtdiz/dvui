@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  List,
   Progress,
   Separator,
   Switch,
@@ -40,7 +41,9 @@ export const App = () => {
     setLastEvent(message);
   };
 
-  const scrollItems = Array.from({ length: 14 }, (_, index) => `Row ${index + 1}`);
+  const listItemHeight = 32;
+  const listViewportHeight = 160;
+  const scrollItems = Array.from({ length: 60 }, (_, index) => `Row ${index + 1}`);
 
   return (
     <div class="flex flex-col gap-6 p-6">
@@ -130,20 +133,15 @@ export const App = () => {
               <h2 class="text-sm text-foreground">Scroll Region</h2>
               <p class="text-xs text-muted-foreground">{scrollDetail()}</p>
             </div>
-            <div
-              class="h-40 w-full overflow-hidden rounded-md border border-border"
-              scroll={true}
-              canvasHeight={560}
+            <List
+              class="h-40 w-full rounded-md border border-border"
+              items={scrollItems}
+              itemSize={listItemHeight}
+              viewportHeight={listViewportHeight}
+              virtual={true}
+              itemClass="flex h-8 items-center rounded-md border border-border px-2 text-sm text-foreground"
               onScroll={logScroll}
-            >
-              <div class="flex flex-col gap-2 p-2">
-                {scrollItems.map((row) => (
-                  <div class="rounded-md border border-border p-2 text-sm text-foreground">
-                    {row}
-                  </div>
-                ))}
-              </div>
-            </div>
+            />
           </div>
 
           <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
