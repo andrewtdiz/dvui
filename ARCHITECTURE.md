@@ -1,171 +1,71 @@
 # Architecture
 
 ## Overview
-This repository implements DVUI, a Zig GUI toolkit with multiple rendering backends, a core runtime built around a per-window state machine, and optional native/JS integrations. The project is split between:
+DVUI is an immediate-mode GUI toolkit written in Zig. It ships with multiple native backends (raylib, dx11, wgpu, web, testing), a retained-mode tree for data-driven rendering, and a SolidJS frontend that drives a native renderer over FFI. The repo is split into Zig core (`src/`) and a TypeScript frontend (`frontend/`), with glue code that keeps both sides in sync.
 
-- `src/`: the Zig runtime, widgets, rendering, backends, and native integrations.
-- `frontend/`: a SolidJS universal renderer host with Bun FFI bindings for the native renderer and a minimal DVUI core FFI.
+## High-level flow
 
-At runtime, UI construction happens between `Window.begin()` and `Window.end()`, with rendering routed through a backend implementation. For JS-driven UI, a native renderer hosts a Solid-like node tree and uses a ring buffer to dispatch events back to JS.
+### Immediate-mode (pure Zig)
+1. Application code imports `src/dvui.zig` and calls widget helpers each frame.
+2. `window.Window` owns per-frame state, event processing, and render submission.
+3. Widgets resolve layout, produce render commands, and hand them to the backend.
+4. The chosen backend (raylib/dx11/wgpu/web) draws the frame and reports input events back.
 
-## Core Runtime (Zig)
-### Public API Surface
-- `src/dvui.zig` is the top-level module exporting all core types and functions. It also owns the global `current_window` pointer used during frame construction.
-- `dvui.App` (`src/window/app.zig`) provides an application loop interface that integrates with backend `main/panic/logFn` when available.
+### Retained-mode (Solid + native renderer)
+1. Solid universal runtime creates a HostNode tree in JS (no DOM).
+2. The host flush builds command buffers and optional snapshot/ops payloads.
+3. `frontend/solid/native/ffi.ts` calls into the `native_renderer` dynamic library.
+4. `src/integrations/native_renderer` decodes commands, updates the retained `NodeStore`, runs layout, renders, and emits events through a ring buffer.
+5. The frontend polls the ring buffer and dispatches events to Solid listeners.
 
-### Global Window Context
-- `dvui.current_window` is a global pointer set by `Window.begin()` and cleared/restored by `Window.end()`.
-- Many top-level helpers (rendering, theme access, caching, input queries) route through `dvui.currentWindow()`.
+## Repository layout
 
-### Window State
-`src/window/window.zig` defines the central `Window` struct. It owns:
-- Backend instance and per-frame timing.
-- Event queue and focus/capture state.
-- Layout state, subwindows, drag state, and debug overlays.
-- Caches and persistent state: `Data` store, fonts, textures, animations, tags, dialog queues.
-- Allocators: a general allocator (`gpa`) plus an arena, a LIFO arena, and a widget stack allocator.
+- `src/` (aka @src)
+  - `dvui.zig`: Public API surface and top-level re-exports. This is the main entry point for Zig users.
+  - `core/`: Fundamental types (Point, Rect, Color, Options, enums) used everywhere.
+  - `window/`: App and Window lifecycle, event handling, cursor state, debug helpers.
+  - `layout/`: Layout primitives, alignment, scroll info, easing.
+  - `render/`: Render commands, paths, textures, image encoders.
+  - `text/`: Fonts, text layout, selection helpers.
+  - `widgets/`: Immediate-mode widget implementations used by the high-level API.
+  - `theming/`: Theme definitions and presets.
+  - `backends/`: Platform render backends (raylib, dx11, wgpu, web, testing).
+  - `platform/`: OS integration (dialogs, io, compatibility helpers).
+  - `accessibility/`: AccessKit integration for assistive tech.
+  - `retained/`: Retained-mode tree, layout, render, and event ring.
+  - `integrations/solid/`: Lightweight Zig entry points used by the Solid integration.
+  - `integrations/native_renderer/`: FFI boundary and native renderer implementation.
+  - `testing/`, `utils/`, `fonts/`: Test helpers, utilities, bundled fonts.
 
-This window state is reset per frame (arenas, caches, layout state) while long-lived structures stay in the `gpa` allocator. The window lifecycle is explicit: `init()` -> `begin()`/`end()` per frame -> `deinit()`.
+- `frontend/` (aka @frontend)
+  - `index.ts`: Demo runner that owns the render loop and event polling.
+  - `solid/`
+    - `host/`: Host tree, mutation queue, and flush logic.
+    - `runtime/`: Solid universal runtime bindings (`createElement`, `insert`, etc.).
+    - `native/`: FFI adapter, command encoder, opcode schema, core renderer.
+    - `util/`, `state/`: Frame scheduling and demo state helpers.
+    - `solid-entry.tsx`: Example Solid app wiring.
+  - `scripts/`: Build pipeline for Solid universal transform.
+  - `dist/`: Bundled output.
 
-### Core Data Model
-- Geometry and primitives live in `src/core/`: `Point`, `Size`, `Rect`, `Color`, `Vertex`.
-- `Options` (`src/core/options.zig`) carries layout and styling knobs used by widgets.
-- `WidgetData` (`src/widgets/widget_data.zig`) is the per-widget record: ID, rect, min-size, options, scale, and debug/accessibility metadata.
-- `Widget` (`src/widgets/widget.zig`) is a vtable-backed interface that allows parent widgets to measure and place children.
-- `Data` (`src/core/data.zig`) is an ID-keyed store for persistent widget data and slices, with type validation in debug builds.
+- `build.zig` / `build.zig.zon`: Zig build graph and dependencies.
+- `docs/`: Internal design notes and render path deep dives.
 
-### Events
-- `Event` (`src/window/event.zig`) encapsulates mouse/key/text events and a handled flag.
-- `Window` accumulates events each frame, handles focus/capture, and exposes helpers to mark events as handled.
+## Key build artifacts
+- `dvui` module: Main Zig library entry point (`src/dvui.zig`).
+- `native_renderer` dynamic library: Built from `src/integrations/native_renderer` for the frontend.
+- `raylib-ontop` example: `src/raylib-ontop-zig.zig` wired in `build.zig`.
+- `retained-harness`: A snapshot playback tool for retained rendering.
 
-## Layout
-- `BasicLayout` (`src/layout/layout.zig`) provides vertical/horizontal stacking, handling expansion, gravity, and min-size aggregation.
-- Alignment helpers and `placeOnScreen` handle common positioning behaviors.
-- Subwindows (`src/window/subwindows.zig`, referenced by Window) allow floating layers and render ordering.
+## Extension points
+- Add a new widget: implement under `src/widgets/`, then expose a helper in `src/dvui.zig` if it should be public.
+- Add a backend: implement in `src/backends/` and plumb through `backends/mod.zig`.
+- Add Solid feature:
+  - Update the command schema/encoder in `frontend/solid/native/`.
+  - Mirror changes in `src/integrations/native_renderer/commands.zig` or retained render logic.
+  - Keep snapshot/ops handling in sync between JS and Zig.
 
-## Rendering
-- `src/render/` owns rendering primitives: triangles, paths, textures, text rendering, and render command deferral.
-- `RenderCommand` (`src/render/render.zig`) enables deferring draw calls (e.g., floating windows that must render above later widgets).
-- `Texture.Cache` (`src/render/texture.zig`) keeps GPU textures alive across frames and cleans them via explicit `reset()`/`deinit()`.
-
-## Backend Abstraction
-`src/backends/backend.zig` defines a uniform backend interface:
-- Frame lifecycle (`begin`, `end`).
-- Window sizing, content scale, and timing.
-- Rendering of triangles with optional clipping.
-- Texture creation/update/target rendering.
-- Clipboard and URL helpers.
-
-Implementations live under `src/backends/` (raylib, web, dx11, wgpu, testing). The concrete backend is provided at build time and imported as `@import("backend")`.
-
-## Memory and Allocators
-- The runtime uses a layered allocator strategy:
-  - `gpa` for long-lived state (Window, caches, widget data, hash maps).
-  - Per-frame `ArenaAllocator` for transient allocations (`Window.arena`).
-  - Per-frame LIFO arena for short-lived buffers (`Window.lifo`).
-  - Widget stack allocator for widget instances that are freed in a LIFO order.
-- `src/utils/alloc.zig` provides a global allocator helper for non-window contexts.
-
-All ownership is explicit: modules expose `init()`/`deinit()` functions and the owning struct frees its children or nested resources.
-
-## Solid Integration (Zig)
-The Solid integration is a data-oriented tree renderer that maps JS-driven nodes to DVUI draws:
-
-- `src/integrations/solid/core/types.zig`
-  - `SolidNode`: node tree entry with layout, paint cache, visual/transform props, listeners, and input state.
-  - `NodeStore`: hash map of nodes with version tracking for dirty propagation.
-- `src/integrations/solid/layout/`: computes layout from a Tailwind-like class spec.
-- `src/integrations/solid/render/`: renders nodes using DVUI primitives and maintains paint caches/dirty regions.
-- `src/integrations/solid/events/`: ring buffer for JS-bound events (`EventRing`).
-- `src/integrations/solid/style/`: parses Tailwind-like classes into layout/visual settings.
-
-The Solid renderer updates layout when the window size/scale changes or when dirty flags propagate through the tree.
-
-## Retained Solid Module (Zig)
-The retained module mirrors the engine Solid runtime in a standalone DVUI package:
-
-- `src/retained/mod.zig`: retained entry point that re-exports submodules.
-- `src/retained/core/`: node store, tree state, and retained types from `src/engine/render/ui-solid/core/`.
-- `src/retained/layout/`: Yoga-based layout from `src/engine/render/ui-solid/layout/`.
-- `src/retained/style/`: class parsing and style translation from `src/engine/render/ui-solid/style/`.
-- `src/retained/render/`: retained rendering pipeline from `src/engine/render/ui-solid/render/`.
-- `src/retained/events/`: event ring and input handling from `src/engine/render/ui-solid/events/`.
-
-Retained modules must depend only on `std`, `dvui`, and `yoga`, with no engine-specific imports.
-
-## Native Renderer (Zig)
-`src/integrations/native_renderer/` provides a Bun FFI-friendly renderer process:
-
-- `Renderer` (`types.zig`) owns:
-  - a `dvui.Window`, backend instance (Raylib), and allocator/arenas.
-  - command buffers (headers + payload) for simple quad/text drawing.
-  - optional Solid `NodeStore` and event ring.
-- `window.zig` drives the frame loop: begin DVUI frame, render Solid if available, otherwise render command buffers, then present.
-- `solid_sync.zig` rebuilds the Solid tree from JSON snapshots or incremental ops from JS.
-- `events.zig` pushes UI events into the ring buffer for JS polling.
-
-This path is intended for JS-driven UIs while reusing DVUI’s rendering backend and input/event processing.
-
-## DVUI Core FFI (Zig)
-`src/core/ffi.zig` defines a minimal, C ABI-safe interface:
-- `dvui_core_init` / `deinit` to create a window and backend (raylib for now).
-- `begin_frame` / `end_frame` to bracket rendering.
-- `pointer`, `wheel`, `key`, `text` event injection.
-- `commit` to render a compact command buffer (quads and text).
-
-This path is simpler than the native renderer and is used by the `frontend` core-renderer adapter.
-
-## Frontend (TypeScript / Solid)
-The `frontend/` package provides a Solid universal host and FFI bindings:
-
-### Host Nodes and Runtime
-- `frontend/solid/host/node.ts` defines `HostNode`, a lightweight DOM-like node with props and event listeners.
-- `frontend/solid/runtime/` implements the Solid universal renderer runtime (create/insert/remove/setProperty) using host nodes.
-- `frontend/solid/host/index.ts` wires Solid’s universal renderer to a `RendererAdapter` and manages mutation queues.
-
-### Flush + Mutation Pipeline
-- `frontend/solid/host/flush.ts` generates:
-  - command buffers (quads/text) for the native renderer core path.
-  - Solid tree snapshots or incremental mutation ops for the native renderer’s Solid store.
-- `frontend/solid/host/mutation-queue.ts` tracks ops; `snapshot.ts` serializes the tree.
-
-### FFI Adapters
-- `frontend/solid/native/adapter.ts` is the main Bun FFI binding to the native renderer shared library.
-- `frontend/solid/native/encoder.ts` encodes compact command buffers (header + payload).
-- `frontend/solid/native/dvui-core.ts` + `core-renderer.ts` bind to the minimal DVUI core FFI interface.
-
-### Event Flow (JS)
-The adapter polls the native event ring and dispatches events to `HostNode` listeners. Payloads are small binary blobs; node IDs map events back to handlers.
-
-## Typical Runtime Flows
-### 1) DVUI App (Zig)
-1. Backend init.
-2. `Window.begin()` sets `dvui.current_window`, clears frame state, and resets caches.
-3. App constructs widgets; each widget registers `WidgetData` and emits render calls.
-4. `Window.end()` flushes deferred commands and backend `end()` presents.
-
-### 2) Solid UI via Native Renderer (JS -> Zig)
-1. Solid universal runtime builds/updates a `HostNode` tree.
-2. Flush builds either:
-   - a full tree snapshot, or
-   - incremental ops (create/move/set_class/set_visual/etc.).
-3. Native renderer updates `NodeStore` and renders via Solid integration.
-4. UI events are pushed into the ring buffer and polled back in JS.
-
-### 3) Command Buffer Rendering (JS -> Zig)
-1. JS encodes quad/text commands via `CommandEncoder`.
-2. Native renderer or core FFI ingests the command buffer and renders with DVUI primitives.
-
-## Key Directories
-- `src/core/`: primitives, options, data store, FFI entrypoints.
-- `src/window/`: Window/App runtime, events, subwindows, dragging.
-- `src/render/`: rendering primitives and texture caching.
-- `src/backends/`: backend interface + implementations.
-- `src/integrations/solid/`: Solid node tree, layout, render, style parsing.
-- `src/integrations/native_renderer/`: Bun FFI-native renderer implementation.
-- `frontend/solid/`: Solid universal host + native bindings.
-
-## Ownership and Lifecycle Summary
-- All major structs (`Window`, `NodeStore`, `Renderer`, caches) provide `init()`/`deinit()` with explicit ownership.
-- Parents own and free nested resources (Window owns caches, fonts, dialogs, and data stores).
-- Per-frame memory is reclaimed by resetting arenas; long-lived allocations are in `gpa` and freed on `deinit()`.
+## State and memory expectations
+- Core state lives in `window.Window` and retained `NodeStore` (explicit `init`/`deinit`).
+- Allocators are passed in explicitly; subsystems own and clean up what they allocate.
+- Backend and FFI lifecycles are explicit (create, resize, present, destroy).
