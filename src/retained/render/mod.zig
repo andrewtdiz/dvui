@@ -142,6 +142,93 @@ fn applyCursorHint(node: *types.SolidNode, class_spec: *const tailwind.Spec) voi
     }
 }
 
+fn nodeHasAccessibilityProps(node: *const types.SolidNode) bool {
+    if (node.access_role != null) return true;
+    if (node.access_label.len > 0) return true;
+    if (node.access_description.len > 0) return true;
+    if (node.access_expanded != null) return true;
+    if (node.access_selected != null) return true;
+    if (node.access_toggled != null) return true;
+    if (node.access_hidden != null) return true;
+    if (node.access_disabled != null) return true;
+    if (node.access_has_popup != null) return true;
+    if (node.access_modal != null) return true;
+    return false;
+}
+
+fn applyAccessibilityOptions(
+    node: *const types.SolidNode,
+    options: *dvui.Options,
+    fallback_role: ?dvui.AccessKit.Role,
+) void {
+    if (node.access_role) |role| {
+        options.role = role;
+    } else if (fallback_role != null and nodeHasAccessibilityProps(node)) {
+        options.role = fallback_role.?;
+    }
+    if (node.access_label.len > 0) {
+        options.label = .{ .text = node.access_label };
+    }
+}
+
+fn applyAccessibilityState(node: *const types.SolidNode, wd: *dvui.WidgetData) void {
+    if (wd.accesskit_node()) |ak_node| {
+        if (node.access_description.len > 0) {
+            const desc = dvui.currentWindow().arena().dupeZ(u8, node.access_description) catch "";
+            defer dvui.currentWindow().arena().free(desc);
+            dvui.AccessKit.nodeSetDescription(ak_node, desc);
+        }
+        if (node.access_expanded) |flag| {
+            dvui.AccessKit.nodeSetExpanded(ak_node, flag);
+        } else {
+            dvui.AccessKit.nodeClearExpanded(ak_node);
+        }
+        if (node.access_selected) |flag| {
+            dvui.AccessKit.nodeSetSelected(ak_node, flag);
+        } else {
+            dvui.AccessKit.nodeClearSelected(ak_node);
+        }
+        if (node.access_toggled) |state| {
+            const toggled = switch (state) {
+                .ak_false => dvui.AccessKit.Toggled.ak_false,
+                .ak_true => dvui.AccessKit.Toggled.ak_true,
+                .mixed => dvui.AccessKit.Toggled.mixed,
+            };
+            dvui.AccessKit.nodeSetToggled(ak_node, toggled);
+        } else {
+            dvui.AccessKit.nodeClearToggled(ak_node);
+        }
+        if (node.access_hidden) |flag| {
+            dvui.AccessKit.nodeSetHidden(ak_node, flag);
+        } else {
+            dvui.AccessKit.nodeClearHidden(ak_node);
+        }
+        if (node.access_disabled) |flag| {
+            dvui.AccessKit.nodeSetDisabled(ak_node, flag);
+        } else {
+            dvui.AccessKit.nodeClearDisabled(ak_node);
+        }
+        if (node.access_has_popup) |popup| {
+            const popup_value = switch (popup) {
+                .menu => dvui.AccessKit.HasPopup.menu,
+                .listbox => dvui.AccessKit.HasPopup.listbox,
+                .tree => dvui.AccessKit.HasPopup.tree,
+                .grid => dvui.AccessKit.HasPopup.grid,
+                .dialog => dvui.AccessKit.HasPopup.dialog,
+            };
+            dvui.AccessKit.nodeSetHasPopup(ak_node, popup_value);
+        } else {
+            dvui.AccessKit.nodeClearHasPopup(ak_node);
+        }
+        const modal_flag: ?bool = if (node.access_modal) |flag| flag else if (node.modal) true else null;
+        if (modal_flag) |flag| {
+            dvui.AccessKit.nodeSetModal(ak_node, flag);
+        } else {
+            dvui.AccessKit.nodeClearModal(ak_node);
+        }
+    }
+}
+
 const ClipState = struct {
     active: bool = false,
     rect: types.Rect = .{},
@@ -799,7 +886,7 @@ fn renderElement(
         logged_render_state = true;
     }
 
-    if (node.isInteractive()) {
+    if (node.isInteractive() or nodeHasAccessibilityProps(node)) {
         renderInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker);
     } else {
         renderNonInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker);
@@ -1120,12 +1207,14 @@ fn renderContainer(
     applyLayoutScaleToOptions(node, &options);
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, .generic_container);
     if (node.layout.rect) |rect| {
         options.rect = physicalToDvuiRect(rect);
     }
 
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
+    applyAccessibilityState(node, box.data());
 
     if (tab_info.focusable and allowFocusRegistration()) {
         dvui.tabIndexSet(box.data().id, tab_info.tab_index);
@@ -1370,7 +1459,12 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode) void {
         applyLayoutScaleToOptions(node, &options);
         applyVisualToOptions(node, &options);
         applyTransformToOptions(node, &options);
-        dvui.labelNoFmt(@src(), trimmed, .{}, options);
+        applyAccessibilityOptions(node, &options, null);
+        var lw = dvui.LabelWidget.initNoFmt(@src(), trimmed, .{}, options);
+        lw.install();
+        applyAccessibilityState(node, lw.data());
+        lw.draw();
+        lw.deinit();
     }
     node.markRendered();
 }
@@ -1428,6 +1522,7 @@ fn renderButton(
     applyLayoutScaleToOptions(node, &options);
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, null);
     if (rect_opt) |rect| {
         options.rect = physicalToDvuiRect(rect);
     }
@@ -1444,6 +1539,7 @@ fn renderButton(
     // gets a unique ID even though they all originate from the same source location.
     var bw = dvui.ButtonWidget.init(@src(), .{ .draw_focus = false }, options);
     bw.install();
+    applyAccessibilityState(node, bw.data());
     if (tab_info.focusable and focus_allowed) {
         focus.registerFocusable(store, node, bw.data());
     }
@@ -1528,18 +1624,28 @@ fn renderIcon(
     applyLayoutScaleToOptions(node, &options);
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, null);
 
     switch (resolved) {
         .vector => |tvg_bytes| {
             const icon_name = if (src.len > 0) src else "solid-icon";
-            dvui.icon(@src(), icon_name, tvg_bytes, .{}, options);
+            var iw = dvui.IconWidget.init(@src(), icon_name, tvg_bytes, .{}, options);
+            iw.install();
+            applyAccessibilityState(node, iw.data());
+            iw.draw();
+            iw.deinit();
         },
         .raster => |resource| {
             const image_source = image_loader.imageSource(resource);
-            _ = dvui.image(@src(), .{ .source = image_source }, options);
+            var wd = dvui.image(@src(), .{ .source = image_source }, options);
+            applyAccessibilityState(node, &wd);
         },
         .glyph => |text| {
-            dvui.labelNoFmt(@src(), text, .{}, options);
+            var lw = dvui.LabelWidget.initNoFmt(@src(), text, .{}, options);
+            lw.install();
+            applyAccessibilityState(node, lw.data());
+            lw.draw();
+            lw.deinit();
         },
     }
 
@@ -1575,9 +1681,11 @@ fn renderImage(
     applyLayoutScaleToOptions(node, &options);
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, null);
 
     const image_source = image_loader.imageSource(resource);
-    _ = dvui.image(@src(), .{ .source = image_source }, options);
+    var wd = dvui.image(@src(), .{ .source = image_source }, options);
+    applyAccessibilityState(node, &wd);
 
     renderChildElements(event_ring, store, node, allocator, tracker);
 }
@@ -1599,6 +1707,7 @@ fn renderInput(
     applyLayoutScaleToOptions(node, &options);
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, .text_input);
 
     const tab_info = focus.tabIndexForNode(store, node);
     const focus_allowed = allowFocusRegistration();
@@ -1625,6 +1734,7 @@ fn renderInput(
     defer box.deinit();
 
     const wd = box.data();
+    applyAccessibilityState(node, wd);
     if (tab_info.focusable and focus_allowed) {
         focus.registerFocusable(store, node, wd);
     }

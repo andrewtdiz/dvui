@@ -2,6 +2,7 @@ import { CommandEncoder } from "../native/encoder";
 import type { RendererAdapter } from "../native/adapter";
 import type { HostNode } from "./node";
 import {
+  accessibilityFields,
   anchorFields,
   bgColorFromClass,
   extractAnchor,
@@ -149,6 +150,17 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           anchorSide: n.anchorSide,
           anchorAlign: n.anchorAlign,
           anchorOffset: n.anchorOffset,
+          role: n.role,
+          ariaLabel: n.ariaLabel,
+          ariaDescription: n.ariaDescription,
+          ariaExpanded: n.ariaExpanded,
+          ariaSelected: n.ariaSelected,
+          ariaChecked: n.ariaChecked,
+          ariaPressed: n.ariaPressed,
+          ariaHidden: n.ariaHidden,
+          ariaDisabled: n.ariaDisabled,
+          ariaHasPopup: n.ariaHasPopup,
+          ariaModal: n.ariaModal,
         };
         ops.push(createOp);
       }
@@ -308,6 +320,78 @@ export const applyAnchorMutation = (node: HostNode, name: string, value: unknown
   }
 };
 
+const normalizeAriaBool = (value: unknown) => {
+  if (value == null) return false;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true") return true;
+    if (lowered === "false") return false;
+  }
+  return Boolean(value);
+};
+
+const normalizeAriaChecked = (value: unknown) => {
+  if (value == null) return "false";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true" || lowered === "false" || lowered === "mixed") return lowered;
+  }
+  return undefined;
+};
+
+const normalizeAriaHasPopup = (value: unknown) => {
+  if (value == null || value === false) return "";
+  if (typeof value === "string") return value;
+  if (value === true) return "menu";
+  return "";
+};
+
+export const applyAccessibilityMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
+  const payload: MutationOp = { op: "set_accessibility", id: node.id };
+  if (name === "role") {
+    payload.role = value == null ? "" : String(value);
+  } else if (name === "ariaLabel") {
+    payload.ariaLabel = value == null ? "" : String(value);
+  } else if (name === "ariaDescription") {
+    payload.ariaDescription = value == null ? "" : String(value);
+  } else if (name === "ariaExpanded") {
+    payload.ariaExpanded = normalizeAriaBool(value);
+  } else if (name === "ariaSelected") {
+    payload.ariaSelected = normalizeAriaBool(value);
+  } else if (name === "ariaChecked") {
+    const checked = normalizeAriaChecked(value);
+    if (checked != null) payload.ariaChecked = checked;
+  } else if (name === "ariaPressed") {
+    const pressed = normalizeAriaChecked(value);
+    if (pressed != null) payload.ariaPressed = pressed;
+  } else if (name === "ariaHidden") {
+    payload.ariaHidden = normalizeAriaBool(value);
+  } else if (name === "ariaDisabled") {
+    payload.ariaDisabled = normalizeAriaBool(value);
+  } else if (name === "ariaHasPopup") {
+    payload.ariaHasPopup = normalizeAriaHasPopup(value);
+  } else if (name === "ariaModal") {
+    payload.ariaModal = normalizeAriaBool(value);
+  }
+  const hasField =
+    payload.role != null ||
+    payload.ariaLabel != null ||
+    payload.ariaDescription != null ||
+    payload.ariaExpanded != null ||
+    payload.ariaSelected != null ||
+    payload.ariaChecked != null ||
+    payload.ariaPressed != null ||
+    payload.ariaHidden != null ||
+    payload.ariaDisabled != null ||
+    payload.ariaHasPopup != null ||
+    payload.ariaModal != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+
 export const applyTransformMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     const payload: MutationOp = { op: "set_transform", id: node.id, [name]: value } as MutationOp;
@@ -333,4 +417,8 @@ export const isFocusField = (name: string): name is (typeof focusFields)[number]
 
 export const isAnchorField = (name: string): name is (typeof anchorFields)[number] => {
   return (anchorFields as readonly string[]).includes(name);
+};
+
+export const isAccessibilityField = (name: string): name is (typeof accessibilityFields)[number] => {
+  return (accessibilityFields as readonly string[]).includes(name);
 };

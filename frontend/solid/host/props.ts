@@ -58,6 +58,20 @@ export const anchorFields = ["anchorId", "anchorSide", "anchorAlign", "anchorOff
 
 export const iconFields = ["iconKind", "iconGlyph"] as const;
 
+export const accessibilityFields = [
+  "role",
+  "ariaLabel",
+  "ariaDescription",
+  "ariaExpanded",
+  "ariaSelected",
+  "ariaChecked",
+  "ariaPressed",
+  "ariaHidden",
+  "ariaDisabled",
+  "ariaHasPopup",
+  "ariaModal",
+] as const;
+
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
   if (!raw) return false;
@@ -214,4 +228,83 @@ export const extractIcon = (props: NodeProps) => {
     icon.iconGlyph = props.iconGlyph;
   }
   return icon;
+};
+
+const normalizeAriaBool = (value: unknown) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true") return true;
+    if (lowered === "false") return false;
+  }
+  return undefined;
+};
+
+const normalizeAriaChecked = (value: unknown) => {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true" || lowered === "false" || lowered === "mixed") return lowered;
+  }
+  return undefined;
+};
+
+const normalizeAriaHasPopup = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (value === true) return "menu";
+  return undefined;
+};
+
+export const normalizeAriaName = (name: string) => {
+  if (!name.startsWith("aria-")) return name;
+  const base = name.slice(5);
+  if (base.length === 0) return name;
+  const camel = base.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase());
+  return `aria${camel.charAt(0).toUpperCase()}${camel.slice(1)}`;
+};
+
+export const extractAccessibility = (props: NodeProps) => {
+  const a: Partial<Record<(typeof accessibilityFields)[number], string | boolean>> = {};
+  if (typeof props.role === "string") {
+    a.role = props.role;
+  }
+  if (typeof props.ariaLabel === "string") {
+    a.ariaLabel = props.ariaLabel;
+  }
+  if (typeof props.ariaDescription === "string") {
+    a.ariaDescription = props.ariaDescription;
+  }
+  const expanded = normalizeAriaBool(props.ariaExpanded);
+  if (expanded != null) {
+    a.ariaExpanded = expanded;
+  }
+  const selected = normalizeAriaBool(props.ariaSelected);
+  if (selected != null) {
+    a.ariaSelected = selected;
+  }
+  const checked = normalizeAriaChecked(props.ariaChecked);
+  if (checked != null) {
+    a.ariaChecked = checked;
+  }
+  const pressed = normalizeAriaChecked(props.ariaPressed);
+  if (pressed != null) {
+    a.ariaPressed = pressed;
+  }
+  const hidden = normalizeAriaBool(props.ariaHidden);
+  if (hidden != null) {
+    a.ariaHidden = hidden;
+  }
+  const disabled = normalizeAriaBool(props.ariaDisabled);
+  if (disabled != null) {
+    a.ariaDisabled = disabled;
+  }
+  const popup = normalizeAriaHasPopup(props.ariaHasPopup);
+  if (popup != null) {
+    a.ariaHasPopup = popup;
+  }
+  const modal = normalizeAriaBool(props.ariaModal);
+  if (modal != null) {
+    a.ariaModal = modal;
+  }
+  return a;
 };

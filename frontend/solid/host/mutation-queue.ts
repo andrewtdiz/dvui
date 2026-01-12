@@ -12,6 +12,7 @@ export type MutationOp = {
     | "set_scroll"
     | "set_focus"
     | "set_anchor"
+    | "set_accessibility"
     | "listen"
     | "set";
   id: number;
@@ -52,6 +53,17 @@ export type MutationOp = {
   anchorSide?: string;
   anchorAlign?: string;
   anchorOffset?: number;
+  role?: string;
+  ariaLabel?: string;
+  ariaDescription?: string;
+  ariaExpanded?: boolean;
+  ariaSelected?: boolean;
+  ariaChecked?: string;
+  ariaPressed?: string;
+  ariaHidden?: boolean;
+  ariaDisabled?: boolean;
+  ariaHasPopup?: string;
+  ariaModal?: boolean;
 };
 
 export const createMutationQueue = () => {

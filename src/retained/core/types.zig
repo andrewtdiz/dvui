@@ -16,6 +16,20 @@ pub const IconKind = enum {
     glyph,
 };
 
+pub const AccessToggled = enum {
+    ak_false,
+    ak_true,
+    mixed,
+};
+
+pub const AccessHasPopup = enum {
+    menu,
+    listbox,
+    tree,
+    grid,
+    dialog,
+};
+
 pub const NodeKind = enum {
     root,
     element,
@@ -240,6 +254,16 @@ pub const SolidNode = struct {
     anchor_side: AnchorSide = .bottom,
     anchor_align: AnchorAlign = .start,
     anchor_offset: f32 = 0,
+    access_role: ?dvui.AccessKit.Role = null,
+    access_label: []u8 = &.{},
+    access_description: []u8 = &.{},
+    access_expanded: ?bool = null,
+    access_selected: ?bool = null,
+    access_toggled: ?AccessToggled = null,
+    access_hidden: ?bool = null,
+    access_disabled: ?bool = null,
+    access_has_popup: ?AccessHasPopup = null,
+    access_modal: ?bool = null,
     class_spec: tailwind.Spec = .{},
     class_spec_dirty: bool = true,
     input_state: ?InputState = null,
@@ -286,6 +310,8 @@ pub const SolidNode = struct {
         if (self.tag.len > 0) allocator.free(self.tag);
         if (self.text.len > 0) allocator.free(self.text);
         if (self.class_name.len > 0) allocator.free(self.class_name);
+        if (self.access_label.len > 0) allocator.free(self.access_label);
+        if (self.access_description.len > 0) allocator.free(self.access_description);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
         if (self.input_state) |*state| {
@@ -328,6 +354,24 @@ pub const SolidNode = struct {
 
     pub fn className(self: *const SolidNode) []const u8 {
         return self.class_name;
+    }
+
+    pub fn setAccessLabel(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        if (self.access_label.len > 0) allocator.free(self.access_label);
+        if (value.len == 0) {
+            self.access_label = &.{};
+            return;
+        }
+        self.access_label = try allocator.dupe(u8, value);
+    }
+
+    pub fn setAccessDescription(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        if (self.access_description.len > 0) allocator.free(self.access_description);
+        if (value.len == 0) {
+            self.access_description = &.{};
+            return;
+        }
+        self.access_description = try allocator.dupe(u8, value);
     }
 
     pub fn setImageSource(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {

@@ -50,6 +50,17 @@ const SolidSnapshotNode = struct {
     anchorSide: ?[]const u8 = null,
     anchorAlign: ?[]const u8 = null,
     anchorOffset: ?f32 = null,
+    role: ?[]const u8 = null,
+    ariaLabel: ?[]const u8 = null,
+    ariaDescription: ?[]const u8 = null,
+    ariaExpanded: ?bool = null,
+    ariaSelected: ?bool = null,
+    ariaChecked: ?[]const u8 = null,
+    ariaPressed: ?[]const u8 = null,
+    ariaHidden: ?bool = null,
+    ariaDisabled: ?bool = null,
+    ariaHasPopup: ?[]const u8 = null,
+    ariaModal: ?bool = null,
 };
 
 const SolidSnapshot = struct {
@@ -96,6 +107,17 @@ const SolidOp = struct {
     anchorSide: ?[]const u8 = null,
     anchorAlign: ?[]const u8 = null,
     anchorOffset: ?f32 = null,
+    role: ?[]const u8 = null,
+    ariaLabel: ?[]const u8 = null,
+    ariaDescription: ?[]const u8 = null,
+    ariaExpanded: ?bool = null,
+    ariaSelected: ?bool = null,
+    ariaChecked: ?[]const u8 = null,
+    ariaPressed: ?[]const u8 = null,
+    ariaHidden: ?bool = null,
+    ariaDisabled: ?bool = null,
+    ariaHasPopup: ?[]const u8 = null,
+    ariaModal: ?bool = null,
 };
 
 const SolidOpBatch = struct {
@@ -300,6 +322,62 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
                 target.setIconGlyph(store_allocator, value) catch {};
                 touched = true;
             }
+            if (node.role) |value| {
+                if (value.len == 0) {
+                    target.access_role = null;
+                    touched = true;
+                } else if (parseAccessRole(value)) |role| {
+                    target.access_role = role;
+                    touched = true;
+                } else {
+                    target.access_role = .generic_container;
+                    touched = true;
+                }
+            }
+            if (node.ariaLabel) |value| {
+                target.setAccessLabel(store_allocator, value) catch {};
+                touched = true;
+            }
+            if (node.ariaDescription) |value| {
+                target.setAccessDescription(store_allocator, value) catch {};
+                touched = true;
+            }
+            if (node.ariaExpanded) |flag| {
+                target.access_expanded = flag;
+                touched = true;
+            }
+            if (node.ariaSelected) |flag| {
+                target.access_selected = flag;
+                touched = true;
+            }
+            if (node.ariaHidden) |flag| {
+                target.access_hidden = flag;
+                touched = true;
+            }
+            if (node.ariaDisabled) |flag| {
+                target.access_disabled = flag;
+                touched = true;
+            }
+            if (node.ariaHasPopup) |value| {
+                target.access_has_popup = parseAccessHasPopup(value);
+                touched = true;
+            }
+            if (node.ariaModal) |flag| {
+                target.access_modal = flag;
+                touched = true;
+            }
+            var toggled_set = false;
+            if (node.ariaChecked) |value| {
+                target.access_toggled = parseAccessToggled(value);
+                touched = true;
+                toggled_set = true;
+            }
+            if (!toggled_set) {
+                if (node.ariaPressed) |value| {
+                    target.access_toggled = parseAccessToggled(value);
+                    touched = true;
+                }
+            }
             if (touched) {
                 store.markNodeChanged(node.id);
             }
@@ -485,6 +563,55 @@ fn parseIconKind(value: []const u8) ?types.IconKind {
     return null;
 }
 
+fn parseAccessRole(value: []const u8) ?dvui.AccessKit.Role {
+    if (value.len == 0) return null;
+    if (std.ascii.eqlIgnoreCase(value, "none") or std.ascii.eqlIgnoreCase(value, "presentation")) return .none;
+
+    var buffer: [64]u8 = undefined;
+    if (value.len > buffer.len) return null;
+    for (value, 0..) |char, idx| {
+        var lower = std.ascii.toLower(char);
+        if (lower == '-') lower = '_';
+        buffer[idx] = lower;
+    }
+    const normalized = buffer[0..value.len];
+
+    if (std.mem.eql(u8, normalized, "tablist")) return .tab_list;
+    if (std.mem.eql(u8, normalized, "tabpanel")) return .tab_panel;
+    if (std.mem.eql(u8, normalized, "menuitem")) return .menu_item;
+    if (std.mem.eql(u8, normalized, "menuitemcheckbox")) return .menu_item;
+    if (std.mem.eql(u8, normalized, "menuitemradio")) return .menu_item;
+    if (std.mem.eql(u8, normalized, "menubar")) return .menu_bar;
+    if (std.mem.eql(u8, normalized, "listbox")) return .list_box;
+    if (std.mem.eql(u8, normalized, "listitem")) return .list_item;
+    if (std.mem.eql(u8, normalized, "alertdialog")) return .alert_dialog;
+    if (std.mem.eql(u8, normalized, "textbox")) return .text_input;
+    if (std.mem.eql(u8, normalized, "searchbox")) return .search_input;
+    if (std.mem.eql(u8, normalized, "combobox")) return .combo_box;
+    if (std.mem.eql(u8, normalized, "switch")) return .ak_switch;
+    if (std.mem.eql(u8, normalized, "img")) return .image;
+
+    return std.meta.stringToEnum(dvui.AccessKit.Role, normalized);
+}
+
+fn parseAccessToggled(value: []const u8) ?types.AccessToggled {
+    if (value.len == 0) return null;
+    if (std.ascii.eqlIgnoreCase(value, "true")) return .ak_true;
+    if (std.ascii.eqlIgnoreCase(value, "false")) return .ak_false;
+    if (std.ascii.eqlIgnoreCase(value, "mixed")) return .mixed;
+    return null;
+}
+
+fn parseAccessHasPopup(value: []const u8) ?types.AccessHasPopup {
+    if (value.len == 0) return null;
+    if (std.ascii.eqlIgnoreCase(value, "menu")) return .menu;
+    if (std.ascii.eqlIgnoreCase(value, "listbox")) return .listbox;
+    if (std.ascii.eqlIgnoreCase(value, "tree")) return .tree;
+    if (std.ascii.eqlIgnoreCase(value, "grid")) return .grid;
+    if (std.ascii.eqlIgnoreCase(value, "dialog")) return .dialog;
+    return null;
+}
+
 fn applyAnchorFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
     const target = store.node(id) orelse return error.MissingId;
     var changed = false;
@@ -531,6 +658,71 @@ fn applyIconFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
     }
 }
 
+fn applyAccessibilityFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    var toggled_set = false;
+
+    if (op.role) |value| {
+        if (value.len == 0) {
+            target.access_role = null;
+            changed = true;
+        } else if (parseAccessRole(value)) |role| {
+            target.access_role = role;
+            changed = true;
+        } else {
+            target.access_role = .generic_container;
+            changed = true;
+        }
+    }
+    if (op.ariaLabel) |value| {
+        try target.setAccessLabel(store.allocator, value);
+        changed = true;
+    }
+    if (op.ariaDescription) |value| {
+        try target.setAccessDescription(store.allocator, value);
+        changed = true;
+    }
+    if (op.ariaExpanded) |flag| {
+        target.access_expanded = flag;
+        changed = true;
+    }
+    if (op.ariaSelected) |flag| {
+        target.access_selected = flag;
+        changed = true;
+    }
+    if (op.ariaHidden) |flag| {
+        target.access_hidden = flag;
+        changed = true;
+    }
+    if (op.ariaDisabled) |flag| {
+        target.access_disabled = flag;
+        changed = true;
+    }
+    if (op.ariaHasPopup) |value| {
+        target.access_has_popup = parseAccessHasPopup(value);
+        changed = true;
+    }
+    if (op.ariaModal) |flag| {
+        target.access_modal = flag;
+        changed = true;
+    }
+    if (op.ariaChecked) |value| {
+        target.access_toggled = parseAccessToggled(value);
+        changed = true;
+        toggled_set = true;
+    }
+    if (!toggled_set) {
+        if (op.ariaPressed) |value| {
+            target.access_toggled = parseAccessToggled(value);
+            changed = true;
+        }
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
 fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (op.op.len == 0) return error.UnknownOp;
 
@@ -558,6 +750,7 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         try applyFocusFields(store, op.id, op);
         try applyAnchorFields(store, op.id, op);
         try applyIconFields(store, op.id, op);
+        try applyAccessibilityFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
         return;
@@ -618,6 +811,12 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_anchor")) {
         if (op.id == 0) return error.MissingId;
         try applyAnchorFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_accessibility")) {
+        if (op.id == 0) return error.MissingId;
+        try applyAccessibilityFields(store, op.id, op);
         return;
     }
 

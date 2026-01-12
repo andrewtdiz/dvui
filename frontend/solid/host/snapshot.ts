@@ -1,5 +1,13 @@
 import type { HostNode } from "./node";
-import { extractAnchor, extractFocus, extractIcon, extractScroll, extractTransform, extractVisual } from "./props";
+import {
+  extractAccessibility,
+  extractAnchor,
+  extractFocus,
+  extractIcon,
+  extractScroll,
+  extractTransform,
+  extractVisual,
+} from "./props";
 
 export type SerializedNode = {
   id: number;
@@ -37,6 +45,17 @@ export type SerializedNode = {
   anchorSide?: string;
   anchorAlign?: string;
   anchorOffset?: number;
+  role?: string;
+  ariaLabel?: string;
+  ariaDescription?: string;
+  ariaExpanded?: boolean;
+  ariaSelected?: boolean;
+  ariaChecked?: string;
+  ariaPressed?: string;
+  ariaHidden?: boolean;
+  ariaDisabled?: boolean;
+  ariaHasPopup?: string;
+  ariaModal?: boolean;
 };
 
 export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
@@ -61,7 +80,8 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       extractScroll(node.props),
       extractFocus(node.props),
       extractAnchor(node.props),
-      extractIcon(node.props)
+      extractIcon(node.props),
+      extractAccessibility(node.props)
     );
     nodes.push(entry);
     for (const child of node.children) {

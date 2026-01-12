@@ -4,12 +4,14 @@ import { registerRuntimeBridge } from "../runtime/bridge";
 import type { RendererAdapter } from "../native/adapter";
 import { CommandEncoder } from "../native/encoder";
 import {
+  applyAccessibilityMutation,
   applyAnchorMutation,
   applyFocusMutation,
   applyScrollMutation,
   applyTransformMutation,
   applyVisualMutation,
   createFlushController,
+  isAccessibilityField,
   isAnchorField,
   isFocusField,
   isScrollField,
@@ -18,7 +20,16 @@ import {
 } from "./flush";
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
-import { extractAnchor, extractFocus, extractIcon, extractScroll, extractTransform, extractVisual } from "./props";
+import {
+  extractAccessibility,
+  extractAnchor,
+  extractFocus,
+  extractIcon,
+  extractScroll,
+  extractTransform,
+  extractVisual,
+  normalizeAriaName,
+} from "./props";
 
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
@@ -71,7 +82,8 @@ export const createSolidHost = (native: RendererAdapter) => {
         extractScroll(node.props),
         extractFocus(node.props),
         extractAnchor(node.props),
-        extractIcon(node.props)
+        extractIcon(node.props),
+        extractAccessibility(node.props)
       );
       push(createOp);
 
@@ -162,42 +174,45 @@ export const createSolidHost = (native: RendererAdapter) => {
         return;
       }
 
-      node.props[name] = value;
-      if (name === "class" || name === "className") {
+      const propName = normalizeAriaName(name);
+      node.props[propName] = value;
+      if (propName === "class" || propName === "className") {
         if (node.created) {
           const cls = value == null ? "" : String(value);
           push({ op: "set_class", id: node.id, className: cls });
         }
-      } else if (name === "src") {
+      } else if (propName === "src") {
         if (node.created) {
           const src = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "src", src });
         }
-      } else if (name === "iconKind") {
+      } else if (propName === "iconKind") {
         if (node.created) {
           const nextKind = value == null ? "auto" : String(value);
           push({ op: "set", id: node.id, name: "iconKind", value: nextKind, iconKind: nextKind });
         }
-      } else if (name === "iconGlyph") {
+      } else if (propName === "iconGlyph") {
         if (node.created) {
           const nextGlyph = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "iconGlyph", value: nextGlyph, iconGlyph: nextGlyph });
         }
-      } else if (name === "value") {
+      } else if (propName === "value") {
         if (node.created) {
           const nextValue = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "value", value: nextValue });
         }
-      } else if (node.created && isTransformField(name)) {
-        applyTransformMutation(node, name, value, ops);
-      } else if (node.created && isVisualField(name)) {
-        applyVisualMutation(node, name, value, ops);
-      } else if (node.created && isScrollField(name)) {
-        applyScrollMutation(node, name, value, ops);
-      } else if (node.created && isFocusField(name)) {
-        applyFocusMutation(node, name, value, ops);
-      } else if (node.created && isAnchorField(name)) {
-        applyAnchorMutation(node, name, value, ops);
+      } else if (node.created && isAccessibilityField(propName)) {
+        applyAccessibilityMutation(node, propName, value, ops);
+      } else if (node.created && isTransformField(propName)) {
+        applyTransformMutation(node, propName, value, ops);
+      } else if (node.created && isVisualField(propName)) {
+        applyVisualMutation(node, propName, value, ops);
+      } else if (node.created && isScrollField(propName)) {
+        applyScrollMutation(node, propName, value, ops);
+      } else if (node.created && isFocusField(propName)) {
+        applyFocusMutation(node, propName, value, ops);
+      } else if (node.created && isAnchorField(propName)) {
+        applyAnchorMutation(node, propName, value, ops);
       }
       flushController.scheduleFlush();
     },

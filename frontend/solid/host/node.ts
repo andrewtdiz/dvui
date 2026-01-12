@@ -49,6 +49,17 @@ export type NodeProps = {
   anchorSide?: AnchorSide;
   anchorAlign?: AnchorAlign;
   anchorOffset?: number;
+  role?: string;
+  ariaLabel?: string;
+  ariaDescription?: string;
+  ariaExpanded?: boolean;
+  ariaSelected?: boolean;
+  ariaChecked?: boolean | "mixed";
+  ariaPressed?: boolean | "mixed";
+  ariaHidden?: boolean;
+  ariaDisabled?: boolean;
+  ariaHasPopup?: string | boolean;
+  ariaModal?: boolean;
 };
 
 export type EventHandler = (payload: Uint8Array) => void;
