@@ -81,6 +81,18 @@ The Solid integration is a data-oriented tree renderer that maps JS-driven nodes
 
 The Solid renderer updates layout when the window size/scale changes or when dirty flags propagate through the tree.
 
+## Retained Solid Module (Zig)
+The retained module mirrors the engine Solid runtime in a standalone DVUI package:
+
+- `src/retained/mod.zig`: retained entry point that re-exports submodules.
+- `src/retained/core/`: node store, tree state, and retained types from `src/engine/render/ui-solid/core/`.
+- `src/retained/layout/`: Yoga-based layout from `src/engine/render/ui-solid/layout/`.
+- `src/retained/style/`: class parsing and style translation from `src/engine/render/ui-solid/style/`.
+- `src/retained/render/`: retained rendering pipeline from `src/engine/render/ui-solid/render/`.
+- `src/retained/events/`: event ring and input handling from `src/engine/render/ui-solid/events/`.
+
+Retained modules must depend only on `std`, `dvui`, and `yoga`, with no engine-specific imports.
+
 ## Native Renderer (Zig)
 `src/integrations/native_renderer/` provides a Bun FFI-friendly renderer process:
 
