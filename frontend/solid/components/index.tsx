@@ -1721,26 +1721,45 @@ export type SwitchProps = {
     onChange?: (checked: boolean) => void;
     disabled?: boolean;
     class?: string;
+    className?: string;
+    role?: string;
+    ariaLabel?: string;
 };
 
 export const Switch = (props: SwitchProps) => {
-    const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false);
+    const [local, others] = splitProps(props, [
+        "checked",
+        "defaultChecked",
+        "onChange",
+        "disabled",
+        "class",
+        "className",
+        "role",
+        "ariaLabel",
+        "onClick",
+    ]);
 
-    const isChecked = () => props.checked !== undefined ? props.checked : internalChecked();
+    const [internalChecked, setInternalChecked] = createSignal(local.defaultChecked ?? false);
 
-    const handleClick = () => {
-        if (props.disabled) return;
+    const isChecked = () => local.checked !== undefined ? local.checked : internalChecked();
+
+    const handleClick = (event: any) => {
+        if (local.disabled) return;
         const newValue = !isChecked();
-        if (props.checked === undefined) {
+        if (local.checked === undefined) {
             setInternalChecked(newValue);
         }
-        props.onChange?.(newValue);
+        local.onChange?.(newValue);
+        local.onClick?.(event);
     };
 
     const trackClass = () => {
+        const userClass = local.class ?? local.className ?? "";
         const base = isChecked() ? "bg-primary" : "bg-input";
-        const disabled = props.disabled ? "opacity-50" : "";
-        return `flex flex-row items-center h-6 w-11 rounded-full ${base} ${disabled} ${props.class ?? ""}`;
+        const disabled = local.disabled ? "opacity-50" : "";
+        return ["flex flex-row items-center h-6 w-11 rounded-full", base, disabled, userClass]
+            .filter(Boolean)
+            .join(" ");
     };
 
     // Thumb: white circle, positioned left when off, right when on
@@ -1754,9 +1773,88 @@ export const Switch = (props: SwitchProps) => {
     };
 
     return (
-        <button class={trackClass()} onClick={handleClick} disabled={props.disabled}>
+        <button
+            class={trackClass()}
+            onClick={handleClick}
+            disabled={local.disabled}
+            role={local.role ?? "switch"}
+            ariaChecked={isChecked()}
+            ariaDisabled={local.disabled}
+            ariaLabel={local.ariaLabel}
+            {...others}
+        >
             <div class={spacerClass()}> </div>
             <div class={thumbClass()}> </div>
+        </button>
+    );
+};
+
+// ============================================================================
+// Toggle Component
+// Pressable button with aria-pressed state
+// ============================================================================
+export type ToggleProps = {
+    pressed?: boolean;
+    defaultPressed?: boolean;
+    onChange?: (pressed: boolean) => void;
+    disabled?: boolean;
+    class?: string;
+    className?: string;
+    role?: string;
+    ariaLabel?: string;
+    children?: JSX.Element;
+};
+
+export const Toggle = (props: ToggleProps) => {
+    const [local, others] = splitProps(props, [
+        "pressed",
+        "defaultPressed",
+        "onChange",
+        "disabled",
+        "class",
+        "className",
+        "role",
+        "ariaLabel",
+        "children",
+        "onClick",
+    ]);
+
+    const [internalPressed, setInternalPressed] = createSignal(local.defaultPressed ?? false);
+
+    const isPressed = () => local.pressed !== undefined ? local.pressed : internalPressed();
+
+    const handleClick = (event: any) => {
+        if (local.disabled) return;
+        const nextValue = !isPressed();
+        if (local.pressed === undefined) {
+            setInternalPressed(nextValue);
+        }
+        local.onChange?.(nextValue);
+        local.onClick?.(event);
+    };
+
+    const toggleClass = () => {
+        const userClass = local.class ?? local.className ?? "";
+        const base = "inline-flex items-center justify-center rounded-md border px-3 py-1 text-sm";
+        const state = isPressed()
+            ? "bg-primary text-primary-foreground border-primary"
+            : "bg-transparent text-foreground border-input";
+        const disabled = local.disabled ? "opacity-50" : "";
+        return [base, state, disabled, userClass].filter(Boolean).join(" ");
+    };
+
+    return (
+        <button
+            class={toggleClass()}
+            onClick={handleClick}
+            disabled={local.disabled}
+            role={local.role ?? "button"}
+            ariaPressed={isPressed()}
+            ariaDisabled={local.disabled}
+            ariaLabel={local.ariaLabel}
+            {...others}
+        >
+            {local.children}
         </button>
     );
 };

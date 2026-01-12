@@ -24,6 +24,7 @@ import {
   Skeleton,
   Stepper,
   Switch,
+  Toggle,
   Tabs,
   TabsContent,
   TabsList,
@@ -41,6 +42,7 @@ export const App = () => {
   const [activePage, setActivePage] = createSignal(3);
   const [activeStep, setActiveStep] = createSignal(1);
   const [activeRadio, setActiveRadio] = createSignal("email");
+  const [togglePressed, setTogglePressed] = createSignal(false);
 
   const decodePayload = (payload?: Uint8Array) => {
     if (!payload || payload.length === 0) return "";
@@ -154,6 +156,12 @@ export const App = () => {
               <div class="flex flex-row items-center gap-3">
                 <Switch />
                 <p class="text-sm text-muted-foreground">Enable preview</p>
+              </div>
+              <div class="flex flex-row items-center gap-3">
+                <Toggle pressed={togglePressed()} onChange={setTogglePressed}>
+                  Auto-save
+                </Toggle>
+                <p class="text-xs text-muted-foreground">{togglePressed() ? "On" : "Off"}</p>
               </div>
               <Textarea placeholder="Type notes..." rows={3} />
             </div>
