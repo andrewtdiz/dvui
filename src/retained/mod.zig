@@ -14,6 +14,37 @@ pub const EventEntry = events_mod.EventEntry;
 const layout = @import("layout/mod.zig");
 const render_mod = @import("render/mod.zig");
 
+const SolidSnapshotNode = struct {
+    id: u32,
+    tag: []const u8,
+    parent: ?u32 = null,
+    text: ?[]const u8 = null,
+    src: ?[]const u8 = null,
+    className: ?[]const u8 = null,
+    rotation: ?f32 = null,
+    scaleX: ?f32 = null,
+    scaleY: ?f32 = null,
+    anchorX: ?f32 = null,
+    anchorY: ?f32 = null,
+    translateX: ?f32 = null,
+    translateY: ?f32 = null,
+    opacity: ?f32 = null,
+    cornerRadius: ?f32 = null,
+    background: ?u32 = null,
+    textColor: ?u32 = null,
+    clipChildren: ?bool = null,
+    scroll: ?bool = null,
+    scrollX: ?f32 = null,
+    scrollY: ?f32 = null,
+    canvasWidth: ?f32 = null,
+    canvasHeight: ?f32 = null,
+    autoCanvas: ?bool = null,
+};
+
+const SolidSnapshot = struct {
+    nodes: []const SolidSnapshotNode = &.{},
+};
+
 pub fn init() void {
     layout.init();
     render_mod.init();
@@ -45,6 +76,129 @@ pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
 
 pub fn takeGizmoRectUpdate() ?types.GizmoRect {
     return render_mod.takeGizmoRectUpdate();
+}
+
+pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes: []const u8) bool {
+    const store_allocator = store.allocator;
+    store.deinit();
+    if (event_ring) |ring| {
+        ring.reset();
+    }
+    store.init(store_allocator) catch return false;
+
+    var parsed = std.json.parseFromSlice(SolidSnapshot, store_allocator, json_bytes, .{
+        .ignore_unknown_fields = true,
+    }) catch return false;
+    defer parsed.deinit();
+
+    const snapshot = parsed.value;
+
+    for (snapshot.nodes) |node| {
+        if (node.id == 0) continue;
+        const is_text = std.mem.eql(u8, node.tag, "text");
+        if (is_text) {
+            store.setTextNode(node.id, node.text orelse "") catch {};
+        } else if (std.mem.eql(u8, node.tag, "slot")) {
+            store.upsertSlot(node.id) catch {};
+        } else {
+            store.upsertElement(node.id, node.tag) catch return false;
+        }
+        if (node.className) |cls| {
+            store.setClassName(node.id, cls) catch {};
+        }
+        if (node.src) |src| {
+            store.setImageSource(node.id, src) catch {};
+        }
+        if (store.node(node.id)) |target| {
+            var touched = false;
+            if (node.rotation) |value| {
+                target.transform.rotation = value;
+                touched = true;
+            }
+            if (node.scaleX) |value| {
+                target.transform.scale[0] = value;
+                touched = true;
+            }
+            if (node.scaleY) |value| {
+                target.transform.scale[1] = value;
+                touched = true;
+            }
+            if (node.anchorX) |value| {
+                target.transform.anchor[0] = value;
+                touched = true;
+            }
+            if (node.anchorY) |value| {
+                target.transform.anchor[1] = value;
+                touched = true;
+            }
+            if (node.translateX) |value| {
+                target.transform.translation[0] = value;
+                touched = true;
+            }
+            if (node.translateY) |value| {
+                target.transform.translation[1] = value;
+                touched = true;
+            }
+            if (node.opacity) |value| {
+                target.visual_props.opacity = value;
+                touched = true;
+            }
+            if (node.cornerRadius) |value| {
+                target.visual_props.corner_radius = value;
+                touched = true;
+            }
+            if (node.background) |value| {
+                target.visual_props.background = .{ .value = value };
+                touched = true;
+            }
+            if (node.textColor) |value| {
+                target.visual_props.text_color = .{ .value = value };
+                touched = true;
+            }
+            if (node.clipChildren) |flag| {
+                target.visual_props.clip_children = flag;
+                touched = true;
+            }
+            if (node.scroll) |flag| {
+                target.scroll.enabled = flag;
+                touched = true;
+            }
+            if (node.scrollX) |value| {
+                target.scroll.offset_x = value;
+                touched = true;
+            }
+            if (node.scrollY) |value| {
+                target.scroll.offset_y = value;
+                touched = true;
+            }
+            if (node.canvasWidth) |value| {
+                target.scroll.canvas_width = value;
+                touched = true;
+            }
+            if (node.canvasHeight) |value| {
+                target.scroll.canvas_height = value;
+                touched = true;
+            }
+            if (node.autoCanvas) |flag| {
+                target.scroll.auto_canvas = flag;
+                touched = true;
+            }
+            if (touched) {
+                store.markNodeChanged(node.id);
+            }
+        }
+    }
+
+    for (snapshot.nodes) |node| {
+        if (node.id == 0) continue;
+        const parent_id: u32 = node.parent orelse 0;
+        store.insert(parent_id, node.id, null) catch {};
+    }
+
+    if (store.node(0)) |root_node| {
+        return root_node.children.items.len > 0;
+    }
+    return false;
 }
 
 pub fn getNodeRect(store: *types.NodeStore, node_id: u32) ?types.Rect {
