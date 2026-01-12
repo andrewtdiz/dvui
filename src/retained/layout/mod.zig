@@ -8,18 +8,22 @@ const use_yoga_layout = true;
 
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
+var layout_updated: bool = false;
 
 pub fn init() void {
     last_screen_size = .{};
     last_natural_scale = 0;
+    layout_updated = false;
 }
 
 pub fn deinit() void {
     last_screen_size = .{};
     last_natural_scale = 0;
+    layout_updated = false;
 }
 
 pub fn updateLayouts(store: *types.NodeStore) void {
+    layout_updated = false;
     const win = dvui.currentWindow();
     const screen_w = win.rect_pixels.w;
     const screen_h = win.rect_pixels.h;
@@ -51,8 +55,13 @@ pub fn updateLayouts(store: *types.NodeStore) void {
         return;
     }
 
+    layout_updated = true;
     updateLayoutIfDirty(store, root, root_rect);
     applyAnchoredPlacement(store, root, root_rect);
+}
+
+pub fn didUpdateLayouts() bool {
+    return layout_updated;
 }
 
 pub fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void {

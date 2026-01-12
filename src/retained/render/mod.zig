@@ -49,6 +49,12 @@ const overlay_subwindow_seed: u32 = 0x4f564c59;
 var render_layer: RenderLayer = .base;
 var hover_layer: RenderLayer = .base;
 var modal_overlay_active: bool = false;
+var last_mouse_pt: ?dvui.Point.Physical = null;
+var last_input_enabled: ?bool = null;
+var last_hover_layer: RenderLayer = .base;
+var portal_cache_allocator: ?std.mem.Allocator = null;
+var portal_cache_version: u64 = 0;
+var cached_portal_ids: std.ArrayList(u32) = .empty;
 
 pub fn init() void {
     gizmo_override_rect = null;
@@ -63,6 +69,10 @@ pub fn init() void {
     render_layer = .base;
     hover_layer = .base;
     modal_overlay_active = false;
+    last_mouse_pt = null;
+    last_input_enabled = null;
+    last_hover_layer = .base;
+    resetPortalCache();
     drag_drop.init();
     focus.init();
     paint_cache.init();
@@ -76,6 +86,10 @@ pub fn deinit() void {
     image_loader.deinit();
     icon_registry.deinit();
     paint_cache.deinit();
+    resetPortalCache();
+    last_mouse_pt = null;
+    last_input_enabled = null;
+    last_hover_layer = .base;
     gizmo_override_rect = null;
     gizmo_rect_pending = null;
     logged_tree_dump = false;
@@ -280,6 +294,49 @@ const OverlayState = struct {
     modal: bool = false,
     hit_rect: ?types.Rect = null,
 };
+
+var cached_overlay_state: OverlayState = .{};
+var overlay_cache_version: u64 = 0;
+
+fn resetPortalCache() void {
+    if (portal_cache_allocator) |alloc| {
+        cached_portal_ids.deinit(alloc);
+    }
+    cached_portal_ids = .empty;
+    portal_cache_allocator = null;
+    portal_cache_version = 0;
+    overlay_cache_version = 0;
+    cached_overlay_state = .{};
+}
+
+fn ensurePortalCache(store: *types.NodeStore, root: *types.SolidNode) []const u32 {
+    if (portal_cache_allocator == null) {
+        portal_cache_allocator = store.allocator;
+    }
+    if (portal_cache_version != root.subtree_version) {
+        cached_portal_ids.clearRetainingCapacity();
+        if (portal_cache_allocator) |alloc| {
+            collectPortalNodes(alloc, store, root, &cached_portal_ids);
+        }
+        portal_cache_version = root.subtree_version;
+        overlay_cache_version = 0;
+    }
+    return cached_portal_ids.items;
+}
+
+fn ensureOverlayState(store: *types.NodeStore, portal_ids: []const u32, version: u64) OverlayState {
+    if (overlay_cache_version != version) {
+        cached_overlay_state = computeOverlayState(store, portal_ids);
+        overlay_cache_version = version;
+    }
+    return cached_overlay_state;
+}
+
+fn updateFrameState(mouse: dvui.Point.Physical, input_enabled: bool, layer: RenderLayer) void {
+    last_mouse_pt = mouse;
+    last_input_enabled = input_enabled;
+    last_hover_layer = layer;
+}
 
 fn collectPortalNodes(
     allocator: std.mem.Allocator,
@@ -746,6 +803,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     input_enabled_state = input_enabled;
     focus.beginFrame(store);
     layout.updateLayouts(store);
+    const layout_did_update = layout.didUpdateLayouts();
     if (input_enabled_state) {
         drag_drop.cancelIfMissing(event_ring, store);
     }
@@ -754,29 +812,42 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     defer arena.deinit();
     const scratch = arena.allocator();
 
-    var portal_ids: std.ArrayList(u32) = .empty;
-    defer portal_ids.deinit(scratch);
-    collectPortalNodes(scratch, store, root, &portal_ids);
-
-    const overlay_state = computeOverlayState(store, portal_ids.items);
+    const portal_ids = ensurePortalCache(store, root);
+    const overlay_state = ensureOverlayState(store, portal_ids, root.subtree_version);
     modal_overlay_active = overlay_state.modal;
 
+    const current_mouse = dvui.currentWindow().mouse_pt;
+
     hover_layer = .base;
-    if (portal_ids.items.len > 0) {
+    if (portal_ids.len > 0) {
         if (overlay_state.modal) {
             hover_layer = .overlay;
         } else if (overlay_state.hit_rect) |hit_rect| {
-            const mouse = dvui.currentWindow().mouse_pt;
-            if (rectContains(hit_rect, mouse)) {
+            if (rectContains(hit_rect, current_mouse)) {
                 hover_layer = .overlay;
             }
         }
     }
 
-    // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
-    syncVisualLayer(event_ring, store, root, portal_ids.items, .base);
-    if (portal_ids.items.len > 0) {
-        syncVisualLayer(event_ring, store, root, portal_ids.items, .overlay);
+    const tree_dirty = root.hasDirtySubtree();
+    const pointer_changed = if (input_enabled_state) blk: {
+        if (last_mouse_pt) |prev_mouse| {
+            break :blk prev_mouse.x != current_mouse.x or prev_mouse.y != current_mouse.y;
+        }
+        break :blk true;
+    } else false;
+    const input_changed = if (last_input_enabled) |prev| prev != input_enabled else true;
+    const layer_changed = hover_layer != last_hover_layer;
+    const needs_visual_sync = tree_dirty or layout_did_update or pointer_changed or input_changed or layer_changed;
+
+    if (needs_visual_sync) {
+        // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
+        syncVisualLayer(event_ring, store, root, portal_ids, .base);
+        if (portal_ids.len > 0) {
+            syncVisualLayer(event_ring, store, root, portal_ids, .overlay);
+        } else {
+            render_layer = .base;
+        }
     } else {
         render_layer = .base;
     }
@@ -784,7 +855,10 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
-    updatePaintCache(store, &dirty_tracker);
+    const needs_paint_cache = needs_visual_sync or root.needsPaintUpdate();
+    if (needs_paint_cache) {
+        updatePaintCache(store, &dirty_tracker);
+    }
 
     // Temporary debug: dump the node tree once to verify state.
     if (!logged_tree_dump) {
@@ -792,6 +866,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     }
 
     if (root.children.items.len == 0) {
+        updateFrameState(current_mouse, input_enabled_state, hover_layer);
         return false;
     }
 
@@ -810,7 +885,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     render_layer = .base;
     renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, false);
 
-    if (portal_ids.items.len > 0) {
+    if (portal_ids.len > 0) {
         const overlay_id = overlaySubwindowId();
         const overlay_rect = if (overlay_state.modal) screen_rect else overlay_state.hit_rect orelse types.Rect{};
         const overlay_rect_phys = direct.rectToPhysical(overlay_rect);
@@ -822,11 +897,12 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         defer dvui.subwindowCurrentSet(prev.id, prev.rect);
 
         render_layer = .overlay;
-        renderPortalNodesOrdered(event_ring, store, portal_ids.items, scratch, &dirty_tracker);
+        renderPortalNodesOrdered(event_ring, store, portal_ids, scratch, &dirty_tracker);
     }
 
     focus.endFrame(event_ring, store, input_enabled_state);
     render_layer = .base;
+    updateFrameState(current_mouse, input_enabled_state, hover_layer);
     return true;
 }
 
