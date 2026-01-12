@@ -599,19 +599,369 @@ export type ProgressProps = {
     value?: number;  // 0-100
     max?: number;
     class?: string;
+    className?: string;
 };
 
 export const Progress = (props: ProgressProps) => {
     const merged = mergeProps({ value: 0, max: 100 }, props);
 
-    const percentage = () => Math.min(100, Math.max(0, (merged.value / merged.max) * 100));
+    const percentage = () => {
+        const max = Number(merged.max);
+        const value = Number(merged.value);
+        if (!Number.isFinite(max) || max <= 0) return 0;
+        if (!Number.isFinite(value)) return 0;
+        return Math.min(100, Math.max(0, (value / max) * 100));
+    };
+
+    const userClass = props.class ?? props.className ?? "";
 
     return (
-        <div class={`h-2 w-full overflow-hidden rounded-full bg-secondary ${props.class ?? ""}`}>
+        <div class={`h-2 w-full overflow-hidden rounded-full bg-secondary ${userClass}`}>
             <div
                 class="h-full bg-primary"
                 style={{ width: `${percentage()}%` }}
             />
+        </div>
+    );
+};
+
+// ============================================================================
+// Pagination Component
+// ============================================================================
+export type PaginationProps = {
+    page?: number;
+    defaultPage?: number;
+    totalPages: number;
+    siblingCount?: number;
+    onChange?: (page: number) => void;
+    class?: string;
+    className?: string;
+};
+
+const clampPaginationPage = (value: number, totalPages: number) => {
+    if (!Number.isFinite(totalPages) || totalPages <= 0) return 1;
+    const normalized = Number.isFinite(value) ? Math.floor(value) : 1;
+    return Math.min(Math.floor(totalPages), Math.max(1, normalized));
+};
+
+const buildPaginationRange = (current: number, total: number, siblingCount: number) => {
+    const totalPages = Math.max(1, Math.floor(total));
+    const clampedCurrent = clampPaginationPage(current, totalPages);
+    const count = Math.max(0, Math.floor(siblingCount));
+
+    const totalPageNumbers = count * 2 + 5;
+    if (totalPages <= totalPageNumbers) {
+        return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const leftSiblingIndex = Math.max(clampedCurrent - count, 1);
+    const rightSiblingIndex = Math.min(clampedCurrent + count, totalPages);
+
+    const showLeftEllipsis = leftSiblingIndex > 2;
+    const showRightEllipsis = rightSiblingIndex < totalPages - 1;
+
+    if (!showLeftEllipsis && showRightEllipsis) {
+        const leftItemCount = 3 + count * 2;
+        return [
+            ...Array.from({ length: leftItemCount }, (_, index) => index + 1),
+            "ellipsis",
+            totalPages,
+        ];
+    }
+
+    if (showLeftEllipsis && !showRightEllipsis) {
+        const rightItemCount = 3 + count * 2;
+        const start = totalPages - rightItemCount + 1;
+        return [
+            1,
+            "ellipsis",
+            ...Array.from({ length: rightItemCount }, (_, index) => start + index),
+        ];
+    }
+
+    return [
+        1,
+        "ellipsis",
+        ...Array.from({ length: rightSiblingIndex - leftSiblingIndex + 1 }, (_, index) => leftSiblingIndex + index),
+        "ellipsis",
+        totalPages,
+    ];
+};
+
+export const Pagination = (props: PaginationProps) => {
+    const [local, others] = splitProps(props, [
+        "page",
+        "defaultPage",
+        "totalPages",
+        "siblingCount",
+        "onChange",
+        "class",
+        "className",
+    ]);
+
+    const [internalPage, setInternalPage] = createSignal(local.defaultPage ?? 1);
+
+    const totalPages = () => {
+        const total = Number(local.totalPages ?? 1);
+        return Number.isFinite(total) && total > 0 ? Math.floor(total) : 1;
+    };
+
+    const currentPage = () => clampPaginationPage(local.page ?? internalPage(), totalPages());
+
+    const siblingCount = () => {
+        const count = Number(local.siblingCount ?? 1);
+        return Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
+    };
+
+    const pageItems = createMemo(() => buildPaginationRange(currentPage(), totalPages(), siblingCount()));
+
+    const setPage = (nextPage: number) => {
+        const next = clampPaginationPage(nextPage, totalPages());
+        if (next === currentPage()) return;
+        if (local.page === undefined) {
+            setInternalPage(next);
+        }
+        local.onChange?.(next);
+    };
+
+    const buttonClass = (active: boolean, disabled: boolean) => {
+        const base = "flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs text-foreground";
+        const state = active ? "bg-primary text-primary-foreground border-primary" : "";
+        const disabledClass = disabled ? "opacity-50" : "";
+        return [base, state, disabledClass].filter(Boolean).join(" ");
+    };
+
+    const computedClass = () => {
+        const userClass = local.class ?? local.className ?? "";
+        return ["flex items-center gap-1", userClass].filter(Boolean).join(" ");
+    };
+
+    const canPrev = () => currentPage() > 1;
+    const canNext = () => currentPage() < totalPages();
+
+    return (
+        <div class={computedClass()} {...others}>
+            <button
+                class={buttonClass(false, !canPrev())}
+                onClick={() => setPage(currentPage() - 1)}
+                disabled={!canPrev()}
+                ariaDisabled={!canPrev()}
+                ariaLabel="Previous page"
+            >
+                <p class="text-xs">‹</p>
+            </button>
+            {pageItems().map((item) => {
+                if (item === "ellipsis") {
+                    return <p class="px-2 text-xs text-muted-foreground">…</p>;
+                }
+
+                const isActive = item === currentPage();
+                return (
+                    <button
+                        class={buttonClass(isActive, false)}
+                        onClick={() => setPage(item)}
+                        ariaSelected={isActive}
+                        ariaLabel={`Page ${item}`}
+                    >
+                        <p class="text-xs">{item}</p>
+                    </button>
+                );
+            })}
+            <button
+                class={buttonClass(false, !canNext())}
+                onClick={() => setPage(currentPage() + 1)}
+                disabled={!canNext()}
+                ariaDisabled={!canNext()}
+                ariaLabel="Next page"
+            >
+                <p class="text-xs">›</p>
+            </button>
+        </div>
+    );
+};
+
+// ============================================================================
+// Stepper Component
+// ============================================================================
+export type StepperOrientation = "horizontal" | "vertical";
+
+export type StepperStep = {
+    title: JSX.Element;
+    description?: JSX.Element;
+    disabled?: boolean;
+};
+
+export type StepperProps = {
+    steps: StepperStep[];
+    value?: number;
+    defaultValue?: number;
+    onChange?: (value: number) => void;
+    orientation?: StepperOrientation;
+    class?: string;
+    className?: string;
+};
+
+export const Stepper = (props: StepperProps) => {
+    const [local, others] = splitProps(props, [
+        "steps",
+        "value",
+        "defaultValue",
+        "onChange",
+        "orientation",
+        "class",
+        "className",
+    ]);
+
+    const [internalValue, setInternalValue] = createSignal(local.defaultValue ?? 0);
+
+    const steps = () => local.steps ?? [];
+
+    const maxIndex = () => Math.max(0, steps().length - 1);
+
+    const currentStep = () => {
+        const raw = local.value ?? internalValue();
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return 0;
+        return Math.min(maxIndex(), Math.max(0, Math.floor(value)));
+    };
+
+    const setCurrentStep = (value: number) => {
+        const next = Math.min(maxIndex(), Math.max(0, Math.floor(Number.isFinite(value) ? value : 0)));
+        if (next === currentStep()) return;
+        if (local.value === undefined) {
+            setInternalValue(next);
+        }
+        local.onChange?.(next);
+    };
+
+    const orientation = () => local.orientation ?? "horizontal";
+
+    const computedClass = () => {
+        const userClass = local.class ?? local.className ?? "";
+        const base = orientation() === "vertical"
+            ? "flex flex-col gap-3"
+            : "flex flex-row items-center gap-3";
+        return [base, userClass].filter(Boolean).join(" ");
+    };
+
+    const stepState = (index: number) => {
+        if (index < currentStep()) return "complete";
+        if (index === currentStep()) return "active";
+        return "upcoming";
+    };
+
+    const indicatorClass = (state: string, disabled: boolean) => {
+        const base = "flex h-7 w-7 items-center justify-center rounded-full border text-xs";
+        const stateClass = state === "complete"
+            ? "bg-primary text-primary-foreground border-primary"
+            : state === "active"
+                ? "border-primary text-foreground"
+                : "border-border text-muted-foreground";
+        const disabledClass = disabled ? "opacity-50" : "";
+        return [base, stateClass, disabledClass].filter(Boolean).join(" ");
+    };
+
+    const titleClass = (state: string, disabled: boolean, align: "center" | "left") => {
+        const base = "text-sm";
+        const stateClass = state === "upcoming" ? "text-muted-foreground" : "text-foreground";
+        const disabledClass = disabled ? "opacity-50" : "";
+        const alignClass = align === "center" ? "text-center" : "text-left";
+        return [base, stateClass, disabledClass, alignClass].filter(Boolean).join(" ");
+    };
+
+    const descriptionClass = (disabled: boolean, align: "center" | "left") => {
+        const alignClass = align === "center" ? "text-center" : "text-left";
+        const disabledClass = disabled ? "opacity-50" : "";
+        return ["text-xs text-muted-foreground", alignClass, disabledClass].filter(Boolean).join(" ");
+    };
+
+    const stepButtonClass = (orientationValue: StepperOrientation, disabled: boolean) => {
+        const base = orientationValue === "vertical"
+            ? "flex flex-row items-start gap-3"
+            : "flex flex-col items-center gap-1";
+        const disabledClass = disabled ? "opacity-50" : "";
+        return [base, disabledClass].filter(Boolean).join(" ");
+    };
+
+    if (steps().length === 0) {
+        return null;
+    }
+
+    if (orientation() === "vertical") {
+        return (
+            <div class={computedClass()} {...others}>
+                {steps().map((step, index) => {
+                    const state = stepState(index);
+                    const disabled = Boolean(step.disabled);
+                    const isLast = index === steps().length - 1;
+
+                    return (
+                        <button
+                            class={stepButtonClass("vertical", disabled)}
+                            onClick={() => {
+                                if (disabled) return;
+                                setCurrentStep(index);
+                            }}
+                            disabled={disabled}
+                            ariaDisabled={disabled}
+                            ariaSelected={state === "active"}
+                        >
+                            <div class="flex flex-col items-center">
+                                <div class={indicatorClass(state, disabled)}>
+                                    {state === "complete" ? "✓" : index + 1}
+                                </div>
+                                <Show when={!isLast}>
+                                    <div class="h-6 w-px bg-border" />
+                                </Show>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <p class={titleClass(state, disabled, "left")}>{step.title}</p>
+                                <Show when={step.description}>
+                                    <p class={descriptionClass(disabled, "left")}>{step.description}</p>
+                                </Show>
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    return (
+        <div class={computedClass()} {...others}>
+            {steps().map((step, index) => {
+                const state = stepState(index);
+                const disabled = Boolean(step.disabled);
+                const isLast = index === steps().length - 1;
+
+                return (
+                    <div class="flex flex-row items-center gap-3">
+                        <button
+                            class={stepButtonClass("horizontal", disabled)}
+                            onClick={() => {
+                                if (disabled) return;
+                                setCurrentStep(index);
+                            }}
+                            disabled={disabled}
+                            ariaDisabled={disabled}
+                            ariaSelected={state === "active"}
+                        >
+                            <div class={indicatorClass(state, disabled)}>
+                                {state === "complete" ? "✓" : index + 1}
+                            </div>
+                            <div class="flex flex-col items-center gap-1">
+                                <p class={titleClass(state, disabled, "center")}>{step.title}</p>
+                                <Show when={step.description}>
+                                    <p class={descriptionClass(disabled, "center")}>{step.description}</p>
+                                </Show>
+                            </div>
+                        </button>
+                        <Show when={!isLast}>
+                            <div class="h-px w-8 bg-border" />
+                        </Show>
+                    </div>
+                );
+            })}
         </div>
     );
 };
@@ -1369,15 +1719,17 @@ export const Avatar = (props: AvatarProps) => {
 
 // ============================================================================
 // Skeleton Component
-// Loading placeholder with animation
+// Loading placeholder
 // ============================================================================
 export type SkeletonProps = {
     class?: string;
+    className?: string;
 };
 
 export const Skeleton = (props: SkeletonProps) => {
+    const cls = props.class ?? props.className ?? "";
     return (
-        <div class={`bg-muted rounded-md ${props.class ?? ""}`} />
+        <div class={`bg-muted rounded-md ${cls}`} />
     );
 };
 

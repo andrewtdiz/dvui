@@ -16,8 +16,11 @@ import {
   GroupBox,
   Kbd,
   List,
+  Pagination,
   Progress,
   Separator,
+  Skeleton,
+  Stepper,
   Switch,
   Tabs,
   TabsContent,
@@ -33,6 +36,8 @@ export const App = () => {
   const [dragDetail, setDragDetail] = createSignal("Idle");
   const [overlayOpen, setOverlayOpen] = createSignal(false);
   const [activeTab, setActiveTab] = createSignal("account");
+  const [activePage, setActivePage] = createSignal(3);
+  const [activeStep, setActiveStep] = createSignal(1);
 
   const decodePayload = (payload?: Uint8Array) => {
     if (!payload || payload.length === 0) return "";
@@ -60,6 +65,11 @@ export const App = () => {
   const listItemHeight = 32;
   const listViewportHeight = 160;
   const scrollItems = Array.from({ length: 60 }, (_, index) => `Row ${index + 1}`);
+  const stepItems = [
+    { title: "Profile", description: "Basics" },
+    { title: "Plan", description: "Billing" },
+    { title: "Confirm", description: "Review" },
+  ];
 
   return (
     <div class="flex flex-col gap-6 p-6">
@@ -242,6 +252,17 @@ export const App = () => {
             />
             <Separator />
             <Progress value={42} />
+            <div class="flex flex-row gap-2">
+              <Skeleton class="h-4 w-24" />
+              <Skeleton class="h-4 w-16" />
+              <Skeleton class="h-4 w-12" />
+            </div>
+            <Stepper
+              steps={stepItems}
+              value={activeStep()}
+              onChange={setActiveStep}
+            />
+            <Pagination page={activePage()} totalPages={8} onChange={setActivePage} />
           </div>
         </div>
       </div>
