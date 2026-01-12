@@ -2,7 +2,9 @@ import { CommandEncoder } from "../native/encoder";
 import type { RendererAdapter } from "../native/adapter";
 import type { HostNode } from "./node";
 import {
+  anchorFields,
   bgColorFromClass,
+  extractAnchor,
   extractTransform,
   extractVisual,
   frameFromProps,
@@ -141,6 +143,10 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           focusTrap: n.focusTrap,
           roving: n.roving,
           modal: n.modal,
+          anchorId: n.anchorId,
+          anchorSide: n.anchorSide,
+          anchorAlign: n.anchorAlign,
+          anchorOffset: n.anchorOffset,
         };
         ops.push(createOp);
       }
@@ -279,6 +285,27 @@ export const applyFocusMutation = (node: HostNode, name: string, value: unknown,
   }
 };
 
+export const applyAnchorMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
+  const payload: MutationOp = { op: "set_anchor", id: node.id };
+  if (name === "anchorId" && typeof value === "number" && Number.isFinite(value)) {
+    payload.anchorId = value;
+  } else if (name === "anchorSide" && typeof value === "string") {
+    payload.anchorSide = value;
+  } else if (name === "anchorAlign" && typeof value === "string") {
+    payload.anchorAlign = value;
+  } else if (name === "anchorOffset" && typeof value === "number" && Number.isFinite(value)) {
+    payload.anchorOffset = value;
+  }
+  const hasField =
+    payload.anchorId != null ||
+    payload.anchorSide != null ||
+    payload.anchorAlign != null ||
+    payload.anchorOffset != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+
 export const applyTransformMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     const payload: MutationOp = { op: "set_transform", id: node.id, [name]: value } as MutationOp;
@@ -300,4 +327,8 @@ export const isScrollField = (name: string): name is (typeof scrollFields)[numbe
 
 export const isFocusField = (name: string): name is (typeof focusFields)[number] => {
   return (focusFields as readonly string[]).includes(name);
+};
+
+export const isAnchorField = (name: string): name is (typeof anchorFields)[number] => {
+  return (anchorFields as readonly string[]).includes(name);
 };

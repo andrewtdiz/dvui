@@ -6,6 +6,9 @@ export type ColorInput =
   | Uint8Array
   | Uint8ClampedArray;
 
+export type AnchorSide = "top" | "bottom" | "left" | "right";
+export type AnchorAlign = "start" | "center" | "end";
+
 export type NodeProps = {
   x?: number;
   y?: number;
@@ -39,6 +42,10 @@ export type NodeProps = {
   focusTrap?: boolean;
   roving?: boolean;
   modal?: boolean;
+  anchorId?: number;
+  anchorSide?: AnchorSide;
+  anchorAlign?: AnchorAlign;
+  anchorOffset?: number;
 };
 
 export type EventHandler = (payload: Uint8Array) => void;

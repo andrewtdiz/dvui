@@ -4,11 +4,13 @@ import { registerRuntimeBridge } from "../runtime/bridge";
 import type { RendererAdapter } from "../native/adapter";
 import { CommandEncoder } from "../native/encoder";
 import {
+  applyAnchorMutation,
   applyFocusMutation,
   applyScrollMutation,
   applyTransformMutation,
   applyVisualMutation,
   createFlushController,
+  isAnchorField,
   isFocusField,
   isScrollField,
   isTransformField,
@@ -16,7 +18,7 @@ import {
 } from "./flush";
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
-import { extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
+import { extractAnchor, extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
 
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
@@ -67,7 +69,8 @@ export const createSolidHost = (native: RendererAdapter) => {
         extractTransform(node.props),
         extractVisual(node.props),
         extractScroll(node.props),
-        extractFocus(node.props)
+        extractFocus(node.props),
+        extractAnchor(node.props)
       );
       push(createOp);
 
@@ -182,6 +185,8 @@ export const createSolidHost = (native: RendererAdapter) => {
         applyScrollMutation(node, name, value, ops);
       } else if (node.created && isFocusField(name)) {
         applyFocusMutation(node, name, value, ops);
+      } else if (node.created && isAnchorField(name)) {
+        applyAnchorMutation(node, name, value, ops);
       }
       flushController.scheduleFlush();
     },

@@ -5,6 +5,9 @@ const tailwind = @import("../style/tailwind.zig");
 const dirty = @import("dirty.zig");
 const text_wrap = @import("../layout/text_wrap.zig");
 
+pub const AnchorSide = dvui.AnchorSide;
+pub const AnchorAlign = dvui.AnchorAlign;
+
 pub const NodeKind = enum {
     root,
     element,
@@ -223,6 +226,10 @@ pub const SolidNode = struct {
     focus_trap: bool = false,
     roving: bool = false,
     modal: bool = false,
+    anchor_id: ?u32 = null,
+    anchor_side: AnchorSide = .bottom,
+    anchor_align: AnchorAlign = .start,
+    anchor_offset: f32 = 0,
     class_spec: tailwind.Spec = .{},
     class_spec_dirty: bool = true,
     input_state: ?InputState = null,

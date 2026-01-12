@@ -54,6 +54,8 @@ export const scrollFields = ["scroll", "scrollX", "scrollY", "canvasWidth", "can
 
 export const focusFields = ["tabIndex", "focusTrap", "roving", "modal"] as const;
 
+export const anchorFields = ["anchorId", "anchorSide", "anchorAlign", "anchorOffset"] as const;
+
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
   if (!raw) return false;
@@ -179,4 +181,24 @@ export const extractFocus = (props: NodeProps) => {
     f.modal = Boolean(props.modal);
   }
   return f;
+};
+
+const anchorSides = ["top", "bottom", "left", "right"] as const;
+const anchorAligns = ["start", "center", "end"] as const;
+
+export const extractAnchor = (props: NodeProps) => {
+  const a: Partial<Record<(typeof anchorFields)[number], number | string>> = {};
+  if (typeof props.anchorId === "number" && Number.isFinite(props.anchorId)) {
+    a.anchorId = props.anchorId;
+  }
+  if (typeof props.anchorSide === "string" && (anchorSides as readonly string[]).includes(props.anchorSide)) {
+    a.anchorSide = props.anchorSide;
+  }
+  if (typeof props.anchorAlign === "string" && (anchorAligns as readonly string[]).includes(props.anchorAlign)) {
+    a.anchorAlign = props.anchorAlign;
+  }
+  if (typeof props.anchorOffset === "number" && Number.isFinite(props.anchorOffset)) {
+    a.anchorOffset = props.anchorOffset;
+  }
+  return a;
 };

@@ -1,5 +1,5 @@
 import type { HostNode } from "./node";
-import { extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
+import { extractAnchor, extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
 
 export type SerializedNode = {
   id: number;
@@ -31,6 +31,10 @@ export type SerializedNode = {
   focusTrap?: boolean;
   roving?: boolean;
   modal?: boolean;
+  anchorId?: number;
+  anchorSide?: string;
+  anchorAlign?: string;
+  anchorOffset?: number;
 };
 
 export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
@@ -53,7 +57,8 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       extractTransform(node.props),
       extractVisual(node.props),
       extractScroll(node.props),
-      extractFocus(node.props)
+      extractFocus(node.props),
+      extractAnchor(node.props)
     );
     nodes.push(entry);
     for (const child of node.children) {

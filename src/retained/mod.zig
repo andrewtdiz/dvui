@@ -44,6 +44,10 @@ const SolidSnapshotNode = struct {
     focusTrap: ?bool = null,
     roving: ?bool = null,
     modal: ?bool = null,
+    anchorId: ?u32 = null,
+    anchorSide: ?[]const u8 = null,
+    anchorAlign: ?[]const u8 = null,
+    anchorOffset: ?f32 = null,
 };
 
 const SolidSnapshot = struct {
@@ -84,6 +88,10 @@ const SolidOp = struct {
     focusTrap: ?bool = null,
     roving: ?bool = null,
     modal: ?bool = null,
+    anchorId: ?u32 = null,
+    anchorSide: ?[]const u8 = null,
+    anchorAlign: ?[]const u8 = null,
+    anchorOffset: ?f32 = null,
 };
 
 const SolidOpBatch = struct {
@@ -258,6 +266,26 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
                 target.modal = flag;
                 touched = true;
             }
+            if (node.anchorId) |value| {
+                target.anchor_id = value;
+                touched = true;
+            }
+            if (node.anchorSide) |value| {
+                if (parseAnchorSide(value)) |side| {
+                    target.anchor_side = side;
+                    touched = true;
+                }
+            }
+            if (node.anchorAlign) |value| {
+                if (parseAnchorAlign(value)) |alignment| {
+                    target.anchor_align = alignment;
+                    touched = true;
+                }
+            }
+            if (node.anchorOffset) |value| {
+                target.anchor_offset = value;
+                touched = true;
+            }
             if (touched) {
                 store.markNodeChanged(node.id);
             }
@@ -418,6 +446,49 @@ fn applyFocusFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void 
     }
 }
 
+fn parseAnchorSide(value: []const u8) ?types.AnchorSide {
+    if (std.mem.eql(u8, value, "top")) return .top;
+    if (std.mem.eql(u8, value, "bottom")) return .bottom;
+    if (std.mem.eql(u8, value, "left")) return .left;
+    if (std.mem.eql(u8, value, "right")) return .right;
+    return null;
+}
+
+fn parseAnchorAlign(value: []const u8) ?types.AnchorAlign {
+    if (std.mem.eql(u8, value, "start")) return .start;
+    if (std.mem.eql(u8, value, "center")) return .center;
+    if (std.mem.eql(u8, value, "end")) return .end;
+    return null;
+}
+
+fn applyAnchorFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.anchorId) |value| {
+        target.anchor_id = value;
+        changed = true;
+    }
+    if (op.anchorSide) |value| {
+        if (parseAnchorSide(value)) |side| {
+            target.anchor_side = side;
+            changed = true;
+        }
+    }
+    if (op.anchorAlign) |value| {
+        if (parseAnchorAlign(value)) |alignment| {
+            target.anchor_align = alignment;
+            changed = true;
+        }
+    }
+    if (op.anchorOffset) |value| {
+        target.anchor_offset = value;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
 fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (op.op.len == 0) return error.UnknownOp;
 
@@ -443,6 +514,7 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         try applyVisualFields(store, op.id, op);
         try applyScrollFields(store, op.id, op);
         try applyFocusFields(store, op.id, op);
+        try applyAnchorFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
         return;
@@ -497,6 +569,12 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_focus")) {
         if (op.id == 0) return error.MissingId;
         try applyFocusFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_anchor")) {
+        if (op.id == 0) return error.MissingId;
+        try applyAnchorFields(store, op.id, op);
         return;
     }
 

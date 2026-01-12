@@ -41,6 +41,7 @@ pub fn updateLayouts(store: *types.NodeStore) void {
     }
 
     updateLayoutIfDirty(store, root, root_rect);
+    applyAnchoredPlacement(store, root, root_rect);
 }
 
 fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void {
@@ -222,6 +223,64 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
             if (store.node(child_id)) |child| {
                 updateLayoutIfDirty(store, child, child_rect);
             }
+        }
+    }
+}
+
+fn offsetLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode, dx: f32, dy: f32, version: u64) void {
+    if (node.layout.rect) |rect| {
+        node.layout.rect = types.Rect{
+            .x = rect.x + dx,
+            .y = rect.y + dy,
+            .w = rect.w,
+            .h = rect.h,
+        };
+        node.layout.version = version;
+        node.invalidatePaint();
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            offsetLayoutSubtree(store, child, dx, dy, version);
+        }
+    }
+}
+
+fn applyAnchoredPlacement(store: *types.NodeStore, node: *types.SolidNode, screen: types.Rect) void {
+    if (node.anchor_id) |anchor_id| {
+        if (anchor_id != node.id) {
+            const anchor = store.node(anchor_id) orelse null;
+            if (anchor) |anchor_node| {
+                const anchor_rect_opt = anchor_node.layout.rect;
+                const node_rect_opt = node.layout.rect;
+                if (anchor_rect_opt != null and node_rect_opt != null) {
+                    const anchor_rect = anchor_rect_opt.?;
+                    const node_rect = node_rect_opt.?;
+                    const offset_scale = dvui.windowNaturalScale();
+                    const placement = dvui.AnchorPlacement{
+                        .side = node.anchor_side,
+                        .alignment = node.anchor_align,
+                        .offset = node.anchor_offset * offset_scale,
+                    };
+                    const placed = dvui.placeAnchoredOnScreen(
+                        dvui.Rect.Natural.cast(screen),
+                        dvui.Rect.Natural.cast(anchor_rect),
+                        placement,
+                        dvui.Rect.Natural.cast(node_rect),
+                    );
+                    const dx = placed.x - node_rect.x;
+                    const dy = placed.y - node_rect.y;
+                    if (dx != 0 or dy != 0) {
+                        offsetLayoutSubtree(store, node, dx, dy, store.currentVersion());
+                    }
+                }
+            }
+        }
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            applyAnchoredPlacement(store, child, screen);
         }
     }
 }

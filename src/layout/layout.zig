@@ -152,6 +152,115 @@ pub const PlaceOnScreenAvoid = enum {
     vertical,
 };
 
+pub const AnchorSide = enum {
+    top,
+    bottom,
+    left,
+    right,
+};
+
+pub const AnchorAlign = enum {
+    start,
+    center,
+    end,
+};
+
+pub const AnchorPlacement = struct {
+    side: AnchorSide = .bottom,
+    alignment: AnchorAlign = .start,
+    offset: f32 = 0,
+};
+
+fn anchorSideOpposite(side: AnchorSide) AnchorSide {
+    return switch (side) {
+        .top => .bottom,
+        .bottom => .top,
+        .left => .right,
+        .right => .left,
+    };
+}
+
+fn anchorSideSpace(screen: Rect.Natural, anchor: Rect.Natural, side: AnchorSide) f32 {
+    const screen_right = screen.x + screen.w;
+    const screen_bottom = screen.y + screen.h;
+    return switch (side) {
+        .top => anchor.y - screen.y,
+        .bottom => screen_bottom - (anchor.y + anchor.h),
+        .left => anchor.x - screen.x,
+        .right => screen_right - (anchor.x + anchor.w),
+    };
+}
+
+fn anchorAlignedOffset(anchor_start: f32, anchor_size: f32, rect_size: f32, alignment: AnchorAlign) f32 {
+    return switch (alignment) {
+        .start => anchor_start,
+        .center => anchor_start + (anchor_size - rect_size) * 0.5,
+        .end => anchor_start + anchor_size - rect_size,
+    };
+}
+
+fn clampRectToScreen(screen: Rect.Natural, rect_in: Rect.Natural) Rect.Natural {
+    var rect = rect_in;
+    const min_size: f32 = 24;
+    const screen_right = screen.x + screen.w;
+    const screen_bottom = screen.y + screen.h;
+
+    if ((rect.x + rect.w) > screen_right) {
+        rect.x = screen_right - rect.w;
+    }
+    if (rect.x < screen.x) {
+        rect.x = screen.x;
+    }
+    if ((rect.x + rect.w) > screen_right) {
+        rect.w = @max(min_size, screen_right - rect.x);
+    }
+
+    if ((rect.y + rect.h) > screen_bottom) {
+        rect.y = screen_bottom - rect.h;
+    }
+    if (rect.y < screen.y) {
+        rect.y = screen.y;
+    }
+    if ((rect.y + rect.h) > screen_bottom) {
+        rect.h = @max(min_size, screen_bottom - rect.y);
+    }
+
+    return rect;
+}
+
+pub fn placeAnchoredOnScreen(screen: Rect.Natural, anchor: Rect.Natural, placement: AnchorPlacement, start: Rect.Natural) Rect.Natural {
+    var rect = start;
+    const required = switch (placement.side) {
+        .top, .bottom => rect.h + placement.offset,
+        .left, .right => rect.w + placement.offset,
+    };
+    const available = anchorSideSpace(screen, anchor, placement.side);
+    const opposite = anchorSideOpposite(placement.side);
+    const opposite_space = anchorSideSpace(screen, anchor, opposite);
+    const side = if (available < required and opposite_space > available) opposite else placement.side;
+
+    switch (side) {
+        .top => {
+            rect.x = anchorAlignedOffset(anchor.x, anchor.w, rect.w, placement.alignment);
+            rect.y = anchor.y - rect.h - placement.offset;
+        },
+        .bottom => {
+            rect.x = anchorAlignedOffset(anchor.x, anchor.w, rect.w, placement.alignment);
+            rect.y = anchor.y + anchor.h + placement.offset;
+        },
+        .left => {
+            rect.x = anchor.x - rect.w - placement.offset;
+            rect.y = anchorAlignedOffset(anchor.y, anchor.h, rect.h, placement.alignment);
+        },
+        .right => {
+            rect.x = anchor.x + anchor.w + placement.offset;
+            rect.y = anchorAlignedOffset(anchor.y, anchor.h, rect.h, placement.alignment);
+        },
+    }
+
+    return clampRectToScreen(screen, rect);
+}
+
 /// Adjust start rect based on screen and spawner (like a context menu).
 ///
 /// When adding a floating widget or window, often we want to guarantee that it

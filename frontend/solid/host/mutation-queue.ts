@@ -11,6 +11,7 @@ export type MutationOp = {
     | "set_visual"
     | "set_scroll"
     | "set_focus"
+    | "set_anchor"
     | "listen"
     | "set";
   id: number;
@@ -45,6 +46,10 @@ export type MutationOp = {
   focusTrap?: boolean;
   roving?: boolean;
   modal?: boolean;
+  anchorId?: number;
+  anchorSide?: string;
+  anchorAlign?: string;
+  anchorOffset?: number;
 };
 
 export const createMutationQueue = () => {
