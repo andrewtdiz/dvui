@@ -6,6 +6,30 @@ const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
 
 const max_snapshot_bytes: usize = 16 * 1024 * 1024;
+const reload_interval_ms: i64 = 250;
+
+const SnapshotError = error{InvalidSnapshot};
+
+fn loadSnapshot(
+    allocator: std.mem.Allocator,
+    store: *retained.NodeStore,
+    ring: *retained.EventRing,
+    snapshot_path: []const u8,
+) !std.fs.File.Stat {
+    var file = try std.fs.cwd().openFile(snapshot_path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    const snapshot_bytes = try file.readToEndAlloc(allocator, max_snapshot_bytes);
+    defer allocator.free(snapshot_bytes);
+
+    const snapshot_ok = retained.setSnapshot(store, ring, snapshot_bytes);
+    if (!snapshot_ok) {
+        return SnapshotError.InvalidSnapshot;
+    }
+
+    return stat;
+}
 
 pub fn main() !void {
     if (@import("builtin").os.tag == .windows) {
@@ -25,8 +49,6 @@ pub fn main() !void {
     }
 
     const snapshot_path = args[1];
-    const snapshot_bytes = try std.fs.cwd().readFileAlloc(allocator, snapshot_path, max_snapshot_bytes);
-    defer allocator.free(snapshot_bytes);
 
     retained.init();
     defer retained.deinit();
@@ -38,11 +60,12 @@ pub fn main() !void {
     var event_ring = try retained.EventRing.init(allocator);
     defer event_ring.deinit();
 
-    const snapshot_ok = retained.setSnapshot(&store, &event_ring, snapshot_bytes);
-    if (!snapshot_ok) {
-        std.debug.print("Failed to parse snapshot {s}\n", .{snapshot_path});
+    const initial_stat = loadSnapshot(allocator, &store, &event_ring, snapshot_path) catch |err| {
+        std.debug.print("Failed to parse snapshot {s}: {s}\n", .{ snapshot_path, @errorName(err) });
         return;
-    }
+    };
+    var snapshot_mtime = initial_stat.mtime;
+    var last_reload_check_ms: i64 = std.time.milliTimestamp();
 
     var title_buffer: [64]u8 = undefined;
     const title = std.fmt.bufPrintZ(&title_buffer, "DVUI Retained Harness", .{}) catch "DVUI Retained Harness";
@@ -83,6 +106,33 @@ pub fn main() !void {
             raygui.lock();
         } else {
             raygui.unlock();
+        }
+
+        const now_ms = std.time.milliTimestamp();
+        if (now_ms - last_reload_check_ms >= reload_interval_ms) {
+            last_reload_check_ms = now_ms;
+            if (std.fs.cwd().openFile(snapshot_path, .{})) |file| {
+                defer file.close();
+                if (file.stat()) |stat| {
+                    if (stat.mtime != snapshot_mtime) {
+                        snapshot_mtime = stat.mtime;
+                        if (file.readToEndAlloc(allocator, max_snapshot_bytes)) |snapshot_bytes| {
+                            defer allocator.free(snapshot_bytes);
+                            if (!retained.setSnapshot(&store, &event_ring, snapshot_bytes)) {
+                                std.debug.print("Snapshot reload parse failed: {s}\n", .{snapshot_path});
+                            } else {
+                                std.debug.print("Reloaded snapshot {s}\n", .{snapshot_path});
+                            }
+                        } else |err| {
+                            std.debug.print("Snapshot reload failed: {s}\n", .{@errorName(err)});
+                        }
+                    }
+                } else |err| {
+                    std.debug.print("Snapshot reload stat failed: {s}\n", .{@errorName(err)});
+                }
+            } else |err| {
+                std.debug.print("Snapshot reload open failed: {s}\n", .{@errorName(err)});
+            }
         }
 
         _ = retained.render(&event_ring, &store, true);

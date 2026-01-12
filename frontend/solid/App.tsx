@@ -1,68 +1,189 @@
 // @ts-nocheck
+import { createSignal, Show } from "solid-js";
 import {
+  Alert,
+  Badge,
   Button,
-  Card,
-  CardHeader,
-  CardHeaderContent,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardAction,
-  CardFooter,
-  Input,
-  Label,
+  Checkbox,
+  Progress,
+  Separator,
+  Switch,
+  Textarea,
 } from "./components/index";
 
 export const App = () => {
+  const [lastEvent, setLastEvent] = createSignal("None");
+  const [scrollDetail, setScrollDetail] = createSignal("Idle");
+  const [dragDetail, setDragDetail] = createSignal("Idle");
+  const [overlayOpen, setOverlayOpen] = createSignal(false);
+
+  const decodePayload = (payload?: Uint8Array) => {
+    if (!payload || payload.length === 0) return "";
+    return new TextDecoder().decode(payload);
+  };
+
+  const logEvent = (label: string) => (payload: Uint8Array) => {
+    const detail = decodePayload(payload);
+    setLastEvent(detail ? `${label}: ${detail}` : label);
+  };
+
+  const logScroll = (payload: Uint8Array) => {
+    const detail = decodePayload(payload) || "Idle";
+    setScrollDetail(detail);
+    setLastEvent(detail === "Idle" ? "scroll" : `scroll: ${detail}`);
+  };
+
+  const logDrag = (label: string) => (payload: Uint8Array) => {
+    const detail = decodePayload(payload);
+    const message = detail ? `${label}: ${detail}` : label;
+    setDragDetail(message);
+    setLastEvent(message);
+  };
+
+  const scrollItems = Array.from({ length: 14 }, (_, index) => `Row ${index + 1}`);
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardHeaderContent>
-          <CardTitle>Login to your account</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account
-          </CardDescription>
-        </CardHeaderContent>
-        <CardAction>
-          <Button variant="link">Sign Up</Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <form>
-          <div className="flex flex-col gap-6">
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="m@example.com"
-                required
-              />
+    <div class="flex flex-col gap-6 p-6">
+      <div class="flex flex-col gap-1">
+        <h1 class="text-lg text-foreground">Component Harness</h1>
+        <p class="text-sm text-muted-foreground">
+          Validate overlays, focus/keyboard routing, drag, and scroll behaviors.
+        </p>
+      </div>
+
+      <div class="flex flex-row gap-6">
+        <div class="flex flex-col gap-6">
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-sm text-foreground">Focus + Keyboard</h2>
+              <p class="text-xs text-muted-foreground">Last event: {lastEvent()}</p>
             </div>
-            <div className="grid gap-2">
-              <div className="flex items-center">
-                <Label htmlFor="password">Password</Label>
-                <a
-                  href="#"
-                  className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                >
-                  Forgot your password?
-                </a>
+            <div focusTrap={true} class="flex flex-col gap-3 rounded-md border border-border p-3">
+              <p class="text-xs text-muted-foreground">Focus trap region</p>
+              <input
+                class="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+                placeholder="Focusable input"
+                onFocus={logEvent("focus")}
+                onBlur={logEvent("blur")}
+                onKeyDown={logEvent("keydown")}
+                onKeyUp={logEvent("keyup")}
+              />
+              <div class="flex flex-row gap-2">
+                <Button size="sm" onClick={logEvent("click")}>Primary</Button>
+                <Button size="sm" variant="outline" onClick={logEvent("click")}>Outline</Button>
               </div>
-              <Input id="password" type="password" required />
+            </div>
+            <div roving={true} class="flex flex-row gap-2 rounded-md border border-border p-2">
+              <Button size="sm" tabIndex={0} onFocus={logEvent("roving focus")}>One</Button>
+              <Button size="sm" tabIndex={0} onFocus={logEvent("roving focus")}>Two</Button>
+              <Button size="sm" tabIndex={0} onFocus={logEvent("roving focus")}>Three</Button>
             </div>
           </div>
-        </form>
-      </CardContent>
-      <CardFooter className="flex-col gap-2">
-        <Button type="submit" className="w-full">
-          Login
-        </Button>
-        <Button variant="outline" className="w-full">
-          Login with Google
-        </Button>
-      </CardFooter>
-    </Card>
-  )
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-sm text-foreground">Drag + Drop</h2>
+              <p class="text-xs text-muted-foreground">{dragDetail()}</p>
+            </div>
+            <div class="flex flex-row gap-4">
+              <div
+                class="flex flex-col gap-2 rounded-md border border-border p-3 w-44"
+                onDragStart={logDrag("dragstart")}
+                onDrag={logDrag("drag")}
+                onDragEnd={logDrag("dragend")}
+              >
+                <p class="text-xs text-muted-foreground">Drag source</p>
+                <div class="flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  Drag me
+                </div>
+              </div>
+              <div
+                class="flex flex-col gap-2 rounded-md border border-border p-3 w-44"
+                onDragEnter={logDrag("dragenter")}
+                onDragLeave={logDrag("dragleave")}
+                onDrop={logDrag("drop")}
+              >
+                <p class="text-xs text-muted-foreground">Drop target</p>
+                <div class="flex h-10 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  Drop here
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <h2 class="text-sm text-foreground">Inputs + Toggles</h2>
+            <div class="flex flex-col gap-3">
+              <Checkbox label="Receive updates" />
+              <div class="flex flex-row items-center gap-3">
+                <Switch />
+                <p class="text-sm text-muted-foreground">Enable preview</p>
+              </div>
+              <Textarea placeholder="Type notes..." rows={3} />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-6">
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-sm text-foreground">Scroll Region</h2>
+              <p class="text-xs text-muted-foreground">{scrollDetail()}</p>
+            </div>
+            <div
+              class="h-40 w-full overflow-hidden rounded-md border border-border"
+              scroll={true}
+              canvasHeight={560}
+              onScroll={logScroll}
+            >
+              <div class="flex flex-col gap-2 p-2">
+                {scrollItems.map((row) => (
+                  <div class="rounded-md border border-border p-2 text-sm text-foreground">
+                    {row}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <h2 class="text-sm text-foreground">Overlay Staging</h2>
+            <p class="text-xs text-muted-foreground">
+              Open the modal to validate portal layering and focus trapping.
+            </p>
+            <Button size="sm" onClick={() => setOverlayOpen(true)}>Open overlay</Button>
+          </div>
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <h2 class="text-sm text-foreground">Status + Feedback</h2>
+            <div class="flex flex-row gap-2">
+              <Badge>Beta</Badge>
+              <Badge variant="secondary">Stable</Badge>
+              <Badge variant="outline">Outline</Badge>
+            </div>
+            <Alert title="Snapshot note">Validate new styling before shipping.</Alert>
+            <Separator />
+            <Progress value={42} />
+          </div>
+        </div>
+      </div>
+
+      <Show when={overlayOpen()}>
+        <portal modal={true} focusTrap={true}>
+          <div class="flex h-full w-full items-center justify-center">
+            <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-80">
+              <h3 class="text-sm text-foreground">Overlay Preview</h3>
+              <p class="text-xs text-muted-foreground">
+                Press buttons and use Tab to ensure focus stays inside.
+              </p>
+              <div class="flex flex-row gap-2">
+                <Button size="sm" onClick={() => setOverlayOpen(false)}>Close</Button>
+                <Button size="sm" variant="secondary">Action</Button>
+              </div>
+            </div>
+          </div>
+        </portal>
+      </Show>
+    </div>
+  );
 };
