@@ -1,11 +1,19 @@
 // @ts-nocheck
 import { createSignal, Show } from "solid-js";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Alert,
   Badge,
   Button,
   Checkbox,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   DescriptionList,
+  GroupBox,
   Kbd,
   List,
   Progress,
@@ -155,6 +163,32 @@ export const App = () => {
                 <p class="text-sm text-muted-foreground">Invite collaborators.</p>
               </TabsContent>
             </Tabs>
+          </div>
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <h2 class="text-sm text-foreground">Actions + Containers</h2>
+            <GroupBox title="Team Access" description="Manage roles and visibility.">
+              <div class="flex flex-row gap-2">
+                <Button size="sm">Invite</Button>
+                <Button size="sm" variant="secondary">Settings</Button>
+              </div>
+            </GroupBox>
+            <Accordion type="single" defaultValue="overview" collapsible={true}>
+              <AccordionItem value="overview">
+                <AccordionTrigger>Overview</AccordionTrigger>
+                <AccordionContent>Quick status and usage details.</AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="details">
+                <AccordionTrigger>Details</AccordionTrigger>
+                <AccordionContent>Additional configuration and metadata.</AccordionContent>
+              </AccordionItem>
+            </Accordion>
+            <Collapsible defaultOpen={true}>
+              <CollapsibleTrigger class="rounded-md bg-muted px-2 py-1">Notes</CollapsibleTrigger>
+              <CollapsibleContent>
+                Use collapsible panels for optional helper copy.
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </div>
 
