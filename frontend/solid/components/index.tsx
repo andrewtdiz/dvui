@@ -188,6 +188,42 @@ export const Badge = (props: BadgeProps) => {
 };
 
 // ============================================================================
+// Tag Component
+// ============================================================================
+export type TagProps = {
+    children?: JSX.Element;
+    class?: string;
+    className?: string;
+};
+
+export const Tag = (props: TagProps) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground ${cls}`}>
+            <p>{props.children}</p>
+        </div>
+    );
+};
+
+// ============================================================================
+// Kbd Component
+// ============================================================================
+export type KbdProps = {
+    children?: JSX.Element;
+    class?: string;
+    className?: string;
+};
+
+export const Kbd = (props: KbdProps) => {
+    const cls = props.class ?? props.className ?? "";
+    return (
+        <div class={`inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 text-xs font-mono text-foreground ${cls}`}>
+            <p>{props.children}</p>
+        </div>
+    );
+};
+
+// ============================================================================
 // Progress Component
 // Uses nested divs for track and fill with inline style for precise control
 // ============================================================================
@@ -669,6 +705,69 @@ export const Label = (props: LabelProps) => {
         <p class={`text-sm text-foreground ${cls}`}>
             {props.children}
         </p>
+    );
+};
+
+// ============================================================================
+// DescriptionList Component
+// ============================================================================
+export type DescriptionListItem = {
+    term: JSX.Element;
+    description: JSX.Element;
+};
+
+export type DescriptionListProps = {
+    items?: DescriptionListItem[];
+    class?: string;
+    className?: string;
+    itemClass?: string;
+    termClass?: string;
+    descriptionClass?: string;
+    children?: JSX.Element;
+};
+
+export const DescriptionList = (props: DescriptionListProps) => {
+    const [local, others] = splitProps(props, [
+        "items",
+        "class",
+        "className",
+        "itemClass",
+        "termClass",
+        "descriptionClass",
+        "children",
+    ]);
+
+    const listClass = () => {
+        const userClass = local.class ?? local.className ?? "";
+        return ["flex flex-col gap-3", userClass].filter(Boolean).join(" ");
+    };
+
+    const itemClass = () => {
+        const userClass = local.itemClass ?? "";
+        return ["flex flex-col gap-1", userClass].filter(Boolean).join(" ");
+    };
+
+    const termClass = () => {
+        const userClass = local.termClass ?? "";
+        return ["text-xs text-muted-foreground", userClass].filter(Boolean).join(" ");
+    };
+
+    const descriptionClass = () => {
+        const userClass = local.descriptionClass ?? "";
+        return ["text-sm text-foreground", userClass].filter(Boolean).join(" ");
+    };
+
+    const renderItems = () => local.items?.map((item) => (
+        <div class={itemClass()}>
+            <p class={termClass()}>{item.term}</p>
+            <p class={descriptionClass()}>{item.description}</p>
+        </div>
+    ));
+
+    return (
+        <div class={listClass()} {...others}>
+            {local.items && local.items.length > 0 ? renderItems() : local.children}
+        </div>
     );
 };
 

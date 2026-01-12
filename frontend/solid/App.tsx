@@ -5,6 +5,8 @@ import {
   Badge,
   Button,
   Checkbox,
+  DescriptionList,
+  Kbd,
   List,
   Progress,
   Separator,
@@ -13,6 +15,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  Tag,
   Textarea,
 } from "./components/index";
 
@@ -187,7 +190,22 @@ export const App = () => {
               <Badge variant="secondary">Stable</Badge>
               <Badge variant="outline">Outline</Badge>
             </div>
+            <div class="flex flex-row gap-2">
+              <Tag>Internal</Tag>
+              <Tag class="bg-secondary text-secondary-foreground">Release</Tag>
+            </div>
+            <div class="flex flex-row items-center gap-1">
+              <p class="text-xs text-muted-foreground">Shortcut</p>
+              <Kbd>⌘</Kbd>
+              <Kbd>K</Kbd>
+            </div>
             <Alert title="Snapshot note">Validate new styling before shipping.</Alert>
+            <DescriptionList
+              items={[
+                { term: "Status", description: "Operational" },
+                { term: "Region", description: "us-east-1" },
+              ]}
+            />
             <Separator />
             <Progress value={42} />
           </div>
