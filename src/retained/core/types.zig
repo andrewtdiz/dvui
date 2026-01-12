@@ -4,6 +4,7 @@ const dvui = @import("dvui");
 const tailwind = @import("../style/tailwind.zig");
 const dirty = @import("dirty.zig");
 const text_wrap = @import("../layout/text_wrap.zig");
+const image_loader = @import("../render/image_loader.zig");
 
 pub const AnchorSide = dvui.AnchorSide;
 pub const AnchorAlign = dvui.AnchorAlign;
@@ -14,6 +15,20 @@ pub const IconKind = enum {
     tvg,
     image,
     glyph,
+};
+
+pub const CachedImage = union(enum) {
+    none,
+    failed,
+    resource: *const image_loader.ImageResource,
+};
+
+pub const CachedIcon = union(enum) {
+    none,
+    failed,
+    vector: []const u8,
+    raster: *const image_loader.ImageResource,
+    glyph: []const u8,
 };
 
 pub const AccessToggled = enum {
@@ -231,6 +246,8 @@ pub const SolidNode = struct {
     image_src: []u8 = &.{},
     icon_kind: IconKind = .auto,
     icon_glyph: []u8 = &.{},
+    cached_image: CachedImage = .none,
+    cached_icon: CachedIcon = .none,
     parent: ?u32 = null,
     children: std.ArrayList(u32),
     listeners: ListenerSet,
@@ -375,15 +392,28 @@ pub const SolidNode = struct {
     }
 
     pub fn setImageSource(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        if (std.mem.eql(u8, self.image_src, value)) return;
         const copy = try allocator.dupe(u8, value);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         self.image_src = copy;
+        self.clearImageCache();
+        self.clearIconCache();
+    }
+
+    fn clearImageCache(self: *SolidNode) void {
+        self.cached_image = .none;
+    }
+
+    fn clearIconCache(self: *SolidNode) void {
+        self.cached_icon = .none;
     }
 
     pub fn setIconGlyph(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        if (std.mem.eql(u8, self.icon_glyph, value)) return;
         const copy = try allocator.dupe(u8, value);
         if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
         self.icon_glyph = copy;
+        self.clearIconCache();
         self.invalidatePaint();
     }
 
@@ -648,6 +678,7 @@ pub const NodeStore = struct {
         const target = self.nodes.getPtr(id) orelse return;
         if (target.icon_kind == value) return;
         target.icon_kind = value;
+        target.clearIconCache();
         self.markNodeChanged(id);
     }
 

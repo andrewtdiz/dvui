@@ -1684,14 +1684,26 @@ fn renderIcon(
 ) void {
     const src = node.imageSource();
     const glyph = node.iconGlyph();
-    const resolved = icon_registry.resolve(node.iconKind(), src, glyph) catch |err| {
-        if (src.len > 0) {
-            log.err("Solid icon load failed for {s}: {s}", .{ src, @errorName(err) });
-        } else {
-            log.err("Solid icon load failed for node {d}: {s}", .{ node_id, @errorName(err) });
-        }
-        return;
-    };
+    switch (node.cached_icon) {
+        .none => {
+            const resolved = icon_registry.resolve(node.iconKind(), src, glyph) catch |err| {
+                if (src.len > 0) {
+                    log.err("Solid icon load failed for {s}: {s}", .{ src, @errorName(err) });
+                } else {
+                    log.err("Solid icon load failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                }
+                node.cached_icon = .failed;
+                return;
+            };
+            node.cached_icon = switch (resolved) {
+                .vector => |bytes| .{ .vector = bytes },
+                .raster => |resource| .{ .raster = resource },
+                .glyph => |text| .{ .glyph = text },
+            };
+        },
+        .failed => return,
+        else => {},
+    }
 
     var options = dvui.Options{
         .name = "solid-icon",
@@ -1704,7 +1716,7 @@ fn renderIcon(
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, null);
 
-    switch (resolved) {
+    switch (node.cached_icon) {
         .vector => |tvg_bytes| {
             const icon_name = if (src.len > 0) src else "solid-icon";
             var iw = dvui.IconWidget.init(@src(), icon_name, tvg_bytes, .{}, options);
@@ -1725,6 +1737,7 @@ fn renderIcon(
             lw.draw();
             lw.deinit();
         },
+        .none, .failed => return,
     }
 
     renderChildElements(event_ring, store, node, allocator, tracker);
@@ -1745,9 +1758,18 @@ fn renderImage(
         return;
     }
 
-    const resource = image_loader.load(src) catch |err| {
-        log.err("Solid image load failed for {s}: {s}", .{ src, @errorName(err) });
-        return;
+    const resource = switch (node.cached_image) {
+        .resource => |resource| resource,
+        .failed => return,
+        .none => blk: {
+            const loaded = image_loader.load(src) catch |err| {
+                log.err("Solid image load failed for {s}: {s}", .{ src, @errorName(err) });
+                node.cached_image = .failed;
+                return;
+            };
+            node.cached_image = .{ .resource = loaded };
+            break :blk loaded;
+        },
     };
 
     var options = dvui.Options{
