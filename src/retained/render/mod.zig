@@ -921,6 +921,11 @@ fn renderElementBody(
         node.markRendered();
         return;
     }
+    if (std.mem.eql(u8, node.tag, "slider")) {
+        renderSlider(event_ring, store, node_id, node, class_spec);
+        node.markRendered();
+        return;
+    }
     if (std.mem.eql(u8, node.tag, "image")) {
         renderImage(event_ring, store, node_id, node, class_spec, allocator, tracker);
         node.markRendered();
@@ -1688,6 +1693,267 @@ fn renderImage(
     applyAccessibilityState(node, &wd);
 
     renderChildElements(event_ring, store, node, allocator, tracker);
+}
+
+fn renderSlider(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    class_spec: tailwind.Spec,
+) void {
+    var options = dvui.slider_defaults.override(.{
+        .name = "solid-slider",
+        .id_extra = nodeIdExtra(node_id),
+    });
+    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.resolveFont(&class_spec, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyVisualToOptions(node, &options);
+    applyTransformToOptions(node, &options);
+    applyAccessibilityOptions(node, &options, .slider);
+
+    if (node.layout.rect) |rect| {
+        options.rect = physicalToDvuiRect(rect);
+    }
+
+    const tab_info = focus.tabIndexForNode(store, node);
+    const focus_allowed = allowFocusRegistration();
+    if (tab_info.focusable and focus_allowed) {
+        options.tab_index = tab_info.tab_index;
+    }
+
+    const state = node.ensureInputState(store.allocator) catch |err| {
+        log.err("Solid slider state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
+        return;
+    };
+
+    state.syncBufferFromValue() catch |err| {
+        log.err("Solid slider buffer sync failed for node {d}: {s}", .{ node_id, @errorName(err) });
+        return;
+    };
+
+    var fraction: f32 = 0;
+    const current_text = state.currentText();
+    if (current_text.len > 0) {
+        fraction = std.fmt.parseFloat(f32, current_text) catch 0;
+    }
+    fraction = @max(0, @min(1, fraction));
+
+    const direction: dvui.enums.Direction = .horizontal;
+
+    var slider_box = dvui.box(@src(), .{ .dir = direction }, options);
+    defer slider_box.deinit();
+    applyAccessibilityState(node, slider_box.data());
+    if (tab_info.focusable and focus_allowed) {
+        focus.registerFocusable(store, node, slider_box.data());
+    }
+
+    if (slider_box.data().accesskit_node()) |ak_node| {
+        dvui.AccessKit.nodeAddAction(ak_node, dvui.AccessKit.Action.focus);
+        dvui.AccessKit.nodeAddAction(ak_node, dvui.AccessKit.Action.set_value);
+        dvui.AccessKit.nodeSetOrientation(ak_node, dvui.AccessKit.Orientation.horizontal);
+        dvui.AccessKit.nodeSetNumericValue(ak_node, fraction);
+        dvui.AccessKit.nodeSetMinNumericValue(ak_node, 0);
+        dvui.AccessKit.nodeSetMaxNumericValue(ak_node, 1);
+    }
+
+    const br = slider_box.data().contentRect();
+    const knobsize = @min(br.w, br.h);
+    const track = switch (direction) {
+        .horizontal => dvui.Rect{ .x = knobsize / 2, .y = br.h / 2 - 2, .w = br.w - knobsize, .h = 4 },
+        .vertical => dvui.Rect{ .x = br.w / 2 - 2, .y = knobsize / 2, .w = 4, .h = br.h - knobsize },
+    };
+    const trackrs = slider_box.widget().screenRectScale(track);
+    const rs = slider_box.data().contentRectScale();
+
+    var hovered = false;
+    var changed = false;
+    var prev_focused = state.focused;
+    var focused_now = false;
+
+    if (input_enabled_state) {
+        if (tab_info.focusable and focus_allowed) {
+            dvui.tabIndexSet(slider_box.data().id, tab_info.tab_index);
+        }
+
+        for (dvui.events()) |*e| {
+            if (!dvui.eventMatch(e, .{ .id = slider_box.data().id, .r = rs.r }))
+                continue;
+
+            switch (e.evt) {
+                .mouse => |me| {
+                    var p: ?dvui.Point.Physical = null;
+                    if (me.action == .focus) {
+                        e.handle(@src(), slider_box.data());
+                        dvui.focusWidget(slider_box.data().id, null, e.num);
+                    } else if (me.action == .press and me.button.pointer()) {
+                        dvui.captureMouse(slider_box.data(), e.num);
+                        e.handle(@src(), slider_box.data());
+                        p = me.p;
+                    } else if (me.action == .release and me.button.pointer()) {
+                        dvui.captureMouse(null, e.num);
+                        dvui.dragEnd();
+                        e.handle(@src(), slider_box.data());
+                    } else if (me.action == .motion and dvui.captured(slider_box.data().id)) {
+                        e.handle(@src(), slider_box.data());
+                        p = me.p;
+                    } else if (me.action == .position) {
+                        dvui.cursorSet(class_spec.cursor orelse .arrow);
+                        hovered = true;
+                    }
+
+                    if (p) |pp| {
+                        var min_val: f32 = undefined;
+                        var max_val: f32 = undefined;
+                        switch (direction) {
+                            .horizontal => {
+                                min_val = trackrs.r.x;
+                                max_val = trackrs.r.x + trackrs.r.w;
+                            },
+                            .vertical => {
+                                min_val = 0;
+                                max_val = trackrs.r.h;
+                            },
+                        }
+
+                        if (max_val > min_val) {
+                            const v = if (direction == .horizontal) pp.x else (trackrs.r.y + trackrs.r.h - pp.y);
+                            fraction = (v - min_val) / (max_val - min_val);
+                            fraction = @max(0, @min(1, fraction));
+                            changed = true;
+                        }
+                    }
+                },
+                .key => |ke| {
+                    if (ke.action == .down or ke.action == .repeat) {
+                        switch (ke.code) {
+                            .left, .down => {
+                                e.handle(@src(), slider_box.data());
+                                fraction = @max(0, @min(1, fraction - 0.05));
+                                changed = true;
+                            },
+                            .right, .up => {
+                                e.handle(@src(), slider_box.data());
+                                fraction = @max(0, @min(1, fraction + 0.05));
+                                changed = true;
+                            },
+                            else => {},
+                        }
+                    }
+                },
+                .text => |te| {
+                    e.handle(@src(), slider_box.data());
+                    const value: f32 = std.fmt.parseFloat(f32, te.txt) catch continue;
+                    fraction = @max(0, @min(1, value));
+                    changed = true;
+                },
+                else => {},
+            }
+        }
+
+        focused_now = dvui.focusedWidgetId() == slider_box.data().id;
+        state.focused = focused_now;
+    } else {
+        state.focused = false;
+        prev_focused = false;
+    }
+
+    if (input_enabled_state) {
+        if (event_ring) |ring| {
+            if (!prev_focused and focused_now and node.hasListener("focus")) {
+                _ = ring.pushFocus(node_id);
+            } else if (prev_focused and !focused_now and node.hasListener("blur")) {
+                _ = ring.pushBlur(node_id);
+            }
+        }
+    }
+
+    const perc = @max(0, @min(1, fraction));
+    if (fraction != perc) {
+        fraction = perc;
+        changed = true;
+    }
+
+    var part = trackrs.r;
+    switch (direction) {
+        .horizontal => part.w *= perc,
+        .vertical => {
+            const h = part.h * (1 - perc);
+            part.y += h;
+            part.h = trackrs.r.h - h;
+        },
+    }
+    if (slider_box.data().visible()) {
+        part.fill(options.corner_radiusGet().scale(trackrs.s, dvui.Rect.Physical), .{
+            .color = dvui.themeGet().color(.highlight, .fill),
+            .fade = 1.0,
+        });
+    }
+
+    switch (direction) {
+        .horizontal => {
+            part.x = part.x + part.w;
+            part.w = trackrs.r.w - part.w;
+        },
+        .vertical => {
+            part = trackrs.r;
+            part.h *= (1 - perc);
+        },
+    }
+    if (slider_box.data().visible()) {
+        part.fill(options.corner_radiusGet().scale(trackrs.s, dvui.Rect.Physical), .{
+            .color = options.color(.fill),
+            .fade = 1.0,
+        });
+    }
+
+    const knobRect = switch (direction) {
+        .horizontal => dvui.Rect{ .x = (br.w - knobsize) * perc, .w = knobsize, .h = knobsize },
+        .vertical => dvui.Rect{ .y = (br.h - knobsize) * (1 - perc), .w = knobsize, .h = knobsize },
+    };
+
+    const fill_color: dvui.Color = if (dvui.captured(slider_box.data().id))
+        options.color(.fill_press)
+    else if (hovered)
+        options.color(.fill_hover)
+    else
+        options.color(.fill);
+
+    var knob = dvui.BoxWidget.init(
+        @src(),
+        .{ .dir = .horizontal },
+        .{
+            .rect = knobRect,
+            .padding = .{},
+            .margin = .{},
+            .background = true,
+            .border = dvui.Rect.all(1),
+            .corner_radius = dvui.Rect.all(100),
+            .color_fill = fill_color,
+        },
+    );
+    knob.install();
+    knob.drawBackground();
+    if (slider_box.data().id == dvui.focusedWidgetId()) {
+        knob.data().focusBorder();
+    }
+    knob.deinit();
+
+    if (changed) {
+        var value_buffer: [32]u8 = undefined;
+        const value_str = std.fmt.bufPrint(&value_buffer, "{d}", .{fraction}) catch "";
+        state.updateFromText(value_str) catch |err| {
+            log.err("Solid slider state update failed for node {d}: {s}", .{ node_id, @errorName(err) });
+        };
+        store.markNodeChanged(node_id);
+        if (event_ring) |ring| {
+            if (node.hasListener("input")) {
+                _ = ring.pushInput(node_id, value_str);
+            }
+        }
+        dvui.refresh(null, @src(), slider_box.data().id);
+    }
 }
 
 fn renderInput(

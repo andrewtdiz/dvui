@@ -473,7 +473,7 @@ pub const SolidNode = struct {
     }
 
     fn tagImpliesInteractive(tag: []const u8) bool {
-        return std.mem.eql(u8, tag, "button") or std.mem.eql(u8, tag, "input");
+        return std.mem.eql(u8, tag, "button") or std.mem.eql(u8, tag, "input") or std.mem.eql(u8, tag, "slider");
     }
 
     fn tagImpliesScroll(tag: []const u8) bool {
@@ -565,7 +565,8 @@ pub const NodeStore = struct {
 
     pub fn setInputValue(self: *NodeStore, id: u32, value: []const u8) !void {
         if (self.nodes.getPtr(id)) |found_node| {
-            if (!std.mem.eql(u8, found_node.tag, "input")) return;
+            const tag = found_node.tag;
+            if (!std.mem.eql(u8, tag, "input") and !std.mem.eql(u8, tag, "slider")) return;
             try found_node.setInputValue(self.allocator, value);
             self.markNodeChanged(id);
         }
