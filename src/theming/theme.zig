@@ -31,6 +31,80 @@ pub const Style = struct {
     border: ?Color = null,
 };
 
+/// Stable design tokens shared by immediate + retained styles.
+pub const Tokens = struct {
+    /// Base spacing unit (applies to margin, padding, gap, inset).
+    pub const spacing_unit: f32 = 4.0;
+    /// Width/height scaling unit (Tailwind w-/h- numeric scale).
+    pub const dimension_unit: f32 = spacing_unit;
+    /// Default border width for `border` tokens.
+    pub const border_width_default: f32 = 1.0;
+    /// Default z-index when none is provided.
+    pub const z_index_default: i16 = 0;
+
+    pub const RadiusToken = struct {
+        token: []const u8,
+        radius: f32,
+    };
+
+    pub const radius_tokens = [_]RadiusToken{
+        .{ .token = "rounded-none", .radius = 0.0 },
+        .{ .token = "rounded-sm", .radius = 2.0 },
+        .{ .token = "rounded", .radius = 4.0 },
+        .{ .token = "rounded-md", .radius = 6.0 },
+        .{ .token = "rounded-lg", .radius = 8.0 },
+        .{ .token = "rounded-xl", .radius = 12.0 },
+        .{ .token = "rounded-2xl", .radius = 16.0 },
+        .{ .token = "rounded-3xl", .radius = 24.0 },
+        .{ .token = "rounded-full", .radius = 9999.0 },
+    };
+
+    pub const TypographyToken = struct {
+        token: []const u8,
+        style: Options.FontStyle,
+    };
+
+    pub const typography_tokens = [_]TypographyToken{
+        .{ .token = "text-xs", .style = .caption },
+        .{ .token = "text-sm", .style = .caption_heading },
+        .{ .token = "text-base", .style = .body },
+        .{ .token = "text-lg", .style = .title_3 },
+        .{ .token = "text-xl", .style = .title_2 },
+        .{ .token = "text-2xl", .style = .title_1 },
+        .{ .token = "text-3xl", .style = .title },
+    };
+
+    pub const ZLayerToken = struct {
+        token: []const u8,
+        value: i16,
+    };
+
+    pub const z_layers = [_]ZLayerToken{
+        .{ .token = "base", .value = 0 },
+        .{ .token = "dropdown", .value = 10 },
+        .{ .token = "overlay", .value = 20 },
+        .{ .token = "modal", .value = 30 },
+        .{ .token = "popover", .value = 40 },
+        .{ .token = "tooltip", .value = 50 },
+    };
+
+    pub const ColorRole = struct {
+        token: []const u8,
+        style: Style.Name,
+    };
+
+    pub const color_roles = [_]ColorRole{
+        .{ .token = "content", .style = .content },
+        .{ .token = "window", .style = .window },
+        .{ .token = "control", .style = .control },
+        .{ .token = "highlight", .style = .highlight },
+        .{ .token = "err", .style = .err },
+        .{ .token = "app1", .style = .app1 },
+        .{ .token = "app2", .style = .app2 },
+        .{ .token = "app3", .style = .app3 },
+    };
+};
+
 name: []const u8,
 
 /// widgets can use this if they need to adjust colors

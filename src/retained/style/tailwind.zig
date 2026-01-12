@@ -1,3 +1,20 @@
+//! Tailwind-like class contract for retained styles.
+//!
+//! Design tokens live in `dvui.Theme.Tokens` to stay aligned with immediate-mode themes.
+//! Supported tokens:
+//! - Colors: `bg-{role}`, `text-{role}`, `border-{role}` for theme roles
+//!   (`content`, `window`, `control`, `highlight`, `err`, `app1`, `app2`, `app3`)
+//!   plus palette names from `colors.zig` (e.g. `slate-900`, `blue-500`).
+//! - Spacing: `m-`, `p-`, `gap-`, `top-`, `right-`, `bottom-`, `left-` use `spacing_unit`
+//!   and accept numeric scales or bracketed `[Npx]` values.
+//! - Sizing: `w-`, `h-` use `dimension_unit` with `full`, `screen`, `px`, or `[Npx]`.
+//! - Radii: `rounded-*` tokens from `Tokens.radius_tokens`.
+//! - Typography: `text-{xs|sm|base|lg|xl|2xl|3xl}` mapped to `Options.FontStyle`.
+//! - Z-layers: `z-{base|dropdown|overlay|modal|popover|tooltip}` plus numeric `z-*`/`z-[N]`.
+//! - Layout: `flex`, `flex-row`, `flex-col`, `absolute`, `justify-*`, `items-*`, `content-*`,
+//!   `hidden`, `overflow-hidden`, `text-left`, `text-center`, `text-right`, `text-nowrap`, `break-words`.
+//! - Extras: `opacity-*`, `cursor-*`, `scale-*`, `font-*`, `italic`, `not-italic`, plus `hover:` variants
+//!   for `bg-`, `text-`, `border-`, `opacity-`.
 const std = @import("std");
 
 const dvui = @import("dvui");
@@ -10,6 +27,7 @@ else
 const msdf_enabled = msdf_placeholder_font_id != null;
 
 const color_data = @import("colors.zig");
+const design_tokens = dvui.Theme.Tokens;
 
 pub const TextAlign = enum {
     left,
@@ -72,7 +90,7 @@ pub const Spec = struct {
     gap_col: ?f32 = null,
     corner_radius: ?f32 = null,
     // Z-ordering (z-index). Default 0 preserves document order.
-    z_index: i16 = 0,
+    z_index: i16 = design_tokens.z_index_default,
     // Clip descendants to this node's bounds (overflow-hidden).
     clip_children: ?bool = null,
     // New easy wins
@@ -209,22 +227,7 @@ const literal_rules = [_]LiteralRule{
     .{ .token = "break-words", .kind = .break_words },
 };
 
-const RoundedRule = struct {
-    token: []const u8,
-    radius: f32,
-};
-
-const rounded_rules = [_]RoundedRule{
-    .{ .token = "rounded-none", .radius = 0.0 },
-    .{ .token = "rounded-sm", .radius = 2.0 },
-    .{ .token = "rounded", .radius = 4.0 },
-    .{ .token = "rounded-md", .radius = 6.0 },
-    .{ .token = "rounded-lg", .radius = 8.0 },
-    .{ .token = "rounded-xl", .radius = 12.0 },
-    .{ .token = "rounded-2xl", .radius = 16.0 },
-    .{ .token = "rounded-3xl", .radius = 24.0 },
-    .{ .token = "rounded-full", .radius = 9999.0 },
-};
+const rounded_rules = design_tokens.radius_tokens;
 
 const PrefixRule = struct {
     prefix: []const u8,
@@ -240,23 +243,12 @@ const prefix_rules: [4]PrefixRule = .{
 
 const ColorMap = std.StaticStringMap(u32).initComptime(color_data.entries);
 
-const spacing_scale: f32 = 4.0;
-const border_default_width: f32 = 1.0;
+const spacing_scale: f32 = design_tokens.spacing_unit;
+const border_default_width: f32 = design_tokens.border_width_default;
+const z_layer_tokens = design_tokens.z_layers;
+const theme_color_roles = design_tokens.color_roles;
 
-const FontRule = struct {
-    token: []const u8,
-    style: FontStyle,
-};
-
-const font_rules = [_]FontRule{
-    .{ .token = "text-xs", .style = .caption },
-    .{ .token = "text-sm", .style = .caption_heading },
-    .{ .token = "text-base", .style = .body },
-    .{ .token = "text-lg", .style = .title_3 },
-    .{ .token = "text-xl", .style = .title_2 },
-    .{ .token = "text-2xl", .style = .title_1 },
-    .{ .token = "text-3xl", .style = .title },
-};
+const font_rules = design_tokens.typography_tokens;
 
 pub fn parse(classes: []const u8) Spec {
     var spec: Spec = .{};
@@ -438,13 +430,13 @@ fn handleHoverPrefixed(spec: *Spec, token: []const u8) bool {
 }
 
 fn handleHoverBackground(spec: *Spec, suffix: []const u8) void {
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.fill_hover, suffix)) |color_value| {
         spec.hover_background = color_value;
     }
 }
 
 fn handleHoverText(spec: *Spec, suffix: []const u8) void {
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.text_hover, suffix)) |color_value| {
         spec.hover_text = color_value;
     }
 }
@@ -500,7 +492,7 @@ fn handleHoverBorder(spec: *Spec, token: []const u8) bool {
             spec.hover_border.set(dir_info.target, value);
             return true;
         }
-        if (lookupColor(rest)) |color_value| {
+        if (lookupColorToken(.border, rest)) |color_value| {
             spec.hover_border_color = color_value;
             return true;
         }
@@ -512,7 +504,7 @@ fn handleHoverBorder(spec: *Spec, token: []const u8) bool {
         return true;
     }
 
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.border, suffix)) |color_value| {
         spec.hover_border_color = color_value;
         return true;
     }
@@ -742,7 +734,13 @@ fn handleZIndex(spec: *Spec, token: []const u8) bool {
 
     if (suffix.len == 0) return false;
     if (std.mem.eql(u8, suffix, "auto")) {
-        spec.z_index = 0;
+        spec.z_index = design_tokens.z_index_default;
+        return true;
+    }
+
+    if (lookupZLayer(suffix)) |layer_value| {
+        const value = if (negative) -layer_value else layer_value;
+        spec.z_index = value;
         return true;
     }
 
@@ -763,6 +761,15 @@ fn handleZIndex(spec: *Spec, token: []const u8) bool {
     }
     spec.z_index = value;
     return true;
+}
+
+fn lookupZLayer(name: []const u8) ?i16 {
+    for (z_layer_tokens) |layer| {
+        if (std.mem.eql(u8, name, layer.token)) {
+            return layer.value;
+        }
+    }
+    return null;
 }
 
 fn handleCursor(spec: *Spec, token: []const u8) bool {
@@ -865,13 +872,13 @@ fn parseBracketValue(token: []const u8) ?f32 {
 }
 
 fn handleBackground(spec: *Spec, suffix: []const u8) void {
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.fill, suffix)) |color_value| {
         spec.background = color_value;
     }
 }
 
 fn handleText(spec: *Spec, suffix: []const u8) void {
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.text, suffix)) |color_value| {
         spec.text = color_value;
     }
 }
@@ -880,7 +887,7 @@ const width_full = "full";
 const width_px = "px";
 const height_full = "full";
 const height_px = "px";
-const dimension_scale: f32 = 4.0;
+const dimension_scale: f32 = design_tokens.dimension_unit;
 
 fn handleWidth(spec: *Spec, suffix: []const u8) void {
     if (std.mem.eql(u8, suffix, width_full)) {
@@ -1047,7 +1054,7 @@ fn handleBorder(spec: *Spec, token: []const u8) bool {
             spec.border.set(dir_info.target, value);
             return true;
         }
-        if (lookupColor(rest)) |color_value| {
+        if (lookupColorToken(.border, rest)) |color_value| {
             spec.border_color = color_value;
             return true;
         }
@@ -1059,7 +1066,7 @@ fn handleBorder(spec: *Spec, token: []const u8) bool {
         return true;
     }
 
-    if (lookupColor(suffix)) |color_value| {
+    if (lookupColorToken(.border, suffix)) |color_value| {
         spec.border_color = color_value;
         return true;
     }
@@ -1116,7 +1123,21 @@ fn applySideValues(values: *const SideValues, current: ?dvui.Rect) ?dvui.Rect {
     return rect;
 }
 
-fn lookupColor(name: []const u8) ?dvui.Color {
+fn lookupColorToken(ask: dvui.Options.ColorAsk, name: []const u8) ?dvui.Color {
+    return lookupThemeColor(ask, name) orelse lookupPaletteColor(name);
+}
+
+fn lookupThemeColor(ask: dvui.Options.ColorAsk, name: []const u8) ?dvui.Color {
+    const win = dvui.current_window orelse return null;
+    for (theme_color_roles) |role| {
+        if (std.mem.eql(u8, name, role.token)) {
+            return win.theme.color(role.style, ask);
+        }
+    }
+    return null;
+}
+
+fn lookupPaletteColor(name: []const u8) ?dvui.Color {
     if (ColorMap.get(name)) |_packed| {
         return colorFromPacked(_packed);
     }
