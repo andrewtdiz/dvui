@@ -9,6 +9,10 @@ import {
   Progress,
   Separator,
   Switch,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
 } from "./components/index";
 
@@ -17,6 +21,7 @@ export const App = () => {
   const [scrollDetail, setScrollDetail] = createSignal("Idle");
   const [dragDetail, setDragDetail] = createSignal("Idle");
   const [overlayOpen, setOverlayOpen] = createSignal(false);
+  const [activeTab, setActiveTab] = createSignal("account");
 
   const decodePayload = (payload?: Uint8Array) => {
     if (!payload || payload.length === 0) return "";
@@ -124,6 +129,29 @@ export const App = () => {
               </div>
               <Textarea placeholder="Type notes..." rows={3} />
             </div>
+          </div>
+
+          <div class="flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96">
+            <div class="flex flex-col gap-1">
+              <h2 class="text-sm text-foreground">Tabs</h2>
+              <p class="text-xs text-muted-foreground">Active tab: {activeTab()}</p>
+            </div>
+            <Tabs value={activeTab()} onChange={setActiveTab} class="flex flex-col gap-3">
+              <TabsList>
+                <TabsTrigger value="account">Account</TabsTrigger>
+                <TabsTrigger value="billing">Billing</TabsTrigger>
+                <TabsTrigger value="team">Team</TabsTrigger>
+              </TabsList>
+              <TabsContent value="account">
+                <p class="text-sm text-muted-foreground">Manage profile and password.</p>
+              </TabsContent>
+              <TabsContent value="billing">
+                <p class="text-sm text-muted-foreground">Update payment details.</p>
+              </TabsContent>
+              <TabsContent value="team">
+                <p class="text-sm text-muted-foreground">Invite collaborators.</p>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
 
