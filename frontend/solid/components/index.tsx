@@ -1221,54 +1221,287 @@ export const Slider = (props: SliderProps) => {
     );
 };
 
+const decodeTextPayload = (event: any) => {
+    if (event?.target?.value !== undefined) {
+        return String(event.target.value);
+    }
+    if (event?.detail !== undefined) {
+        return String(event.detail);
+    }
+    if (event instanceof Uint8Array) {
+        return new TextDecoder().decode(event);
+    }
+    return String(event ?? "");
+};
+
+const normalizeKeyPayload = (event: any) => {
+    const raw = event instanceof Uint8Array
+        ? new TextDecoder().decode(event)
+        : event?.key ?? event?.detail ?? event;
+    if (raw == null) return "";
+    const value = String(raw);
+    const lowered = value.toLowerCase();
+    switch (lowered) {
+        case "arrowup":
+            return "up";
+        case "arrowdown":
+            return "down";
+        case "arrowleft":
+            return "left";
+        case "arrowright":
+            return "right";
+        case "pageup":
+        case "page_up":
+            return "page_up";
+        case "pagedown":
+        case "page_down":
+            return "page_down";
+        default:
+            return lowered;
+    }
+};
+
 // ============================================================================
 // Input Component
 // Uses native <input> tag - receives input events from native backend
 // ============================================================================
 export type InputProps = {
     value?: string;
+    defaultValue?: string;
     placeholder?: string;
     onChange?: (value: string) => void;
+    validate?: (value: string) => boolean;
+    onInvalid?: (value: string) => void;
     disabled?: boolean;
     class?: string;
+    className?: string;
 };
 
 export const Input = (props: InputProps) => {
-    const [localValue, setLocalValue] = createSignal(props.value ?? "");
+    const [local, others] = splitProps(props, [
+        "value",
+        "defaultValue",
+        "placeholder",
+        "onChange",
+        "validate",
+        "onInvalid",
+        "disabled",
+        "class",
+        "className",
+        "onInput",
+    ]);
 
-    // Sync with external value prop
-    const displayValue = () => props.value !== undefined ? props.value : localValue();
+    const [localValue, setLocalValue] = createSignal(local.defaultValue ?? "");
+    const isControlled = () => local.value !== undefined;
+    const displayValue = () => (isControlled() ? local.value ?? "" : localValue());
 
-    const handleInput = (e: any) => {
-        // Handle both DOM-style events and native events
-        let newValue: string;
-        if (e?.target?.value !== undefined) {
-            newValue = e.target.value;
-        } else if (e?.detail !== undefined) {
-            newValue = e.detail;
-        } else if (e instanceof Uint8Array) {
-            // Native event payload - decode as text
-            newValue = new TextDecoder().decode(e);
-        } else {
-            newValue = String(e ?? "");
+    const handleInput = (event: any) => {
+        if (local.disabled) return;
+        const nextValue = decodeTextPayload(event);
+        if (!isControlled()) {
+            setLocalValue(nextValue);
         }
-
-        setLocalValue(newValue);
-        props.onChange?.(newValue);
+        const valid = local.validate ? local.validate(nextValue) : true;
+        if (!valid) {
+            local.onInvalid?.(nextValue);
+        } else {
+            local.onChange?.(nextValue);
+        }
+        local.onInput?.(event);
     };
 
     const computedClass = () => {
-        const disabled = props.disabled ? "opacity-50" : "";
-        return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
+        const userClass = local.class ?? local.className ?? "";
+        const disabled = local.disabled ? "opacity-50" : "";
+        return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${userClass}`;
     };
 
     return (
         <input
             class={computedClass()}
             value={displayValue()}
-            placeholder={props.placeholder}
+            placeholder={local.placeholder}
             onInput={handleInput}
-            disabled={props.disabled}
+            disabled={local.disabled}
+            {...others}
+        />
+    );
+};
+
+// ============================================================================
+// NumberInput Component
+// ============================================================================
+export type NumberInputProps = {
+    value?: number;
+    defaultValue?: number;
+    min?: number;
+    max?: number;
+    step?: number;
+    placeholder?: string;
+    onChange?: (value: number) => void;
+    validate?: (value: number) => boolean;
+    onInvalid?: (raw: string) => void;
+    disabled?: boolean;
+    class?: string;
+    className?: string;
+};
+
+export const NumberInput = (props: NumberInputProps) => {
+    const [local, others] = splitProps(props, [
+        "value",
+        "defaultValue",
+        "min",
+        "max",
+        "step",
+        "placeholder",
+        "onChange",
+        "validate",
+        "onInvalid",
+        "disabled",
+        "class",
+        "className",
+        "onInput",
+        "onKeyDown",
+    ]);
+
+    const initialValue = () => {
+        const seed = local.defaultValue;
+        return typeof seed === "number" && Number.isFinite(seed) ? String(seed) : "";
+    };
+
+    const [rawValue, setRawValue] = createSignal(initialValue());
+    const isControlled = () => local.value !== undefined;
+
+    const displayValue = () => {
+        if (isControlled()) {
+            const value = Number(local.value);
+            return Number.isFinite(value) ? String(value) : "";
+        }
+        return rawValue();
+    };
+
+    const parseNumber = (raw: string) => {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) return null;
+        const value = Number(trimmed);
+        if (!Number.isFinite(value)) return null;
+        return value;
+    };
+
+    const clampNumber = (value: number) => {
+        let next = value;
+        const min = Number(local.min);
+        const max = Number(local.max);
+        if (Number.isFinite(min)) {
+            next = Math.max(min, next);
+        }
+        if (Number.isFinite(max)) {
+            next = Math.min(max, next);
+        }
+        return next;
+    };
+
+    const stepSize = (scale = 1) => {
+        const step = Number(local.step ?? 1);
+        const base = Number.isFinite(step) && step !== 0 ? step : 1;
+        return base * scale;
+    };
+
+    const emitValue = (value: number, raw?: string) => {
+        const clamped = clampNumber(value);
+        const valid = local.validate ? local.validate(clamped) : true;
+        if (!valid) {
+            local.onInvalid?.(raw ?? String(clamped));
+            return;
+        }
+        if (!isControlled()) {
+            setRawValue(raw ?? String(clamped));
+        }
+        local.onChange?.(clamped);
+    };
+
+    const handleInput = (event: any) => {
+        if (local.disabled) return;
+        const nextRaw = decodeTextPayload(event);
+        if (!isControlled()) {
+            setRawValue(nextRaw);
+        }
+        const parsed = parseNumber(nextRaw);
+        if (parsed == null) {
+            local.onInvalid?.(nextRaw);
+            local.onInput?.(event);
+            return;
+        }
+        emitValue(parsed, nextRaw);
+        local.onInput?.(event);
+    };
+
+    const handleKeyDown = (event: any) => {
+        if (local.disabled) {
+            local.onKeyDown?.(event);
+            return;
+        }
+        const key = normalizeKeyPayload(event);
+        const current = parseNumber(displayValue());
+        const base = current ?? (Number.isFinite(Number(local.min)) ? Number(local.min) : 0);
+        let handled = false;
+
+        switch (key) {
+            case "up":
+            case "page_up": {
+                const scale = key === "page_up" ? 10 : 1;
+                emitValue(base + stepSize(scale));
+                handled = true;
+                break;
+            }
+            case "down":
+            case "page_down": {
+                const scale = key === "page_down" ? 10 : 1;
+                emitValue(base - stepSize(scale));
+                handled = true;
+                break;
+            }
+            case "home": {
+                const min = Number(local.min);
+                if (Number.isFinite(min)) {
+                    emitValue(min);
+                    handled = true;
+                }
+                break;
+            }
+            case "end": {
+                const max = Number(local.max);
+                if (Number.isFinite(max)) {
+                    emitValue(max);
+                    handled = true;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+
+        if (handled && typeof event?.preventDefault === "function") {
+            event.preventDefault();
+        }
+        local.onKeyDown?.(event);
+    };
+
+    const computedClass = () => {
+        const userClass = local.class ?? local.className ?? "";
+        const disabled = local.disabled ? "opacity-50" : "";
+        return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${userClass}`;
+    };
+
+    return (
+        <input
+            class={computedClass()}
+            value={displayValue()}
+            placeholder={local.placeholder}
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+            disabled={local.disabled}
+            {...others}
         />
     );
 };
