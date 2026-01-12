@@ -887,6 +887,21 @@ fn renderChildrenOrdered(
 ) void {
     if (node.children.items.len == 0) return;
 
+    var prev_clip: ?dvui.Rect.Physical = null;
+    if (node.visual.clip_children or node.scroll.enabled) {
+        if (node.layout.rect) |rect| {
+            const bounds = transformedRect(node, rect) orelse rect;
+            const clip_rect = dvui.Rect.Physical{
+                .x = bounds.x,
+                .y = bounds.y,
+                .w = bounds.w,
+                .h = bounds.h,
+            };
+            prev_clip = dvui.clip(clip_rect);
+        }
+    }
+    defer if (prev_clip) |prev| dvui.clipSet(prev);
+
     var any_z = false;
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;

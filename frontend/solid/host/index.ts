@@ -21,6 +21,7 @@ import {
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
 import {
+  clipChildrenFromClass,
   extractAccessibility,
   extractAnchor,
   extractFocus,
@@ -168,9 +169,18 @@ export const createSolidHost = (native: RendererAdapter) => {
       const propName = normalizeAriaName(name);
       node.props[propName] = value;
       if (propName === "class" || propName === "className") {
+        const cls = value == null ? "" : String(value);
         if (node.created) {
-          const cls = value == null ? "" : String(value);
           push({ op: "set_class", id: node.id, className: cls });
+        }
+        const nextClip = clipChildrenFromClass(node.props);
+        if (nextClip || node.props.clipChildren != null) {
+          if (node.props.clipChildren !== nextClip) {
+            node.props.clipChildren = nextClip;
+            if (node.created) {
+              applyVisualMutation(node, "clipChildren", nextClip, ops);
+            }
+          }
         }
       } else if (propName === "src") {
         if (node.created) {

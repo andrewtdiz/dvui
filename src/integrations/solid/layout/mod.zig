@@ -5,8 +5,11 @@ const types = @import("../core/types.zig");
 const flex = @import("flex.zig");
 const measure = @import("measure.zig");
 
+const log = std.log.scoped(.solid_layout);
+
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
+var layout_sanity_checked: bool = false;
 
 pub fn updateLayouts(store: *types.NodeStore) void {
     const win = dvui.currentWindow();
@@ -42,6 +45,45 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     updateLayoutIfDirty(store, root, root_rect);
     applyAnchoredPlacement(store, root, root_rect);
+    checkHarnessCardLayout(store, root_rect);
+}
+
+fn checkHarnessCardLayout(store: *types.NodeStore, root_rect: types.Rect) void {
+    if (layout_sanity_checked) return;
+
+    var total: usize = 0;
+    var out_of_bounds: usize = 0;
+    var needs_retry = false;
+
+    var iter = store.nodes.iterator();
+    while (iter.next()) |entry| {
+        const node = entry.value_ptr;
+        if (node.kind != .element) continue;
+        if (node.class_name.len == 0) continue;
+        if (std.mem.indexOf(u8, node.class_name, "w-96") == null) continue;
+
+        total += 1;
+
+        if (node.layout.rect) |rect| {
+            const max_x = rect.x + rect.w;
+            const max_y = rect.y + rect.h;
+            const root_max_x = root_rect.x + root_rect.w;
+            const root_max_y = root_rect.y + root_rect.h;
+            if (rect.x < root_rect.x or rect.y < root_rect.y or max_x > root_max_x or max_y > root_max_y) {
+                out_of_bounds += 1;
+            }
+        } else {
+            needs_retry = true;
+        }
+    }
+
+    if (total == 0 or needs_retry) return;
+
+    if (out_of_bounds > 0) {
+        log.warn("solid layout sanity check: {d}/{d} harness cards out of bounds", .{ out_of_bounds, total });
+    }
+
+    layout_sanity_checked = true;
 }
 
 fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void {

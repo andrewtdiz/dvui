@@ -82,6 +82,16 @@ export const hasAbsoluteClass = (props: NodeProps) => {
     .includes("absolute");
 };
 
+export const clipChildrenFromClass = (props: NodeProps) => {
+  const raw = props.className ?? props.class;
+  if (!raw) return false;
+  return raw
+    .split(/\s+/)
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .includes("overflow-hidden");
+};
+
 export const bgColorFromClass = (props: NodeProps): ColorInput | undefined => {
   const raw = props.className ?? props.class;
   if (!raw) return undefined;

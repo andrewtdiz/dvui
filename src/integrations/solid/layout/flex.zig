@@ -49,7 +49,13 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
                 continue;
             }
 
-            const child_size = measure.measureNodeSize(store, child, available_size);
+            var child_size = measure.measureNodeSize(store, child, available_size);
+            if (child_spec.width) |width_spec| {
+                switch (width_spec) {
+                    .full => child_size.w = area.w,
+                    else => {},
+                }
+            }
             child_sizes.append(std.heap.page_allocator, child_size) catch {};
 
             const is_empty_text = child.kind == .text and child_size.w == 0 and child_size.h == 0;
