@@ -88,6 +88,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
   let seq = 0;
   let syncedOnce = false;
   let needFullSync = false;
+  let mutationsOnlySynced = false;
 
   const snapshotEveryFlush = mutationMode === "snapshot_every_flush";
   const snapshotOnceThenMutations = mutationMode === "snapshot_once";
@@ -109,7 +110,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       }
     }
 
-    if (mutationsOnlyAfterSnapshot && ops.length === 0) {
+    if (mutationsOnlyAfterSnapshot && !mutationsOnlySynced && ops.length === 0) {
       for (const n of nodes) {
         if (n.id === 0) continue;
         const createOp: MutationOp = {
@@ -173,6 +174,8 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       ops.length = 0;
       if (!ok) {
         needFullSync = true;
+      } else if (mutationsOnlyAfterSnapshot) {
+        mutationsOnlySynced = true;
       }
     }
 
@@ -186,6 +189,9 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       native.setSolidTree(payload);
       markCreated(root);
       syncedOnce = true;
+      if (mutationsOnlyAfterSnapshot) {
+        mutationsOnlySynced = true;
+      }
       needFullSync = false;
       ops.length = 0;
       sentSnapshot = true;
