@@ -8,6 +8,22 @@ import {
   type NativeLibrary,
 } from "./ffi";
 
+const EVENT_KIND_TO_NAME: Record<number, string> = {
+  0: "click",
+  1: "input",
+  2: "focus",
+  3: "blur",
+  4: "mouseenter",
+  5: "mouseleave",
+  6: "keydown",
+  7: "keyup",
+  8: "change",
+  9: "submit",
+  20: "scroll",
+};
+
+const EVENT_DECODER = new TextDecoder();
+
 export type RendererCapabilities = {
   window: boolean;
 };
@@ -187,21 +203,6 @@ export class NativeRenderer implements RendererAdapter {
     const bufferView = new DataView(toArrayBuffer(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
     const detailBuffer = detailPtr ? new Uint8Array(toArrayBuffer(detailPtr, 0, detailCapacity)) : new Uint8Array(0);
 
-    const decoder = new TextDecoder();
-    const eventKindToName: Record<number, string> = {
-      0: "click",
-      1: "input",
-      2: "focus",
-      3: "blur",
-      4: "mouseenter",
-      5: "mouseleave",
-      6: "keydown",
-      7: "keyup",
-      8: "change",
-      9: "submit",
-      20: "scroll",
-    };
-
     let current = readHead;
     let dispatched = 0;
 
@@ -214,7 +215,7 @@ export class NativeRenderer implements RendererAdapter {
       const detailOffset = bufferView.getUint32(offset + 8, true);
       const detailLen = bufferView.getUint16(offset + 12, true);
 
-      const eventName = eventKindToName[kind] ?? "unknown";
+      const eventName = EVENT_KIND_TO_NAME[kind] ?? "unknown";
       const node = nodeIndex.get(nodeId);
 
       if (node) {
@@ -222,7 +223,7 @@ export class NativeRenderer implements RendererAdapter {
         if (handlers && handlers.size > 0) {
           let detail: string | undefined;
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
-            detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+            detail = EVENT_DECODER.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
 
           const isKeyEvent = eventName === "keydown" || eventName === "keyup";
