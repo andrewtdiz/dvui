@@ -99,7 +99,8 @@ fn shouldMeasureCombinedText(node: *const types.SolidNode) bool {
     return std.mem.eql(u8, node.tag, "p") or
         std.mem.eql(u8, node.tag, "h1") or
         std.mem.eql(u8, node.tag, "h2") or
-        std.mem.eql(u8, node.tag, "h3");
+        std.mem.eql(u8, node.tag, "h3") or
+        std.mem.eql(u8, node.tag, "button");
 }
 
 fn measureCombinedElementText(

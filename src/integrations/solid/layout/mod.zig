@@ -1,3 +1,4 @@
+const std = @import("std");
 const dvui = @import("dvui");
 
 const types = @import("../core/types.zig");
@@ -144,7 +145,18 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
             rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
         }
     } else {
-        rect = parent_rect;
+        const is_inline = spec.is_inline or (node.kind == .element and (std.mem.eql(u8, node.tag, "button") or std.mem.eql(u8, node.tag, "span") or std.mem.eql(u8, node.tag, "a")));
+
+        if (is_inline) {
+            rect = types.Rect{
+                .x = parent_rect.x,
+                .y = parent_rect.y,
+                .w = 0,
+                .h = 0,
+            };
+        } else {
+            rect = parent_rect;
+        }
 
         const margin_left = sideValue(spec.margin.left) * scale;
         const margin_right = sideValue(spec.margin.right) * scale;

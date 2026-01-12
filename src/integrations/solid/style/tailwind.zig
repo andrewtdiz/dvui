@@ -17,6 +17,7 @@ pub const Spec = struct {
     width: ?Width = null,
     height: ?Height = null,
     is_flex: bool = false,
+    is_inline: bool = false,
     position: ?Position = null,
     top: ?f32 = null,
     right: ?f32 = null,
@@ -107,6 +108,7 @@ const SideValues = struct {
 
 const LiteralKind = enum {
     flex_display,
+    flex_inline,
     flex_row,
     flex_col,
     absolute,
@@ -137,6 +139,7 @@ const LiteralRule = struct {
 
 const literal_rules = [_]LiteralRule{
     .{ .token = "flex", .kind = .flex_display },
+    .{ .token = "inline-flex", .kind = .flex_inline },
     .{ .token = "flex-row", .kind = .flex_row },
     .{ .token = "flex-col", .kind = .flex_col },
     .{ .token = "absolute", .kind = .absolute },
@@ -321,6 +324,10 @@ fn handleTypography(spec: *Spec, token: []const u8) bool {
 fn applyLiteral(spec: *Spec, kind: LiteralKind) void {
     switch (kind) {
         .flex_display => spec.is_flex = true,
+        .flex_inline => {
+            spec.is_flex = true;
+            spec.is_inline = true;
+        },
         .flex_row => spec.direction = .horizontal,
         .flex_col => spec.direction = .vertical,
         .absolute => spec.position = .absolute,

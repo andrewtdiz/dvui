@@ -626,7 +626,7 @@ fn renderButton(
 
     var options = dvui.Options{
         .id_extra = nodeIdExtra(node_id),
-        .padding = dvui.Rect.all(6),
+        .padding = dvui.Rect{},
         // Respect layout positions exactly; DVUI's default button margin would offset the rect.
         .margin = dvui.Rect{},
     };

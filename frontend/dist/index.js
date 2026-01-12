@@ -801,6 +801,54 @@ function mergeProps(...sources) {
   }
   return target;
 }
+function splitProps(props, ...keys) {
+  const len = keys.length;
+  if (SUPPORTS_PROXY && $PROXY in props) {
+    const blocked = len > 1 ? keys.flat() : keys[0];
+    const res = keys.map((k) => {
+      return new Proxy({
+        get(property) {
+          return k.includes(property) ? props[property] : undefined;
+        },
+        has(property) {
+          return k.includes(property) && property in props;
+        },
+        keys() {
+          return k.filter((property) => (property in props));
+        }
+      }, propTraps);
+    });
+    res.push(new Proxy({
+      get(property) {
+        return blocked.includes(property) ? undefined : props[property];
+      },
+      has(property) {
+        return blocked.includes(property) ? false : (property in props);
+      },
+      keys() {
+        return Object.keys(props).filter((k) => !blocked.includes(k));
+      }
+    }, propTraps));
+    return res;
+  }
+  const objects = [];
+  for (let i = 0;i <= len; i++) {
+    objects[i] = {};
+  }
+  for (const propName of Object.getOwnPropertyNames(props)) {
+    let keyIndex = len;
+    for (let i = 0;i < keys.length; i++) {
+      if (keys[i].includes(propName)) {
+        keyIndex = i;
+        break;
+      }
+    }
+    const desc = Object.getOwnPropertyDescriptor(props, propName);
+    const isDefaultDesc = !desc.get && !desc.set && desc.enumerable && desc.writable && desc.configurable;
+    isDefaultDesc ? objects[keyIndex][propName] = desc.value : Object.defineProperty(objects[keyIndex], propName, desc);
+  }
+  return objects;
+}
 var narrowedError = (name) => `Attempting to access a stale value from <${name}> that could possibly be undefined. This may occur because you are reading the accessor returned from the component at a time where it has already been unmounted. We recommend cleaning up any stale timers or async, or reading from the initial condition.`;
 function Show(props) {
   const keyed = props.keyed;
@@ -2361,6 +2409,30 @@ var effect = (fn, initial) => {
   fn(initial);
   return createEffect(() => fn(initial));
 };
+var spread = (node, props) => {
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.spread) {
+    hostOps.spread(node, props);
+    return node;
+  }
+  if (!props)
+    return node;
+  for (const [k, v] of Object.entries(props)) {
+    setProperty(node, k, v);
+  }
+  return node;
+};
+var mergeProps2 = (...sources) => {
+  const out = {};
+  for (const src of sources) {
+    if (!src)
+      continue;
+    for (const [k, v] of Object.entries(src)) {
+      out[k] = v;
+    }
+  }
+  return out;
+};
 // solid/native/dvui-core.ts
 import { dlopen as dlopen2, ptr as ptr2, suffix as suffix2, CString } from "bun:ffi";
 import { existsSync as existsSync2 } from "fs";
@@ -2579,93 +2651,116 @@ var createFrameScheduler = (options = {}) => {
     }
   };
 };
-// solid/state/time.ts
-var [elapsedSeconds, setElapsedSeconds] = createSignal(0);
-var [deltaSeconds, setDeltaSeconds] = createSignal(0);
-var getElapsedSeconds = elapsedSeconds;
-var getDeltaSeconds = deltaSeconds;
-var setTime = (elapsed, dt) => {
-  setElapsedSeconds(elapsed);
-  setDeltaSeconds(dt);
+// solid/components/index.tsx
+var buttonVariantClasses = {
+  default: "bg-primary text-primary-foreground hover:bg-primary/90",
+  destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+  ghost: "hover:bg-accent hover:text-accent-foreground",
+  link: "text-primary underline-offset-4 hover:underline"
+};
+var buttonSizeClasses = {
+  default: "h-10 px-4 py-2",
+  sm: "h-9 rounded-md px-3",
+  lg: "h-11 rounded-md px-8",
+  icon: "h-10 w-10"
+};
+var Button = (props) => {
+  const [local, others] = splitProps(props, ["variant", "size", "class", "children"]);
+  const merged = mergeProps({
+    variant: "default",
+    size: "default"
+  }, local);
+  const computedClass = () => {
+    return [
+      "inline-flex items-center justify-center rounded-md text-sm font-medium disabled:opacity-50",
+      buttonVariantClasses[merged.variant],
+      buttonSizeClasses[merged.size],
+      local.class
+    ].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$ = createElement("button");
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      }
+    }, others), true);
+    insert(_el$, () => local.children);
+    return _el$;
+  })();
+};
+var Checkbox = (props) => {
+  const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false);
+  const isChecked = () => props.checked !== undefined ? props.checked : internalChecked();
+  const handleClick = () => {
+    if (props.disabled)
+      return;
+    const newValue = !isChecked();
+    if (props.checked === undefined) {
+      setInternalChecked(newValue);
+    }
+    props.onChange?.(newValue);
+  };
+  const boxClasses = () => {
+    const base = "flex items-center justify-center w-5 h-5 rounded";
+    const checked = isChecked() ? "bg-blue-600" : "bg-gray-700";
+    const disabled = props.disabled ? "opacity-50" : "";
+    return `${base} ${checked} ${disabled}`;
+  };
+  return (() => {
+    var _el$2 = createElement("div"), _el$3 = createElement("div");
+    insertNode(_el$2, _el$3);
+    setProp(_el$2, "onClick", handleClick);
+    insert(_el$3, createComponent2(Show, {
+      get when() {
+        return isChecked();
+      },
+      get children() {
+        var _el$4 = createElement("p");
+        insertNode(_el$4, createTextNode(`\u2713`));
+        setProp(_el$4, "class", "text-white text-xs");
+        return _el$4;
+      }
+    }));
+    insert(_el$2, createComponent2(Show, {
+      get when() {
+        return props.label;
+      },
+      get children() {
+        var _el$6 = createElement("p");
+        setProp(_el$6, "class", "text-sm text-gray-300");
+        insert(_el$6, () => props.label);
+        return _el$6;
+      }
+    }), null);
+    effect((_p$) => {
+      var _v$ = `flex items-center gap-2 ${props.class ?? ""}`, _v$2 = boxClasses();
+      _v$ !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$3, "class", _v$2, _p$.t));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined
+    });
+    return _el$2;
+  })();
 };
 
 // solid/App.tsx
 var App = () => {
   const [count, setCount] = createSignal(0);
-  const [x, setX] = createSignal(0);
-  const [y, setY] = createSignal(0);
-  const elapsed = getElapsedSeconds;
-  const delta = getDeltaSeconds;
-  const radius = 50;
-  const center_x = 200;
-  const center_y = 150;
-  const speed = 3;
-  createEffect(() => {
-    const t = elapsed();
-    const angle = t * speed;
-    setX(center_x + Math.cos(angle) * radius);
-    setY(center_y + Math.sin(angle) * radius);
-  });
   return (() => {
-    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("p"), _el$5 = createElement("button"), _el$6 = createElement("div"), _el$7 = createElement("div"), _el$8 = createElement("p"), _el$0 = createElement("div"), _el$1 = createElement("p"), _el$11 = createElement("div"), _el$12 = createElement("div"), _el$13 = createElement("p"), _el$17 = createElement("p"), _el$18 = createTextNode(`Right `);
-    insertNode(_el$, _el$2);
-    setProp(_el$, "class", "w-full h-full bg-neutral-900");
-    insertNode(_el$2, _el$3);
-    insertNode(_el$2, _el$5);
-    insertNode(_el$2, _el$6);
-    insertNode(_el$2, _el$11);
-    insertNode(_el$2, _el$17);
-    setProp(_el$2, "class", "absolute top-15 left-15 flex flex-col items-start justify-start border-2 border-red-700 gap-3 bg-red-500 w-64 h-64 p-3 rounded-md");
-    insertNode(_el$3, createTextNode(`Centered Text`));
-    setProp(_el$3, "class", "absolute top-0 right-0 bg-blue-400 text-gray-100 px-2 py-1 text-center");
-    setProp(_el$5, "class", "bg-blue-400 text-gray-100 px-4 py-2 rounded");
-    setProp(_el$5, "onClick", (payload) => {
-      const view = new DataView(payload.buffer);
-      const nodeId = view.getUint32(0, true);
-      console.log("[event demo] click payload nodeId=", nodeId);
-      setCount((prev) => prev + 1);
-    });
-    insert(_el$5, count);
-    insertNode(_el$6, _el$7);
-    insertNode(_el$6, _el$0);
-    setProp(_el$6, "class", "w-32 h-32 bg-neutral-800 border border-white rounded-sm");
-    insertNode(_el$7, _el$8);
-    setProp(_el$7, "class", "absolute top-6 left-6 w-20 h-20 bg-blue-500 z-20 flex items-center justify-center text-white text-sm rounded-sm");
-    insertNode(_el$8, createTextNode(`z-20`));
-    insertNode(_el$0, _el$1);
-    insertNode(_el$1, createTextNode(`z-0`));
-    insertNode(_el$11, _el$12);
-    insertNode(_el$11, _el$13);
-    setProp(_el$11, "class", "w-32 h-32 bg-neutral-800 border border-white overflow-hidden rounded-sm relative");
-    setProp(_el$12, "class", "absolute top-0 left-0 w-48 h-48 bg-yellow-400");
-    insertNode(_el$13, createTextNode(`clipped`));
-    setProp(_el$13, "class", "absolute bottom-1 right-1 text-black text-xs bg-white px-1 rounded-sm");
-    insert(_el$2, createComponent2(Show, {
-      get when() {
-        return memo2(() => count() > 0)() && count() < 10;
-      },
+    var _el$ = createElement("div");
+    insert(_el$, createComponent2(Button, {
+      variant: "default",
+      onClick: () => setCount(count() + 1),
       get children() {
-        var _el$15 = createElement("p"), _el$16 = createTextNode(`Right `);
-        insertNode(_el$15, _el$16);
-        setProp(_el$15, "class", "bg-purple-500 text-white rounded-sm");
-        insert(_el$15, count, null);
-        return _el$15;
+        return ["Count: ", memo2(() => count())];
       }
-    }), _el$17);
-    insert(_el$2, (() => {
-      var _c$ = memo2(() => !!(count() > 0 && count() < 10));
-      return () => _c$() && (() => {
-        var _el$19 = createElement("p"), _el$20 = createTextNode(`Right `);
-        insertNode(_el$19, _el$20);
-        setProp(_el$19, "class", "bg-purple-500 text-white rounded-sm");
-        insert(_el$19, count, null);
-        return _el$19;
-      })();
-    })(), _el$17);
-    insertNode(_el$17, _el$18);
-    setProp(_el$17, "class", "bg-purple-500 text-white rounded-sm");
-    insert(_el$17, count, null);
-    effect((_$p) => setProp(_el$0, "class", `absolute top-2 left-2 w-20 h-20 bg-green-400 z-${count()}`, _$p));
+    }), null);
+    insert(_el$, createComponent2(Checkbox, {}), null);
     return _el$;
   })();
 };
@@ -2681,6 +2776,14 @@ var createSolidTextApp = (renderer) => {
     setMessage,
     dispose: dispose ?? (() => {})
   };
+};
+
+// solid/state/time.ts
+var [elapsedSeconds, setElapsedSeconds] = createSignal(0);
+var [deltaSeconds, setDeltaSeconds] = createSignal(0);
+var setTime = (elapsed, dt) => {
+  setElapsedSeconds(elapsed);
+  setDeltaSeconds(dt);
 };
 
 // index.ts
