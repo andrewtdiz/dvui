@@ -1684,9 +1684,25 @@ fn renderIcon(
 ) void {
     const src = node.imageSource();
     const glyph = node.iconGlyph();
+    const icon_kind = node.iconKind();
     switch (node.cached_icon) {
         .none => {
-            const resolved = icon_registry.resolve(node.iconKind(), src, glyph) catch |err| {
+            const resolved_path = if (src.len > 0 and glyph.len == 0 and icon_kind != .glyph and (icon_kind != .auto or !icon_registry.hasEntry(src))) blk: {
+                if (node.resolved_icon_path.len > 0) break :blk node.resolved_icon_path;
+                const resolved = icon_registry.resolveIconPathAlloc(store.allocator, src) catch |err| {
+                    if (src.len > 0) {
+                        log.err("Solid icon resolve failed for {s}: {s}", .{ src, @errorName(err) });
+                    } else {
+                        log.err("Solid icon resolve failed for node {d}: {s}", .{ node_id, @errorName(err) });
+                    }
+                    node.cached_icon = .failed;
+                    return;
+                };
+                node.resolved_icon_path = resolved;
+                break :blk resolved;
+            } else &.{};
+
+            const resolved = icon_registry.resolveWithPath(icon_kind, src, glyph, resolved_path) catch |err| {
                 if (src.len > 0) {
                     log.err("Solid icon load failed for {s}: {s}", .{ src, @errorName(err) });
                 } else {
@@ -1762,7 +1778,17 @@ fn renderImage(
         .resource => |resource| resource,
         .failed => return,
         .none => blk: {
-            const loaded = image_loader.load(src) catch |err| {
+            const resolved_path = if (node.resolved_image_path.len > 0) node.resolved_image_path else blk_path: {
+                const resolved = image_loader.resolveImagePathAlloc(store.allocator, src) catch |err| {
+                    log.err("Solid image resolve failed for {s}: {s}", .{ src, @errorName(err) });
+                    node.cached_image = .failed;
+                    return;
+                };
+                node.resolved_image_path = resolved;
+                break :blk_path resolved;
+            };
+
+            const loaded = image_loader.loadResolved(resolved_path) catch |err| {
                 log.err("Solid image load failed for {s}: {s}", .{ src, @errorName(err) });
                 node.cached_image = .failed;
                 return;

@@ -246,6 +246,8 @@ pub const SolidNode = struct {
     image_src: []u8 = &.{},
     icon_kind: IconKind = .auto,
     icon_glyph: []u8 = &.{},
+    resolved_image_path: []u8 = &.{},
+    resolved_icon_path: []u8 = &.{},
     cached_image: CachedImage = .none,
     cached_icon: CachedIcon = .none,
     parent: ?u32 = null,
@@ -331,6 +333,8 @@ pub const SolidNode = struct {
         if (self.access_description.len > 0) allocator.free(self.access_description);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
+        if (self.resolved_image_path.len > 0) allocator.free(self.resolved_image_path);
+        if (self.resolved_icon_path.len > 0) allocator.free(self.resolved_icon_path);
         if (self.input_state) |*state| {
             state.deinit();
         }
@@ -396,15 +400,19 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, value);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         self.image_src = copy;
-        self.clearImageCache();
-        self.clearIconCache();
+        self.clearImageCache(allocator);
+        self.clearIconCache(allocator);
     }
 
-    fn clearImageCache(self: *SolidNode) void {
+    fn clearImageCache(self: *SolidNode, allocator: std.mem.Allocator) void {
+        if (self.resolved_image_path.len > 0) allocator.free(self.resolved_image_path);
+        self.resolved_image_path = &.{};
         self.cached_image = .none;
     }
 
-    fn clearIconCache(self: *SolidNode) void {
+    fn clearIconCache(self: *SolidNode, allocator: std.mem.Allocator) void {
+        if (self.resolved_icon_path.len > 0) allocator.free(self.resolved_icon_path);
+        self.resolved_icon_path = &.{};
         self.cached_icon = .none;
     }
 
@@ -413,7 +421,7 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, value);
         if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
         self.icon_glyph = copy;
-        self.clearIconCache();
+        self.clearIconCache(allocator);
         self.invalidatePaint();
     }
 
@@ -678,7 +686,7 @@ pub const NodeStore = struct {
         const target = self.nodes.getPtr(id) orelse return;
         if (target.icon_kind == value) return;
         target.icon_kind = value;
-        target.clearIconCache();
+        target.clearIconCache(self.allocator);
         self.markNodeChanged(id);
     }
 

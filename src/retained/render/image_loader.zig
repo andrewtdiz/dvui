@@ -46,27 +46,35 @@ const image_search_roots = [_][]const u8{
 };
 
 pub fn load(src: []const u8) !*const ImageResource {
-    const canonical = try resolveImagePath(src);
-    var keep_path = false;
-    defer if (!keep_path) image_allocator.free(canonical);
+    const canonical = try resolveImagePathAlloc(image_allocator, src);
+    defer image_allocator.free(canonical);
+    return loadResolved(canonical);
+}
 
-    if (image_cache.getPtr(canonical)) |existing| {
+pub fn loadResolved(path: []const u8) !*const ImageResource {
+    if (path.len == 0) {
+        return error.MissingImageSource;
+    }
+    if (image_cache.getPtr(path)) |existing| {
         return existing;
     }
 
-    const bytes = try readImageFile(canonical);
+    const bytes = try readImageFile(path);
     errdefer image_allocator.free(bytes);
 
-    const gop = try image_cache.getOrPut(canonical);
+    const key = try image_allocator.dupe(u8, path);
+    errdefer image_allocator.free(key);
+
+    const gop = try image_cache.getOrPut(key);
     if (gop.found_existing) {
+        image_allocator.free(key);
         image_allocator.free(bytes);
         return gop.value_ptr;
     }
 
-    keep_path = true;
-    gop.key_ptr.* = canonical;
+    gop.key_ptr.* = key;
     gop.value_ptr.* = .{
-        .path = canonical,
+        .path = key,
         .bytes = bytes,
     };
     return gop.value_ptr;
@@ -81,21 +89,21 @@ pub fn imageSource(resource: *const ImageResource) dvui.ImageSource {
     };
 }
 
-fn resolveImagePath(source: []const u8) ![]u8 {
+pub fn resolveImagePathAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     if (source.len == 0) {
         return error.MissingImageSource;
     }
     if (std.fs.path.isAbsolute(source)) {
-        return std.fs.realpathAlloc(image_allocator, source) catch {
+        return std.fs.realpathAlloc(allocator, source) catch {
             return error.ImageNotFound;
         };
     }
 
     for (image_search_roots) |root| {
-        const candidate = try buildCandidatePath(root, source);
-        defer image_allocator.free(candidate);
+        const candidate = try buildCandidatePathAlloc(allocator, root, source);
+        defer allocator.free(candidate);
 
-        const resolved = std.fs.cwd().realpathAlloc(image_allocator, candidate) catch {
+        const resolved = std.fs.cwd().realpathAlloc(allocator, candidate) catch {
             continue;
         };
         return resolved;
@@ -104,11 +112,15 @@ fn resolveImagePath(source: []const u8) ![]u8 {
     return error.ImageNotFound;
 }
 
-fn buildCandidatePath(base: []const u8, rel: []const u8) ![]u8 {
+fn resolveImagePath(source: []const u8) ![]u8 {
+    return resolveImagePathAlloc(image_allocator, source);
+}
+
+fn buildCandidatePathAlloc(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) ![]u8 {
     if (base.len == 0) {
-        return image_allocator.dupe(u8, rel);
+        return allocator.dupe(u8, rel);
     }
-    return std.fs.path.join(image_allocator, &.{ base, rel });
+    return std.fs.path.join(allocator, &.{ base, rel });
 }
 
 fn readImageFile(path: []const u8) ![]u8 {

@@ -90,6 +90,10 @@ pub fn registerGlyph(name: []const u8, glyph: []const u8) !void {
     try upsertEntry(name, .{ .kind = .glyph, .glyph = copy });
 }
 
+pub fn hasEntry(name: []const u8) bool {
+    return icon_cache.getPtr(name) != null;
+}
+
 pub fn resolve(kind: types.IconKind, src: []const u8, glyph: []const u8) !ResolvedIcon {
     if (kind == .glyph or glyph.len > 0) {
         const resolved_glyph = try resolveGlyph(src, glyph);
@@ -110,6 +114,37 @@ pub fn resolve(kind: types.IconKind, src: []const u8, glyph: []const u8) !Resolv
         },
         .image => {
             const resource = try resolveRaster(src);
+            return .{ .raster = resource };
+        },
+        .glyph => {
+            const resolved_glyph = try resolveGlyph(src, glyph);
+            return .{ .glyph = resolved_glyph };
+        },
+        else => return error.InvalidIconSource,
+    }
+}
+
+pub fn resolveWithPath(kind: types.IconKind, src: []const u8, glyph: []const u8, resolved_path: []const u8) !ResolvedIcon {
+    if (kind == .glyph or glyph.len > 0) {
+        const resolved_glyph = try resolveGlyph(src, glyph);
+        return .{ .glyph = resolved_glyph };
+    }
+
+    if (kind == .auto and src.len > 0) {
+        if (icon_cache.getPtr(src)) |entry| {
+            return resolveFromEntry(entry);
+        }
+    }
+
+    const kind_source = if (resolved_path.len > 0) resolved_path else src;
+    const resolved_kind = if (kind == .auto) detectIconKind(kind_source) else kind;
+    switch (resolved_kind) {
+        .svg, .tvg => {
+            const bytes = try resolveVectorWithPath(resolved_kind, src, resolved_path);
+            return .{ .vector = bytes };
+        },
+        .image => {
+            const resource = try resolveRasterWithPath(src, resolved_path);
             return .{ .raster = resource };
         },
         .glyph => {
@@ -180,6 +215,62 @@ fn resolveVector(kind: types.IconKind, src: []const u8) ![]const u8 {
     gop.key_ptr.* = canonical;
     gop.value_ptr.* = .{ .kind = resolved_kind, .vector = vector };
     return ensureVectorBytes(gop.value_ptr);
+}
+
+fn resolveVectorWithPath(kind: types.IconKind, src: []const u8, resolved_path: []const u8) ![]const u8 {
+    if (resolved_path.len > 0) {
+        return resolveVectorFromPath(kind, resolved_path);
+    }
+    return resolveVector(kind, src);
+}
+
+fn resolveVectorFromPath(kind: types.IconKind, path: []const u8) ![]const u8 {
+    if (path.len == 0) return error.MissingIconSource;
+
+    if (icon_cache.getPtr(path)) |entry| {
+        if (entry.kind != .svg and entry.kind != .tvg) return error.InvalidIconSource;
+        return ensureVectorBytes(entry);
+    }
+
+    const bytes = try readIconFile(path);
+    const resolved_kind = if (kind == .auto) detectVectorKind(path) else kind;
+    if (resolved_kind != .svg and resolved_kind != .tvg) {
+        icon_allocator.free(bytes);
+        return error.InvalidIconSource;
+    }
+
+    var vector = VectorEntry{};
+    if (resolved_kind == .svg) {
+        vector.svg_bytes = bytes;
+    } else {
+        vector.tvg_bytes = bytes;
+    }
+
+    const key = try icon_allocator.dupe(u8, path);
+    errdefer icon_allocator.free(key);
+
+    const gop = try icon_cache.getOrPut(key);
+    if (gop.found_existing) {
+        icon_allocator.free(key);
+        icon_allocator.free(bytes);
+        return ensureVectorBytes(gop.value_ptr);
+    }
+
+    gop.key_ptr.* = key;
+    gop.value_ptr.* = .{ .kind = resolved_kind, .vector = vector };
+    return ensureVectorBytes(gop.value_ptr);
+}
+
+fn resolveRasterWithPath(src: []const u8, resolved_path: []const u8) !*const image_loader.ImageResource {
+    if (resolved_path.len > 0) {
+        return resolveRasterFromPath(resolved_path);
+    }
+    return resolveRaster(src);
+}
+
+fn resolveRasterFromPath(path: []const u8) !*const image_loader.ImageResource {
+    if (path.len == 0) return error.MissingIconSource;
+    return image_loader.loadResolved(path);
 }
 
 fn resolveRaster(src: []const u8) !*const image_loader.ImageResource {
@@ -265,19 +356,19 @@ fn freeEntry(entry: IconEntry) void {
     if (entry.glyph.len > 0) icon_allocator.free(entry.glyph);
 }
 
-fn resolveIconPath(source: []const u8) ![]u8 {
+pub fn resolveIconPathAlloc(allocator: std.mem.Allocator, source: []const u8) ![]u8 {
     if (source.len == 0) return error.MissingIconSource;
     if (std.fs.path.isAbsolute(source)) {
-        return std.fs.realpathAlloc(icon_allocator, source) catch {
+        return std.fs.realpathAlloc(allocator, source) catch {
             return error.IconNotFound;
         };
     }
 
     for (icon_search_roots) |root| {
-        const candidate = try buildCandidatePath(root, source);
-        defer icon_allocator.free(candidate);
+        const candidate = try buildCandidatePathAlloc(allocator, root, source);
+        defer allocator.free(candidate);
 
-        const resolved = std.fs.cwd().realpathAlloc(icon_allocator, candidate) catch {
+        const resolved = std.fs.cwd().realpathAlloc(allocator, candidate) catch {
             continue;
         };
         return resolved;
@@ -286,11 +377,15 @@ fn resolveIconPath(source: []const u8) ![]u8 {
     return error.IconNotFound;
 }
 
-fn buildCandidatePath(base: []const u8, rel: []const u8) ![]u8 {
+fn resolveIconPath(source: []const u8) ![]u8 {
+    return resolveIconPathAlloc(icon_allocator, source);
+}
+
+fn buildCandidatePathAlloc(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) ![]u8 {
     if (base.len == 0) {
-        return icon_allocator.dupe(u8, rel);
+        return allocator.dupe(u8, rel);
     }
-    return std.fs.path.join(icon_allocator, &.{ base, rel });
+    return std.fs.path.join(allocator, &.{ base, rel });
 }
 
 fn readIconFile(path: []const u8) ![]u8 {
