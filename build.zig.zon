@@ -30,6 +30,9 @@
         .wgpu_native_zig = .{
             .path = "./deps/wgpu_native_zig",
         },
+        .zig_yoga = .{
+            .path = "./deps/zig-yoga",
+        },
         // for rendering tvg icons
         .svg2tvg = .{
             .url = "git+https://github.com/nat3Github/zig-lib-svg2tvg#78797970be3d676a9087696ec36d6f29a522b580",

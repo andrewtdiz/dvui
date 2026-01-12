@@ -34,6 +34,7 @@ pub fn build(b: *Build) !void {
         .image = false,
         .image_write = false,
     });
+    const retained_mod = addRetainedModule(b, target, optimize, dvui_mod);
     const raylib_mod = addRaylibBackend(b, target, optimize, linux_display_backend);
 
     raylib_mod.addImport("dvui", dvui_mod);
@@ -74,8 +75,10 @@ pub fn build(b: *Build) !void {
     });
     native_module.addImport("dvui", dvui_mod);
     native_module.addImport("raylib-backend", raylib_mod);
+    native_module.addImport("retained", retained_mod);
 
     // Create solid module for native_renderer
+
     const solid_mod = b.createModule(.{
         .root_source_file = b.path("src/integrations/solid/mod.zig"),
         .target = target,
@@ -244,6 +247,26 @@ fn addDvuiModule(
     });
     configureDvuiModule(b, dvui_mod, target, optimize, build_options, stb);
     return dvui_mod;
+}
+
+fn addRetainedModule(
+    b: *Build,
+    target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    dvui_mod: *Build.Module,
+) *Build.Module {
+    const retained_mod = b.addModule("dvui_retained", .{
+        .root_source_file = b.path("src/retained/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    retained_mod.addImport("dvui", dvui_mod);
+    const yoga_dep = b.dependency("zig_yoga", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    retained_mod.addImport("yoga-zig", yoga_dep.module("yoga-zig"));
+    return retained_mod;
 }
 
 fn addDvuiLibrary(
