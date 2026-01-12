@@ -38,6 +38,7 @@ export type NodeProps = {
   tabIndex?: number;
   focusTrap?: boolean;
   roving?: boolean;
+  modal?: boolean;
 };
 
 export type EventHandler = (payload: Uint8Array) => void;

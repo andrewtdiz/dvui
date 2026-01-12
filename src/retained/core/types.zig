@@ -222,6 +222,7 @@ pub const SolidNode = struct {
     tab_index: ?i32 = null,
     focus_trap: bool = false,
     roving: bool = false,
+    modal: bool = false,
     class_spec: tailwind.Spec = .{},
     class_spec_dirty: bool = true,
     input_state: ?InputState = null,

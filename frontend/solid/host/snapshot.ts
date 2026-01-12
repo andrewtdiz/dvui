@@ -30,6 +30,7 @@ export type SerializedNode = {
   tabIndex?: number;
   focusTrap?: boolean;
   roving?: boolean;
+  modal?: boolean;
 };
 
 export const serializeTree = (roots: HostNode[]): SerializedNode[] => {

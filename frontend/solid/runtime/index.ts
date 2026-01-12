@@ -31,8 +31,17 @@ export const use = (fn: (el: any, arg: any) => any, el: any, arg: any) => {
 };
 
 // Web-specific built-ins like Portal/Dynamic don't make sense for the native DVUI renderer.
-// Provide minimal fallbacks so JSX compiles; they render inline.
-export const Portal = (props: any) => props.children;
+// Provide minimal fallbacks so JSX compiles; Portal maps to an overlay node.
+export const Portal = (props: any) => {
+  const node = createElement("portal");
+  const entries = props ? Object.entries(props) : [];
+  for (const [key, value] of entries) {
+    if (key === "children") continue;
+    setProperty(node, key, value);
+  }
+  insert(node, props?.children);
+  return node;
+};
 
 export const Dynamic = (props: any) => {
   return createMemo(() => {

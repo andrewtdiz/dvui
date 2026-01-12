@@ -44,6 +44,7 @@ export type MutationOp = {
   tabIndex?: number;
   focusTrap?: boolean;
   roving?: boolean;
+  modal?: boolean;
 };
 
 export const createMutationQueue = () => {

@@ -43,6 +43,7 @@ const SolidSnapshotNode = struct {
     tabIndex: ?i32 = null,
     focusTrap: ?bool = null,
     roving: ?bool = null,
+    modal: ?bool = null,
 };
 
 const SolidSnapshot = struct {
@@ -82,6 +83,7 @@ const SolidOp = struct {
     tabIndex: ?i32 = null,
     focusTrap: ?bool = null,
     roving: ?bool = null,
+    modal: ?bool = null,
 };
 
 const SolidOpBatch = struct {
@@ -252,6 +254,10 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
                 target.roving = flag;
                 touched = true;
             }
+            if (node.modal) |flag| {
+                target.modal = flag;
+                touched = true;
+            }
             if (touched) {
                 store.markNodeChanged(node.id);
             }
@@ -401,6 +407,10 @@ fn applyFocusFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void 
     }
     if (op.roving) |flag| {
         target.roving = flag;
+        changed = true;
+    }
+    if (op.modal) |flag| {
+        target.modal = flag;
         changed = true;
     }
     if (changed) {

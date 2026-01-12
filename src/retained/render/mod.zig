@@ -38,6 +38,17 @@ var button_text_error_log_count: usize = 0;
 var paragraph_log_count: usize = 0;
 var input_enabled_state: bool = true;
 
+const RenderLayer = enum {
+    base,
+    overlay,
+};
+
+const overlay_subwindow_seed: u32 = 0x4f564c59;
+
+var render_layer: RenderLayer = .base;
+var hover_layer: RenderLayer = .base;
+var modal_overlay_active: bool = false;
+
 pub fn init() void {
     gizmo_override_rect = null;
     gizmo_rect_pending = null;
@@ -48,6 +59,9 @@ pub fn init() void {
     button_text_error_log_count = 0;
     paragraph_log_count = 0;
     input_enabled_state = true;
+    render_layer = .base;
+    hover_layer = .base;
+    modal_overlay_active = false;
     drag_drop.init();
     focus.init();
     paint_cache.init();
@@ -68,6 +82,9 @@ pub fn deinit() void {
     button_text_error_log_count = 0;
     paragraph_log_count = 0;
     input_enabled_state = true;
+    render_layer = .base;
+    hover_layer = .base;
+    modal_overlay_active = false;
 }
 
 fn physicalToDvuiRect(rect: types.Rect) dvui.Rect {
@@ -99,6 +116,7 @@ fn applyLayoutScaleToOptions(node: *const types.SolidNode, options: *dvui.Option
 }
 
 fn applyCursorHint(node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
+    if (!allowPointerInput()) return;
     const cursor = class_spec.cursor orelse return;
     const rect_base = node.layout.rect orelse return;
     const rect = transformedRect(node, rect_base) orelse rect_base;
@@ -146,8 +164,197 @@ fn rectContains(rect: types.Rect, point: dvui.Point.Physical) bool {
     return true;
 }
 
+fn isPortalNode(node: *const types.SolidNode) bool {
+    return node.kind == .element and std.mem.eql(u8, node.tag, "portal");
+}
+
+fn allowPointerInput() bool {
+    return input_enabled_state and render_layer == hover_layer;
+}
+
+fn allowFocusRegistration() bool {
+    if (!input_enabled_state) return false;
+    if (!modal_overlay_active) return true;
+    return render_layer == .overlay;
+}
+
+fn overlaySubwindowId() dvui.Id {
+    return dvui.Id.extendId(null, @src(), nodeIdExtra(overlay_subwindow_seed));
+}
+
 fn scrollContentId(node_id: u32) dvui.Id {
     return dvui.Id.extendId(null, @src(), nodeIdExtra(node_id));
+}
+
+const OverlayState = struct {
+    modal: bool = false,
+    hit_rect: ?types.Rect = null,
+};
+
+fn collectPortalNodes(
+    allocator: std.mem.Allocator,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    list: *std.ArrayList(u32),
+) void {
+    if (isPortalNode(node)) {
+        list.append(allocator, node.id) catch {};
+        return;
+    }
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        collectPortalNodes(allocator, store, child, list);
+    }
+}
+
+fn overlaySubtreeHasModal(store: *types.NodeStore, node: *types.SolidNode) bool {
+    const spec = node.prepareClassSpec();
+    if (spec.hidden) return false;
+    if (node.modal) return true;
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        if (overlaySubtreeHasModal(store, child)) return true;
+    }
+    return false;
+}
+
+fn shouldIncludeOverlayRect(node: *types.SolidNode, spec: tailwind.Spec) bool {
+    if (node.modal) return true;
+    if (node.isInteractive()) return true;
+    if (node.total_interactive > 0) return true;
+    if (node.visual_props.background != null) return true;
+    if (spec.background != null) return true;
+    return false;
+}
+
+fn unionRect(a: types.Rect, b: types.Rect) types.Rect {
+    const x0 = @min(a.x, b.x);
+    const y0 = @min(a.y, b.y);
+    const x1 = @max(a.x + a.w, b.x + b.w);
+    const y1 = @max(a.y + a.h, b.y + b.h);
+    return types.Rect{
+        .x = x0,
+        .y = y0,
+        .w = @max(0.0, x1 - x0),
+        .h = @max(0.0, y1 - y0),
+    };
+}
+
+fn appendRect(target: *?types.Rect, rect: types.Rect) void {
+    if (rect.w <= 0 or rect.h <= 0) return;
+    if (target.*) |existing| {
+        target.* = unionRect(existing, rect);
+    } else {
+        target.* = rect;
+    }
+}
+
+fn accumulateOverlayHitRect(store: *types.NodeStore, node: *types.SolidNode, rect_opt: *?types.Rect) void {
+    const spec = node.prepareClassSpec();
+    if (spec.hidden) return;
+    if (node.layout.rect) |rect_base| {
+        if (shouldIncludeOverlayRect(node, spec)) {
+            const rect = transformedRect(node, rect_base) orelse rect_base;
+            appendRect(rect_opt, rect);
+        }
+    }
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        accumulateOverlayHitRect(store, child, rect_opt);
+    }
+}
+
+fn computeOverlayState(store: *types.NodeStore, portal_ids: []const u32) OverlayState {
+    var state = OverlayState{};
+    if (portal_ids.len == 0) return state;
+    for (portal_ids) |portal_id| {
+        const portal = store.node(portal_id) orelse continue;
+        const spec = portal.prepareClassSpec();
+        if (spec.hidden) continue;
+        if (overlaySubtreeHasModal(store, portal)) {
+            state.modal = true;
+        }
+        for (portal.children.items) |child_id| {
+            const child = store.node(child_id) orelse continue;
+            accumulateOverlayHitRect(store, child, &state.hit_rect);
+        }
+    }
+    return state;
+}
+
+fn syncVisualLayer(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    root: *types.SolidNode,
+    portal_ids: []const u32,
+    layer: RenderLayer,
+) void {
+    render_layer = layer;
+    switch (layer) {
+        .overlay => {
+            for (portal_ids) |portal_id| {
+                const portal = store.node(portal_id) orelse continue;
+                syncVisualsFromClasses(event_ring, store, portal, .{});
+            }
+        },
+        .base => {
+            for (root.children.items) |child_id| {
+                const child = store.node(child_id) orelse continue;
+                if (isPortalNode(child)) continue;
+                syncVisualsFromClasses(event_ring, store, child, .{});
+            }
+        },
+    }
+}
+
+fn renderPortalNodesOrdered(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    portal_ids: []const u32,
+    allocator: std.mem.Allocator,
+    tracker: *DirtyRegionTracker,
+) void {
+    if (portal_ids.len == 0) return;
+    var ordered: std.ArrayList(u32) = .empty;
+    defer ordered.deinit(allocator);
+    for (portal_ids) |portal_id| {
+        if (store.node(portal_id) == null) continue;
+        ordered.append(allocator, portal_id) catch {};
+    }
+    if (ordered.items.len == 0) return;
+
+    var any_z = false;
+    for (ordered.items) |portal_id| {
+        const portal = store.node(portal_id) orelse continue;
+        if (portal.visual.z_index != 0) {
+            any_z = true;
+            break;
+        }
+    }
+
+    if (any_z) {
+        var i: usize = 1;
+        while (i < ordered.items.len) : (i += 1) {
+            const key_id = ordered.items[i];
+            const key_node = store.node(key_id);
+            const key_z: i16 = if (key_node) |kn| kn.visual.z_index else 0;
+
+            var j: usize = i;
+            while (j > 0) {
+                const prev_id = ordered.items[j - 1];
+                const prev_node = store.node(prev_id);
+                const prev_z: i16 = if (prev_node) |pn| pn.visual.z_index else 0;
+                if (prev_z <= key_z) break;
+                ordered.items[j] = prev_id;
+                j -= 1;
+            }
+            ordered.items[j] = key_id;
+        }
+    }
+
+    for (ordered.items) |portal_id| {
+        renderNode(event_ring, store, portal_id, allocator, tracker);
+    }
 }
 
 fn handleScrollInput(
@@ -339,8 +546,9 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
         rect_opt = transformedRect(node, rect_base) orelse rect_base;
     }
 
+    const pointer_allowed = allowPointerInput();
     var hovered = false;
-    if (input_enabled_state and !class_spec_base.hidden and node.kind == .element) {
+    if (pointer_allowed and !class_spec_base.hidden and node.kind == .element) {
         if (rect_opt) |rect| {
             const mouse = dvui.currentWindow().mouse_pt;
             if (rectContains(rect, mouse)) {
@@ -416,6 +624,7 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
 
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
+            if (render_layer == .base and isPortalNode(child)) continue;
             syncVisualsFromClasses(event_ring, store, child, next_clip);
         }
     }
@@ -451,12 +660,37 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         drag_drop.cancelIfMissing(event_ring, store);
     }
 
-    // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
-    syncVisualsFromClasses(event_ring, store, root, .{});
-
     var arena = std.heap.ArenaAllocator.init(store.allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
+
+    var portal_ids: std.ArrayList(u32) = .empty;
+    defer portal_ids.deinit(scratch);
+    collectPortalNodes(scratch, store, root, &portal_ids);
+
+    const overlay_state = computeOverlayState(store, portal_ids.items);
+    modal_overlay_active = overlay_state.modal;
+
+    hover_layer = .base;
+    if (portal_ids.items.len > 0) {
+        if (overlay_state.modal) {
+            hover_layer = .overlay;
+        } else if (overlay_state.hit_rect) |hit_rect| {
+            const mouse = dvui.currentWindow().mouse_pt;
+            if (rectContains(hit_rect, mouse)) {
+                hover_layer = .overlay;
+            }
+        }
+    }
+
+    // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
+    syncVisualLayer(event_ring, store, root, portal_ids.items, .base);
+    if (portal_ids.items.len > 0) {
+        syncVisualLayer(event_ring, store, root, portal_ids.items, .overlay);
+    } else {
+        render_layer = .base;
+    }
+
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
@@ -471,19 +705,38 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         return false;
     }
 
+    const win = dvui.currentWindow();
+    const screen_rect = types.Rect{
+        .x = 0,
+        .y = 0,
+        .w = win.rect_pixels.w,
+        .h = win.rect_pixels.h,
+    };
+
     if (dirty_tracker.regions.items.len == 0) {
-        const win = dvui.currentWindow();
-        const screen_rect = types.Rect{
-            .x = 0,
-            .y = 0,
-            .w = win.rect_pixels.w,
-            .h = win.rect_pixels.h,
-        };
         dirty_tracker.add(screen_rect);
     }
 
+    render_layer = .base;
     renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, false);
+
+    if (portal_ids.items.len > 0) {
+        const overlay_id = overlaySubwindowId();
+        const overlay_rect = if (overlay_state.modal) screen_rect else overlay_state.hit_rect orelse types.Rect{};
+        const overlay_rect_phys = direct.rectToPhysical(overlay_rect);
+        const overlay_rect_nat = physicalToDvuiRect(overlay_rect);
+        const overlay_mouse_events = overlay_state.modal or overlay_state.hit_rect != null;
+
+        dvui.subwindowAdd(overlay_id, overlay_rect_nat, overlay_rect_phys, overlay_state.modal, null, overlay_mouse_events);
+        const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_nat);
+        defer dvui.subwindowCurrentSet(prev.id, prev.rect);
+
+        render_layer = .overlay;
+        renderPortalNodesOrdered(event_ring, store, portal_ids.items, scratch, &dirty_tracker);
+    }
+
     focus.endFrame(event_ring, store, input_enabled_state);
+    render_layer = .base;
     return true;
 }
 
@@ -495,6 +748,9 @@ fn renderNode(
     tracker: *DirtyRegionTracker,
 ) void {
     const node = store.node(node_id) orelse return;
+    if (render_layer == .base and isPortalNode(node)) {
+        return;
+    }
     switch (node.kind) {
         .root => {
             renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
@@ -842,10 +1098,8 @@ fn renderContainer(
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
 
-    if (tab_info.focusable and input_enabled_state) {
+    if (tab_info.focusable and allowFocusRegistration()) {
         dvui.tabIndexSet(box.data().id, tab_info.tab_index);
-    }
-    if (tab_info.focusable) {
         focus.registerFocusable(store, node, box.data());
     }
 
@@ -1136,7 +1390,8 @@ fn renderButton(
         .margin = dvui.Rect{},
     };
     const tab_info = focus.tabIndexForNode(store, node);
-    if (tab_info.focusable) {
+    const focus_allowed = allowFocusRegistration();
+    if (tab_info.focusable and focus_allowed) {
         options.tab_index = tab_info.tab_index;
     }
     style_apply.applyToOptions(&class_spec, &options);
@@ -1160,7 +1415,7 @@ fn renderButton(
     // gets a unique ID even though they all originate from the same source location.
     var bw = dvui.ButtonWidget.init(@src(), .{ .draw_focus = false }, options);
     bw.install();
-    if (tab_info.focusable) {
+    if (tab_info.focusable and focus_allowed) {
         focus.registerFocusable(store, node, bw.data());
     }
     if (input_enabled_state) {
@@ -1270,6 +1525,7 @@ fn renderInput(
     applyTransformToOptions(node, &options);
 
     const tab_info = focus.tabIndexForNode(store, node);
+    const focus_allowed = allowFocusRegistration();
 
     var state = node.ensureInputState(store.allocator) catch |err| {
         log.err("Solid input state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
@@ -1293,7 +1549,7 @@ fn renderInput(
     defer box.deinit();
 
     const wd = box.data();
-    if (tab_info.focusable) {
+    if (tab_info.focusable and focus_allowed) {
         focus.registerFocusable(store, node, wd);
     }
     var prev_focused = state.focused;
@@ -1301,7 +1557,7 @@ fn renderInput(
     var text_changed = false;
 
     if (input_enabled_state) {
-        if (tab_info.focusable) {
+        if (tab_info.focusable and focus_allowed) {
             dvui.tabIndexSet(wd.id, tab_info.tab_index);
         }
 

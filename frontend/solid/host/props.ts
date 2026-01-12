@@ -52,7 +52,7 @@ export const visualFields = ["opacity", "cornerRadius", "background", "textColor
 
 export const scrollFields = ["scroll", "scrollX", "scrollY", "canvasWidth", "canvasHeight", "autoCanvas"] as const;
 
-export const focusFields = ["tabIndex", "focusTrap", "roving"] as const;
+export const focusFields = ["tabIndex", "focusTrap", "roving", "modal"] as const;
 
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
@@ -174,6 +174,9 @@ export const extractFocus = (props: NodeProps) => {
   }
   if (props.roving != null) {
     f.roving = Boolean(props.roving);
+  }
+  if (props.modal != null) {
+    f.modal = Boolean(props.modal);
   }
   return f;
 };

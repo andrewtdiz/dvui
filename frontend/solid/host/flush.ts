@@ -18,8 +18,9 @@ import { serializeTree, type SerializedNode } from "./snapshot";
 
 const emitNode = (node: HostNode, encoder: CommandEncoder, parentId: number) => {
   let downstreamParent = parentId;
+  const isPassthrough = node.tag === "slot" || node.tag === "portal";
 
-  if (node.tag !== "root" && node.tag !== "slot") {
+  if (node.tag !== "root" && !isPassthrough) {
     const frame = frameFromProps(node.props);
     const flags = hasAbsoluteClass(node.props) ? 1 : 0;
     const resolvedColor = node.props.color ?? bgColorFromClass(node.props);
@@ -32,11 +33,11 @@ const emitNode = (node: HostNode, encoder: CommandEncoder, parentId: number) => 
     }
 
     downstreamParent = node.id;
-  } else if (node.tag !== "slot") {
+  } else if (!isPassthrough) {
     downstreamParent = node.id;
   }
 
-  const nextParent = node.tag === "slot" ? parentId : downstreamParent;
+  const nextParent = isPassthrough ? parentId : downstreamParent;
   for (const child of node.children) {
     emitNode(child, encoder, nextParent);
   }
@@ -139,6 +140,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           tabIndex: n.tabIndex,
           focusTrap: n.focusTrap,
           roving: n.roving,
+          modal: n.modal,
         };
         ops.push(createOp);
       }
@@ -267,8 +269,11 @@ export const applyFocusMutation = (node: HostNode, name: string, value: unknown,
     payload.focusTrap = Boolean(value);
   } else if (name === "roving") {
     payload.roving = Boolean(value);
+  } else if (name === "modal") {
+    payload.modal = Boolean(value);
   }
-  const hasField = payload.tabIndex != null || payload.focusTrap != null || payload.roving != null;
+  const hasField =
+    payload.tabIndex != null || payload.focusTrap != null || payload.roving != null || payload.modal != null;
   if (hasField) {
     ops.push(payload);
   }
