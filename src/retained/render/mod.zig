@@ -132,28 +132,11 @@ fn applyLayoutScaleToOptions(node: *const types.SolidNode, options: *dvui.Option
     options.font = font.resize(font.size * factor);
 }
 
-fn applyCursorHint(node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
+fn applyCursorHint(node: *const types.SolidNode, class_spec: *const tailwind.Spec) void {
     if (!allowPointerInput()) return;
+    if (!node.hovered) return;
     const cursor = class_spec.cursor orelse return;
-    const rect_base = node.layout.rect orelse return;
-    const rect = transformedRect(node, rect_base) orelse rect_base;
-    const rect_phys = dvui.Rect.Physical{
-        .x = rect.x,
-        .y = rect.y,
-        .w = rect.w,
-        .h = rect.h,
-    };
-    for (dvui.events()) |*event| {
-        switch (event.evt) {
-            .mouse => |me| {
-                if (me.action != .position) continue;
-                if (rect_phys.contains(me.p)) {
-                    dvui.cursorSet(cursor);
-                }
-            },
-            else => {},
-        }
-    }
+    dvui.cursorSet(cursor);
 }
 
 fn nodeHasAccessibilityProps(node: *const types.SolidNode) bool {
@@ -435,20 +418,22 @@ fn syncVisualLayer(
     root: *types.SolidNode,
     portal_ids: []const u32,
     layer: RenderLayer,
+    mouse: dvui.Point.Physical,
 ) void {
     render_layer = layer;
+    const pointer_allowed = allowPointerInput();
     switch (layer) {
         .overlay => {
             for (portal_ids) |portal_id| {
                 const portal = store.node(portal_id) orelse continue;
-                syncVisualsFromClasses(event_ring, store, portal, .{});
+                syncVisualsFromClasses(event_ring, store, portal, .{}, mouse, pointer_allowed);
             }
         },
         .base => {
             for (root.children.items) |child_id| {
                 const child = store.node(child_id) orelse continue;
                 if (isPortalNode(child)) continue;
-                syncVisualsFromClasses(event_ring, store, child, .{});
+                syncVisualsFromClasses(event_ring, store, child, .{}, mouse, pointer_allowed);
             }
         },
     }
@@ -682,9 +667,18 @@ fn renderScrollBars(
     return scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y;
 }
 
-fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStore, node: *types.SolidNode, clip: ClipState) void {
+fn syncVisualsFromClasses(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    clip: ClipState,
+    mouse: dvui.Point.Physical,
+    pointer_allowed: bool,
+) void {
     const class_spec_base = node.prepareClassSpec();
     const has_hover = tailwind.hasHover(&class_spec_base);
+    const has_mouseenter = node.hasListener("mouseenter");
+    const has_mouseleave = node.hasListener("mouseleave");
     const prev_bg = node.visual.background;
     const prev_hovered = node.hovered;
 
@@ -693,11 +687,10 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
         rect_opt = transformedRect(node, rect_base) orelse rect_base;
     }
 
-    const pointer_allowed = allowPointerInput();
+    const wants_hover = has_hover or has_mouseenter or has_mouseleave or class_spec_base.cursor != null;
     var hovered = false;
-    if (pointer_allowed and !class_spec_base.hidden and node.kind == .element) {
+    if (pointer_allowed and wants_hover and !class_spec_base.hidden and node.kind == .element) {
         if (rect_opt) |rect| {
-            const mouse = dvui.currentWindow().mouse_pt;
             if (rectContains(rect, mouse)) {
                 if (!clip.active or rectContains(clip.rect, mouse)) {
                     hovered = true;
@@ -711,7 +704,7 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
     if (class_spec_base.hidden) {
         if (input_enabled_state) {
             if (event_ring) |ring| {
-                if (prev_hovered and node.hasListener("mouseleave")) {
+                if (prev_hovered and has_mouseleave) {
                     _ = ring.push(.mouseleave, node.id, null);
                 }
             }
@@ -725,9 +718,9 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
     if (input_enabled_state) {
         if (event_ring) |ring| {
             if (prev_hovered != hovered) {
-                if (hovered and node.hasListener("mouseenter")) {
+                if (hovered and has_mouseenter) {
                     _ = ring.push(.mouseenter, node.id, null);
-                } else if (!hovered and node.hasListener("mouseleave")) {
+                } else if (!hovered and has_mouseleave) {
                     _ = ring.push(.mouseleave, node.id, null);
                 }
             }
@@ -772,7 +765,7 @@ fn syncVisualsFromClasses(event_ring: ?*events.EventRing, store: *types.NodeStor
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
             if (render_layer == .base and isPortalNode(child)) continue;
-            syncVisualsFromClasses(event_ring, store, child, next_clip);
+            syncVisualsFromClasses(event_ring, store, child, next_clip, mouse, pointer_allowed);
         }
     }
 }
@@ -842,9 +835,9 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
 
     if (needs_visual_sync) {
         // Ensure visual props (especially backgrounds) are applied before caching/dirty decisions.
-        syncVisualLayer(event_ring, store, root, portal_ids, .base);
+        syncVisualLayer(event_ring, store, root, portal_ids, .base, current_mouse);
         if (portal_ids.len > 0) {
-            syncVisualLayer(event_ring, store, root, portal_ids, .overlay);
+            syncVisualLayer(event_ring, store, root, portal_ids, .overlay, current_mouse);
         } else {
             render_layer = .base;
         }
