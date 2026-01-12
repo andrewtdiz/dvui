@@ -219,9 +219,28 @@ function registerGraph(value) {
   if (DevHooks.afterRegisterGraph)
     DevHooks.afterRegisterGraph(value);
 }
+function createContext(defaultValue, options) {
+  const id = Symbol("context");
+  return {
+    id,
+    Provider: createProvider(id, options),
+    defaultValue
+  };
+}
 function useContext(context) {
   let value;
   return Owner && Owner.context && (value = Owner.context[context.id]) !== undefined ? value : context.defaultValue;
+}
+function children(fn) {
+  const children2 = createMemo(fn);
+  const memo = createMemo(() => resolveChildren(children2()), undefined, {
+    name: "children"
+  });
+  memo.toArray = () => {
+    const c = memo();
+    return Array.isArray(c) ? c : c != null ? [c] : [];
+  };
+  return memo;
 }
 var SuspenseContext;
 function readSignal() {
@@ -675,6 +694,32 @@ function handleError(err, owner = Owner) {
   else
     runErrors(error, fns, owner);
 }
+function resolveChildren(children2) {
+  if (typeof children2 === "function" && !children2.length)
+    return resolveChildren(children2());
+  if (Array.isArray(children2)) {
+    const results = [];
+    for (let i = 0;i < children2.length; i++) {
+      const result = resolveChildren(children2[i]);
+      Array.isArray(result) ? results.push.apply(results, result) : results.push(result);
+    }
+    return results;
+  }
+  return children2;
+}
+function createProvider(id, options) {
+  return function provider(props) {
+    let res;
+    createRenderEffect(() => res = untrack(() => {
+      Owner.context = {
+        ...Owner.context,
+        [id]: props.value
+      };
+      return children(() => props.children);
+    }), undefined, options);
+    return res;
+  };
+}
 var FALLBACK = Symbol("fallback");
 var hydrationEnabled = false;
 function createComponent(Comp, props) {
@@ -848,6 +893,32 @@ function splitProps(props, ...keys) {
     isDefaultDesc ? objects[keyIndex][propName] = desc.value : Object.defineProperty(objects[keyIndex], propName, desc);
   }
   return objects;
+}
+var narrowedError = (name) => `Attempting to access a stale value from <${name}> that could possibly be undefined. This may occur because you are reading the accessor returned from the component at a time where it has already been unmounted. We recommend cleaning up any stale timers or async, or reading from the initial condition.`;
+function Show(props) {
+  const keyed = props.keyed;
+  const conditionValue = createMemo(() => props.when, undefined, {
+    name: "condition value"
+  });
+  const condition = keyed ? conditionValue : createMemo(conditionValue, undefined, {
+    equals: (a, b) => !a === !b,
+    name: "condition"
+  });
+  return createMemo(() => {
+    const c = condition();
+    if (c) {
+      const child = props.children;
+      const fn = typeof child === "function" && child.length > 0;
+      return fn ? untrack(() => child(keyed ? c : () => {
+        if (!untrack(condition))
+          throw narrowedError("Show");
+        return conditionValue();
+      })) : child;
+    }
+    return props.fallback;
+  }, undefined, {
+    name: "value"
+  });
 }
 if (globalThis) {
   if (!globalThis.Solid$$)
@@ -1178,6 +1249,22 @@ var transformFields = [
   "translateY"
 ];
 var visualFields = ["opacity", "cornerRadius", "background", "textColor", "clipChildren"];
+var scrollFields = ["scroll", "scrollX", "scrollY", "canvasWidth", "canvasHeight", "autoCanvas"];
+var focusFields = ["tabIndex", "focusTrap", "roving", "modal"];
+var anchorFields = ["anchorId", "anchorSide", "anchorAlign", "anchorOffset"];
+var accessibilityFields = [
+  "role",
+  "ariaLabel",
+  "ariaDescription",
+  "ariaExpanded",
+  "ariaSelected",
+  "ariaChecked",
+  "ariaPressed",
+  "ariaHidden",
+  "ariaDisabled",
+  "ariaHasPopup",
+  "ariaModal"
+];
 var hasAbsoluteClass = (props) => {
   const raw = props.className ?? props.class;
   if (!raw)
@@ -1266,6 +1353,149 @@ var extractVisual = (props) => {
   }
   return v;
 };
+var extractScroll = (props) => {
+  const s = {};
+  for (const key of scrollFields) {
+    const raw = props[key];
+    if (raw == null)
+      continue;
+    if (key === "scroll" || key === "autoCanvas") {
+      s[key] = Boolean(raw);
+      continue;
+    }
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      s[key] = raw;
+    }
+  }
+  return s;
+};
+var extractFocus = (props) => {
+  const f = {};
+  if (typeof props.tabIndex === "number" && Number.isFinite(props.tabIndex)) {
+    f.tabIndex = props.tabIndex;
+  }
+  if (props.focusTrap != null) {
+    f.focusTrap = Boolean(props.focusTrap);
+  }
+  if (props.roving != null) {
+    f.roving = Boolean(props.roving);
+  }
+  if (props.modal != null) {
+    f.modal = Boolean(props.modal);
+  }
+  return f;
+};
+var anchorSides = ["top", "bottom", "left", "right"];
+var anchorAligns = ["start", "center", "end"];
+var extractAnchor = (props) => {
+  const a = {};
+  if (typeof props.anchorId === "number" && Number.isFinite(props.anchorId)) {
+    a.anchorId = props.anchorId;
+  }
+  if (typeof props.anchorSide === "string" && anchorSides.includes(props.anchorSide)) {
+    a.anchorSide = props.anchorSide;
+  }
+  if (typeof props.anchorAlign === "string" && anchorAligns.includes(props.anchorAlign)) {
+    a.anchorAlign = props.anchorAlign;
+  }
+  if (typeof props.anchorOffset === "number" && Number.isFinite(props.anchorOffset)) {
+    a.anchorOffset = props.anchorOffset;
+  }
+  return a;
+};
+var extractIcon = (props) => {
+  const icon = {};
+  if (typeof props.iconKind === "string") {
+    icon.iconKind = props.iconKind;
+  }
+  if (typeof props.iconGlyph === "string") {
+    icon.iconGlyph = props.iconGlyph;
+  }
+  return icon;
+};
+var normalizeAriaBool = (value) => {
+  if (typeof value === "boolean")
+    return value;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true")
+      return true;
+    if (lowered === "false")
+      return false;
+  }
+  return;
+};
+var normalizeAriaChecked = (value) => {
+  if (typeof value === "boolean")
+    return value ? "true" : "false";
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true" || lowered === "false" || lowered === "mixed")
+      return lowered;
+  }
+  return;
+};
+var normalizeAriaHasPopup = (value) => {
+  if (typeof value === "string")
+    return value;
+  if (value === true)
+    return "menu";
+  return;
+};
+var normalizeAriaName = (name) => {
+  if (!name.startsWith("aria-"))
+    return name;
+  const base = name.slice(5);
+  if (base.length === 0)
+    return name;
+  const camel = base.replace(/-([a-z])/g, (_, char) => char.toUpperCase());
+  return `aria${camel.charAt(0).toUpperCase()}${camel.slice(1)}`;
+};
+var extractAccessibility = (props) => {
+  const a = {};
+  if (typeof props.role === "string") {
+    a.role = props.role;
+  }
+  if (typeof props.ariaLabel === "string") {
+    a.ariaLabel = props.ariaLabel;
+  }
+  if (typeof props.ariaDescription === "string") {
+    a.ariaDescription = props.ariaDescription;
+  }
+  const expanded = normalizeAriaBool(props.ariaExpanded);
+  if (expanded != null) {
+    a.ariaExpanded = expanded;
+  }
+  const selected = normalizeAriaBool(props.ariaSelected);
+  if (selected != null) {
+    a.ariaSelected = selected;
+  }
+  const checked = normalizeAriaChecked(props.ariaChecked);
+  if (checked != null) {
+    a.ariaChecked = checked;
+  }
+  const pressed = normalizeAriaChecked(props.ariaPressed);
+  if (pressed != null) {
+    a.ariaPressed = pressed;
+  }
+  const hidden = normalizeAriaBool(props.ariaHidden);
+  if (hidden != null) {
+    a.ariaHidden = hidden;
+  }
+  const disabled = normalizeAriaBool(props.ariaDisabled);
+  if (disabled != null) {
+    a.ariaDisabled = disabled;
+  }
+  const popup = normalizeAriaHasPopup(props.ariaHasPopup);
+  if (popup != null) {
+    a.ariaHasPopup = popup;
+  }
+  const modal = normalizeAriaBool(props.ariaModal);
+  if (modal != null) {
+    a.ariaModal = modal;
+  }
+  return a;
+};
 
 // solid/host/snapshot.ts
 var serializeTree = (roots) => {
@@ -1282,7 +1512,11 @@ var serializeTree = (roots) => {
     if (node.tag === "text") {
       entry.text = node.props.text ?? "";
     }
-    Object.assign(entry, extractTransform(node.props), extractVisual(node.props));
+    if (node.props.value != null)
+      entry.value = String(node.props.value);
+    if (node.props.src != null)
+      entry.src = String(node.props.src);
+    Object.assign(entry, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractIcon(node.props), extractAccessibility(node.props));
     nodes.push(entry);
     for (const child of node.children) {
       serialize(child, node.id);
@@ -1297,7 +1531,8 @@ var serializeTree = (roots) => {
 // solid/host/flush.ts
 var emitNode = (node, encoder, parentId) => {
   let downstreamParent = parentId;
-  if (node.tag !== "root" && node.tag !== "slot") {
+  const isPassthrough = node.tag === "slot" || node.tag === "portal";
+  if (node.tag !== "root" && !isPassthrough) {
     const frame = frameFromProps(node.props);
     const flags = hasAbsoluteClass(node.props) ? 1 : 0;
     const resolvedColor = node.props.color ?? bgColorFromClass(node.props);
@@ -1308,10 +1543,10 @@ var emitNode = (node, encoder, parentId) => {
       encoder.pushQuad(node.id, parentId, frame, packedBackground, flags);
     }
     downstreamParent = node.id;
-  } else if (node.tag !== "slot") {
+  } else if (!isPassthrough) {
     downstreamParent = node.id;
   }
-  const nextParent = node.tag === "slot" ? parentId : downstreamParent;
+  const nextParent = isPassthrough ? parentId : downstreamParent;
   for (const child of node.children) {
     emitNode(child, encoder, nextParent);
   }
@@ -1366,7 +1601,48 @@ var createFlushController = (ctx) => {
           before: null,
           tag: n.tag,
           className: n.className,
-          text: n.text
+          text: n.text,
+          src: n.src,
+          iconKind: n.iconKind,
+          iconGlyph: n.iconGlyph,
+          value: n.value,
+          rotation: n.rotation,
+          scaleX: n.scaleX,
+          scaleY: n.scaleY,
+          anchorX: n.anchorX,
+          anchorY: n.anchorY,
+          translateX: n.translateX,
+          translateY: n.translateY,
+          opacity: n.opacity,
+          cornerRadius: n.cornerRadius,
+          background: n.background,
+          textColor: n.textColor,
+          clipChildren: n.clipChildren,
+          scroll: n.scroll,
+          scrollX: n.scrollX,
+          scrollY: n.scrollY,
+          canvasWidth: n.canvasWidth,
+          canvasHeight: n.canvasHeight,
+          autoCanvas: n.autoCanvas,
+          tabIndex: n.tabIndex,
+          focusTrap: n.focusTrap,
+          roving: n.roving,
+          modal: n.modal,
+          anchorId: n.anchorId,
+          anchorSide: n.anchorSide,
+          anchorAlign: n.anchorAlign,
+          anchorOffset: n.anchorOffset,
+          role: n.role,
+          ariaLabel: n.ariaLabel,
+          ariaDescription: n.ariaDescription,
+          ariaExpanded: n.ariaExpanded,
+          ariaSelected: n.ariaSelected,
+          ariaChecked: n.ariaChecked,
+          ariaPressed: n.ariaPressed,
+          ariaHidden: n.ariaHidden,
+          ariaDisabled: n.ariaDisabled,
+          ariaHasPopup: n.ariaHasPopup,
+          ariaModal: n.ariaModal
         };
         ops.push(createOp);
       }
@@ -1449,6 +1725,128 @@ var applyVisualMutation = (node, name, value, ops) => {
     ops.push(payload);
   }
 };
+var applyScrollMutation = (node, name, value, ops) => {
+  const payload = { op: "set_scroll", id: node.id };
+  if (name === "scroll") {
+    payload.scroll = Boolean(value);
+  } else if (name === "autoCanvas") {
+    payload.autoCanvas = Boolean(value);
+  } else if (typeof value === "number" && Number.isFinite(value)) {
+    if (name === "scrollX")
+      payload.scrollX = value;
+    if (name === "scrollY")
+      payload.scrollY = value;
+    if (name === "canvasWidth")
+      payload.canvasWidth = value;
+    if (name === "canvasHeight")
+      payload.canvasHeight = value;
+  }
+  const hasField = payload.scroll != null || payload.scrollX != null || payload.scrollY != null || payload.canvasWidth != null || payload.canvasHeight != null || payload.autoCanvas != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+var applyFocusMutation = (node, name, value, ops) => {
+  const payload = { op: "set_focus", id: node.id };
+  if (name === "tabIndex" && typeof value === "number" && Number.isFinite(value)) {
+    payload.tabIndex = value;
+  } else if (name === "focusTrap") {
+    payload.focusTrap = Boolean(value);
+  } else if (name === "roving") {
+    payload.roving = Boolean(value);
+  } else if (name === "modal") {
+    payload.modal = Boolean(value);
+  }
+  const hasField = payload.tabIndex != null || payload.focusTrap != null || payload.roving != null || payload.modal != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+var applyAnchorMutation = (node, name, value, ops) => {
+  const payload = { op: "set_anchor", id: node.id };
+  if (name === "anchorId" && typeof value === "number" && Number.isFinite(value)) {
+    payload.anchorId = value;
+  } else if (name === "anchorSide" && typeof value === "string") {
+    payload.anchorSide = value;
+  } else if (name === "anchorAlign" && typeof value === "string") {
+    payload.anchorAlign = value;
+  } else if (name === "anchorOffset" && typeof value === "number" && Number.isFinite(value)) {
+    payload.anchorOffset = value;
+  }
+  const hasField = payload.anchorId != null || payload.anchorSide != null || payload.anchorAlign != null || payload.anchorOffset != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+var normalizeAriaBool2 = (value) => {
+  if (value == null)
+    return false;
+  if (typeof value === "boolean")
+    return value;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true")
+      return true;
+    if (lowered === "false")
+      return false;
+  }
+  return Boolean(value);
+};
+var normalizeAriaChecked2 = (value) => {
+  if (value == null)
+    return "false";
+  if (typeof value === "boolean")
+    return value ? "true" : "false";
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (lowered === "true" || lowered === "false" || lowered === "mixed")
+      return lowered;
+  }
+  return;
+};
+var normalizeAriaHasPopup2 = (value) => {
+  if (value == null || value === false)
+    return "";
+  if (typeof value === "string")
+    return value;
+  if (value === true)
+    return "menu";
+  return "";
+};
+var applyAccessibilityMutation = (node, name, value, ops) => {
+  const payload = { op: "set_accessibility", id: node.id };
+  if (name === "role") {
+    payload.role = value == null ? "" : String(value);
+  } else if (name === "ariaLabel") {
+    payload.ariaLabel = value == null ? "" : String(value);
+  } else if (name === "ariaDescription") {
+    payload.ariaDescription = value == null ? "" : String(value);
+  } else if (name === "ariaExpanded") {
+    payload.ariaExpanded = normalizeAriaBool2(value);
+  } else if (name === "ariaSelected") {
+    payload.ariaSelected = normalizeAriaBool2(value);
+  } else if (name === "ariaChecked") {
+    const checked = normalizeAriaChecked2(value);
+    if (checked != null)
+      payload.ariaChecked = checked;
+  } else if (name === "ariaPressed") {
+    const pressed = normalizeAriaChecked2(value);
+    if (pressed != null)
+      payload.ariaPressed = pressed;
+  } else if (name === "ariaHidden") {
+    payload.ariaHidden = normalizeAriaBool2(value);
+  } else if (name === "ariaDisabled") {
+    payload.ariaDisabled = normalizeAriaBool2(value);
+  } else if (name === "ariaHasPopup") {
+    payload.ariaHasPopup = normalizeAriaHasPopup2(value);
+  } else if (name === "ariaModal") {
+    payload.ariaModal = normalizeAriaBool2(value);
+  }
+  const hasField = payload.role != null || payload.ariaLabel != null || payload.ariaDescription != null || payload.ariaExpanded != null || payload.ariaSelected != null || payload.ariaChecked != null || payload.ariaPressed != null || payload.ariaHidden != null || payload.ariaDisabled != null || payload.ariaHasPopup != null || payload.ariaModal != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
 var applyTransformMutation = (node, name, value, ops) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     const payload = { op: "set_transform", id: node.id, [name]: value };
@@ -1460,6 +1858,18 @@ var isTransformField = (name) => {
 };
 var isVisualField = (name) => {
   return visualFields.includes(name);
+};
+var isScrollField = (name) => {
+  return scrollFields.includes(name);
+};
+var isFocusField = (name) => {
+  return focusFields.includes(name);
+};
+var isAnchorField = (name) => {
+  return anchorFields.includes(name);
+};
+var isAccessibilityField = (name) => {
+  return accessibilityFields.includes(name);
 };
 
 // solid/host/node.ts
@@ -1481,6 +1891,8 @@ class HostNode {
   _onBlur;
   _onMouseEnter;
   _onMouseLeave;
+  _onKeyDown;
+  _onKeyUp;
   constructor(tag) {
     this.tag = tag;
   }
@@ -1543,6 +1955,26 @@ class HostNode {
   }
   get onMouseLeave() {
     return this._onMouseLeave;
+  }
+  set onKeyDown(handler) {
+    if (this._onKeyDown)
+      this.off("keydown", this._onKeyDown);
+    this._onKeyDown = handler;
+    if (handler)
+      this.on("keydown", handler);
+  }
+  get onKeyDown() {
+    return this._onKeyDown;
+  }
+  set onKeyUp(handler) {
+    if (this._onKeyUp)
+      this.off("keyup", this._onKeyUp);
+    this._onKeyUp = handler;
+    if (handler)
+      this.on("keyup", handler);
+  }
+  get onKeyUp() {
+    return this._onKeyUp;
   }
   get firstChild() {
     return this.children[0];
@@ -1645,6 +2077,11 @@ var removeFromIndex = (node, index) => {
   }
 };
 var nodeClass = (node) => node.props.className ?? node.props.class;
+var normalizeTag = (tagName) => {
+  if (tagName === "img")
+    return "image";
+  return tagName;
+};
 var createSolidHost = (native) => {
   const encoder = native.encoder;
   const root = new HostNode("root");
@@ -1674,7 +2111,11 @@ var createSolidHost = (native) => {
       const cls = nodeClass(node);
       if (cls)
         createOp.className = cls;
-      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props));
+      if (node.props.src != null)
+        createOp.src = String(node.props.src);
+      if (node.props.value != null)
+        createOp.value = String(node.props.value);
+      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractIcon(node.props), extractAccessibility(node.props));
       push(createOp);
       for (const [eventType] of node.listeners) {
         push({
@@ -1709,7 +2150,7 @@ var createSolidHost = (native) => {
   };
   const runtimeOps = {
     createElement(tagName) {
-      return registerNode(new HostNode(tagName));
+      return registerNode(new HostNode(normalizeTag(tagName)));
     },
     createTextNode(value) {
       const node = registerNode(new HostNode("text"));
@@ -1754,23 +2195,53 @@ var createSolidHost = (native) => {
         eventName = rest.charAt(0).toLowerCase() + rest.slice(1);
       }
       if (eventName) {
+        const normalized = eventName.toLowerCase();
         if (typeof prev === "function")
-          node.off(eventName, prev);
+          node.off(normalized, prev);
         if (typeof value === "function")
-          node.on(eventName, value);
+          node.on(normalized, value);
         flushController.scheduleFlush();
         return;
       }
-      node.props[name] = value;
-      if (name === "class" || name === "className") {
+      const propName = normalizeAriaName(name);
+      node.props[propName] = value;
+      if (propName === "class" || propName === "className") {
         if (node.created) {
           const cls = value == null ? "" : String(value);
           push({ op: "set_class", id: node.id, className: cls });
         }
-      } else if (node.created && isTransformField(name)) {
-        applyTransformMutation(node, name, value, ops);
-      } else if (node.created && isVisualField(name)) {
-        applyVisualMutation(node, name, value, ops);
+      } else if (propName === "src") {
+        if (node.created) {
+          const src = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "src", src });
+        }
+      } else if (propName === "iconKind") {
+        if (node.created) {
+          const nextKind = value == null ? "auto" : String(value);
+          push({ op: "set", id: node.id, name: "iconKind", value: nextKind, iconKind: nextKind });
+        }
+      } else if (propName === "iconGlyph") {
+        if (node.created) {
+          const nextGlyph = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "iconGlyph", value: nextGlyph, iconGlyph: nextGlyph });
+        }
+      } else if (propName === "value") {
+        if (node.created) {
+          const nextValue = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "value", value: nextValue });
+        }
+      } else if (node.created && isAccessibilityField(propName)) {
+        applyAccessibilityMutation(node, propName, value, ops);
+      } else if (node.created && isTransformField(propName)) {
+        applyTransformMutation(node, propName, value, ops);
+      } else if (node.created && isVisualField(propName)) {
+        applyVisualMutation(node, propName, value, ops);
+      } else if (node.created && isScrollField(propName)) {
+        applyScrollMutation(node, propName, value, ops);
+      } else if (node.created && isFocusField(propName)) {
+        applyFocusMutation(node, propName, value, ops);
+      } else if (node.created && isAnchorField(propName)) {
+        applyAnchorMutation(node, propName, value, ops);
       }
       flushController.scheduleFlush();
     }
@@ -1846,20 +2317,20 @@ var COMMAND_HEADER_SIZE = 40;
 
 // solid/native/encoder.ts
 class CommandEncoder {
-  maxCommands;
-  maxPayloadBytes;
   headers;
   headerView;
   payload;
+  headerCapacity;
+  payloadCapacity;
   textEncoder = new TextEncoder;
   commandCount = 0;
   payloadOffset = 0;
   constructor(maxCommands = 256, maxPayloadBytes = 16384) {
-    this.maxCommands = maxCommands;
-    this.maxPayloadBytes = maxPayloadBytes;
-    this.headers = new ArrayBuffer(COMMAND_HEADER_SIZE * this.maxCommands);
+    this.headerCapacity = Math.max(1, maxCommands);
+    this.payloadCapacity = Math.max(1, maxPayloadBytes);
+    this.headers = new ArrayBuffer(COMMAND_HEADER_SIZE * this.headerCapacity);
     this.headerView = new DataView(this.headers);
-    this.payload = new Uint8Array(this.maxPayloadBytes);
+    this.payload = new Uint8Array(this.payloadCapacity);
   }
   reset() {
     this.commandCount = 0;
@@ -1879,9 +2350,7 @@ class CommandEncoder {
   }
   pushText(nodeId, parentId, frame, text, color, flags = 0) {
     const encoded = this.textEncoder.encode(text);
-    if (encoded.length + this.payloadOffset > this.payload.byteLength) {
-      throw new Error("Command payload buffer exhausted");
-    }
+    this.ensurePayloadCapacity(this.payloadOffset + encoded.length);
     const payloadOffset = this.payloadOffset;
     this.payload.set(encoded, payloadOffset);
     this.payloadOffset += encoded.length;
@@ -1905,9 +2374,7 @@ class CommandEncoder {
     };
   }
   writeHeader(params) {
-    if (this.commandCount >= this.maxCommands) {
-      throw new Error("Command header buffer exhausted");
-    }
+    this.ensureHeaderCapacity(this.commandCount + 1);
     const base = this.commandCount * COMMAND_HEADER_SIZE;
     this.headerView.setUint8(base, params.opcode);
     this.headerView.setUint8(base + 1, params.flags ?? 0);
@@ -1922,6 +2389,33 @@ class CommandEncoder {
     this.headerView.setUint32(base + 32, params.payloadLength >>> 0, true);
     this.headerView.setUint32(base + 36, params.extra >>> 0, true);
     this.commandCount += 1;
+  }
+  ensureHeaderCapacity(requiredCommands) {
+    if (requiredCommands <= this.headerCapacity)
+      return;
+    let next = this.headerCapacity;
+    while (next < requiredCommands) {
+      next = next > 0 ? next * 2 : 1;
+    }
+    const nextBuffer = new ArrayBuffer(COMMAND_HEADER_SIZE * next);
+    const nextView = new DataView(nextBuffer);
+    const used = this.commandCount * COMMAND_HEADER_SIZE;
+    new Uint8Array(nextBuffer).set(new Uint8Array(this.headers, 0, used));
+    this.headers = nextBuffer;
+    this.headerView = nextView;
+    this.headerCapacity = next;
+  }
+  ensurePayloadCapacity(requiredBytes) {
+    if (requiredBytes <= this.payloadCapacity)
+      return;
+    let next = this.payloadCapacity;
+    while (next < requiredBytes) {
+      next = next > 0 ? next * 2 : 1;
+    }
+    const nextPayload = new Uint8Array(next);
+    nextPayload.set(this.payload.subarray(0, this.payloadOffset));
+    this.payload = nextPayload;
+    this.payloadCapacity = next;
   }
 }
 
@@ -2180,7 +2674,8 @@ class NativeRenderer {
       6: "keydown",
       7: "keyup",
       8: "change",
-      9: "submit"
+      9: "submit",
+      20: "scroll"
     };
     let current = readHead;
     let dispatched = 0;
@@ -2200,11 +2695,14 @@ class NativeRenderer {
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
             detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
+          const isKeyEvent = eventName === "keydown" || eventName === "keyup";
+          const keyValue = isKeyEvent ? detail : undefined;
           const eventObj = {
             type: eventName,
             target: { id: nodeId, value: detail, tagName: node.tag },
             currentTarget: { id: nodeId, value: detail, tagName: node.tag },
             detail,
+            key: keyValue,
             _nativePayload: new Uint8Array([nodeId & 255, nodeId >> 8 & 255, nodeId >> 16 & 255, nodeId >> 24 & 255])
           };
           for (const handler of handlers) {
@@ -2242,6 +2740,7 @@ class NativeRenderer {
   }
 }
 // solid/runtime/index.ts
+var memo2 = (fn) => createMemo(() => fn());
 var createElement = (tag) => {
   const hostOps = getRuntimeHostOps();
   if (hostOps?.createElement) {
@@ -2410,6 +2909,40 @@ var mergeProps2 = (...sources) => {
     }
   }
   return out;
+};
+var parseScrollDetail = (detail) => {
+  if (!detail)
+    return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  const offsetX = Number(parsed?.x);
+  const offsetY = Number(parsed?.y);
+  const viewportWidth = Number(parsed?.viewportW);
+  const viewportHeight = Number(parsed?.viewportH);
+  const contentWidth = Number(parsed?.contentW);
+  const contentHeight = Number(parsed?.contentH);
+  if (!Number.isFinite(offsetX) || !Number.isFinite(offsetY) || !Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight) || !Number.isFinite(contentWidth) || !Number.isFinite(contentHeight)) {
+    return null;
+  }
+  return { offsetX, offsetY, viewportWidth, viewportHeight, contentWidth, contentHeight };
+};
+var computeVirtualRange = (options) => {
+  const itemCount = Math.max(0, Math.floor(options.itemCount));
+  const itemSize = options.itemSize > 0 ? options.itemSize : 0;
+  const viewportSize = Math.max(0, options.viewportSize);
+  const scrollOffset = Math.max(0, options.scrollOffset);
+  const overscan = Math.max(0, Math.floor(options.overscan ?? 2));
+  if (itemCount == 0 || itemSize == 0) {
+    return { start: 0, end: 0, offset: 0 };
+  }
+  const start = Math.max(0, Math.floor(scrollOffset / itemSize) - overscan);
+  const visibleCount = Math.ceil(viewportSize / itemSize) + overscan * 2;
+  const end = Math.min(itemCount, start + Math.max(0, visibleCount));
+  return { start, end, offset: start * itemSize };
 };
 // solid/native/dvui-core.ts
 import { dlopen as dlopen2, ptr as ptr2, suffix as suffix2, CString } from "bun:ffi";
@@ -2629,7 +3162,7 @@ var createFrameScheduler = (options = {}) => {
     }
   };
 };
-// solid/components/index.tsx
+// solid/components/button.tsx
 var buttonVariantClasses = {
   default: "bg-primary text-primary-foreground hover:bg-neutral-300",
   destructive: "bg-destructive text-destructive-foreground hover:bg-red-500",
@@ -2671,7 +3204,1335 @@ var Button = (props) => {
     return _el$;
   })();
 };
-var Input = (props) => {
+// solid/components/accordion.tsx
+var AccordionContext = createContext();
+var useAccordionContext = () => {
+  const ctx = useContext(AccordionContext);
+  if (!ctx) {
+    throw new Error("Accordion components must be used within an <Accordion> container");
+  }
+  return ctx;
+};
+var AccordionItemContext = createContext();
+var useAccordionItemContext = () => {
+  const ctx = useContext(AccordionItemContext);
+  if (!ctx) {
+    throw new Error("AccordionItem components must be used within an <AccordionItem>");
+  }
+  return ctx;
+};
+var Accordion = (props) => {
+  const [local, others] = splitProps(props, ["type", "value", "defaultValue", "onChange", "collapsible", "class", "className", "children"]);
+  const [internalValue, setInternalValue] = createSignal(local.defaultValue);
+  const type = () => local.type ?? "single";
+  const isControlled = () => local.value !== undefined;
+  const currentValue = () => isControlled() ? local.value : internalValue();
+  const setValue = (next) => {
+    if (!isControlled()) {
+      setInternalValue(next);
+    }
+    local.onChange?.(next);
+  };
+  const isOpen = (value) => {
+    const valueState = currentValue();
+    if (type() === "multiple") {
+      return Array.isArray(valueState) && valueState.includes(value);
+    }
+    return valueState === value;
+  };
+  const toggle = (value) => {
+    if (type() === "multiple") {
+      const existing = currentValue();
+      const list = Array.isArray(existing) ? existing : [];
+      const next = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+      setValue(next);
+      return;
+    }
+    if (isOpen(value)) {
+      if (local.collapsible) {
+        setValue(undefined);
+      }
+      return;
+    }
+    setValue(value);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-2", userClass].filter(Boolean).join(" ");
+  };
+  return createComponent2(AccordionContext.Provider, {
+    value: {
+      type,
+      isOpen,
+      toggle
+    },
+    get children() {
+      var _el$ = createElement("div");
+      spread(_el$, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$, () => local.children);
+      return _el$;
+    }
+  });
+};
+var AccordionItem = (props) => {
+  const ctx = useAccordionContext();
+  const [local, others] = splitProps(props, ["value", "disabled", "class", "className", "children"]);
+  const isOpen = () => ctx.isOpen(local.value);
+  const disabled = () => Boolean(local.disabled);
+  const toggle = () => {
+    if (disabled())
+      return;
+    ctx.toggle(local.value);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const state = isOpen() ? "bg-muted" : "bg-transparent";
+    const disabledClass = disabled() ? "opacity-50" : "";
+    return ["flex flex-col gap-2 rounded-md border border-border p-3", state, disabledClass, userClass].filter(Boolean).join(" ");
+  };
+  return createComponent2(AccordionItemContext.Provider, {
+    value: {
+      value: () => local.value,
+      isOpen,
+      toggle,
+      disabled
+    },
+    get children() {
+      var _el$2 = createElement("div");
+      spread(_el$2, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$2, () => local.children);
+      return _el$2;
+    }
+  });
+};
+var AccordionTrigger = (props) => {
+  const item = useAccordionItemContext();
+  const [local, others] = splitProps(props, ["class", "className", "children", "disabled", "onClick"]);
+  const disabled = () => Boolean(local.disabled ?? item.disabled());
+  const handleClick = (event) => {
+    if (disabled())
+      return;
+    item.toggle();
+    local.onClick?.(event);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = "flex w-full items-center justify-between text-sm text-foreground";
+    const disabledClass = disabled() ? "opacity-50" : "";
+    return [base, disabledClass, userClass].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$3 = createElement("button");
+    setProp(_el$3, "onClick", handleClick);
+    spread(_el$3, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      },
+      get ariaExpanded() {
+        return item.isOpen();
+      },
+      get ariaDisabled() {
+        return disabled();
+      },
+      get disabled() {
+        return disabled();
+      }
+    }, others), true);
+    insert(_el$3, () => local.children);
+    return _el$3;
+  })();
+};
+var AccordionContent = (props) => {
+  const item = useAccordionItemContext();
+  const [local, others] = splitProps(props, ["forceMount", "class", "className", "children"]);
+  const computedClass = (hidden = false) => {
+    const userClass = local.class ?? local.className ?? "";
+    const hiddenClass = hidden ? "hidden" : "";
+    return ["text-sm text-muted-foreground", hiddenClass, userClass].filter(Boolean).join(" ");
+  };
+  if (local.forceMount) {
+    return (() => {
+      var _el$4 = createElement("div");
+      spread(_el$4, mergeProps2({
+        get ["class"]() {
+          return computedClass(!item.isOpen());
+        },
+        get ariaHidden() {
+          return !item.isOpen();
+        }
+      }, others), true);
+      insert(_el$4, () => local.children);
+      return _el$4;
+    })();
+  }
+  return createComponent2(Show, {
+    get when() {
+      return item.isOpen();
+    },
+    get children() {
+      var _el$5 = createElement("div");
+      setProp(_el$5, "ariaHidden", false);
+      spread(_el$5, mergeProps2({
+        get ["class"]() {
+          return computedClass(false);
+        }
+      }, others), true);
+      insert(_el$5, () => local.children);
+      return _el$5;
+    }
+  });
+};
+// solid/components/collapsible.tsx
+var CollapsibleContext = createContext();
+var useCollapsibleContext = () => {
+  const ctx = useContext(CollapsibleContext);
+  if (!ctx) {
+    throw new Error("Collapsible components must be used within a <Collapsible> container");
+  }
+  return ctx;
+};
+var Collapsible = (props) => {
+  const [local, others] = splitProps(props, ["open", "defaultOpen", "onChange", "disabled", "class", "className", "children"]);
+  const [internalOpen, setInternalOpen] = createSignal(local.defaultOpen ?? false);
+  const isControlled = () => local.open !== undefined;
+  const isOpen = () => isControlled() ? Boolean(local.open) : internalOpen();
+  const setOpen = (next) => {
+    if (!isControlled()) {
+      setInternalOpen(next);
+    }
+    local.onChange?.(next);
+  };
+  const toggle = () => {
+    if (local.disabled)
+      return;
+    setOpen(!isOpen());
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-2", userClass].filter(Boolean).join(" ");
+  };
+  return createComponent2(CollapsibleContext.Provider, {
+    value: {
+      open: isOpen,
+      setOpen,
+      toggle,
+      disabled: () => Boolean(local.disabled)
+    },
+    get children() {
+      var _el$ = createElement("div");
+      spread(_el$, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$, () => local.children);
+      return _el$;
+    }
+  });
+};
+var CollapsibleTrigger = (props) => {
+  const ctx = useCollapsibleContext();
+  const [local, others] = splitProps(props, ["class", "className", "children", "disabled", "onClick"]);
+  const disabled = () => Boolean(local.disabled ?? ctx.disabled());
+  const handleClick = (event) => {
+    if (disabled())
+      return;
+    ctx.toggle();
+    local.onClick?.(event);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = "flex w-full items-center justify-between text-sm text-foreground";
+    const disabledClass = disabled() ? "opacity-50" : "";
+    return [base, disabledClass, userClass].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$2 = createElement("button");
+    setProp(_el$2, "onClick", handleClick);
+    spread(_el$2, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      },
+      get ariaExpanded() {
+        return ctx.open();
+      },
+      get ariaDisabled() {
+        return disabled();
+      },
+      get disabled() {
+        return disabled();
+      }
+    }, others), true);
+    insert(_el$2, () => local.children);
+    return _el$2;
+  })();
+};
+var CollapsibleContent = (props) => {
+  const ctx = useCollapsibleContext();
+  const [local, others] = splitProps(props, ["forceMount", "class", "className", "children"]);
+  const computedClass = (hidden = false) => {
+    const userClass = local.class ?? local.className ?? "";
+    const hiddenClass = hidden ? "hidden" : "";
+    return ["text-sm text-muted-foreground", hiddenClass, userClass].filter(Boolean).join(" ");
+  };
+  if (local.forceMount) {
+    return (() => {
+      var _el$3 = createElement("div");
+      spread(_el$3, mergeProps2({
+        get ["class"]() {
+          return computedClass(!ctx.open());
+        },
+        get ariaHidden() {
+          return !ctx.open();
+        }
+      }, others), true);
+      insert(_el$3, () => local.children);
+      return _el$3;
+    })();
+  }
+  return createComponent2(Show, {
+    get when() {
+      return ctx.open();
+    },
+    get children() {
+      var _el$4 = createElement("div");
+      setProp(_el$4, "ariaHidden", false);
+      spread(_el$4, mergeProps2({
+        get ["class"]() {
+          return computedClass(false);
+        }
+      }, others), true);
+      insert(_el$4, () => local.children);
+      return _el$4;
+    }
+  });
+};
+// solid/components/checkbox.tsx
+var Checkbox = (props) => {
+  const [internalChecked, setInternalChecked] = createSignal(props.defaultChecked ?? false);
+  const isChecked = () => props.checked !== undefined ? props.checked : internalChecked();
+  const handleClick = () => {
+    if (props.disabled)
+      return;
+    const newValue = !isChecked();
+    if (props.checked === undefined) {
+      setInternalChecked(newValue);
+    }
+    props.onChange?.(newValue);
+  };
+  const wrapperClass = () => {
+    const userClass = props.class ?? props.className ?? "";
+    return ["flex items-center gap-2", userClass].filter(Boolean).join(" ");
+  };
+  const boxClasses = () => {
+    const base = isChecked() ? "bg-primary text-primary-foreground border border-primary" : "bg-transparent text-foreground border border-input";
+    const size = "h-4 w-4 rounded-sm";
+    const disabled = props.disabled ? "opacity-50" : "";
+    return ["flex items-center justify-center text-xs", size, base, disabled].filter(Boolean).join(" ");
+  };
+  const labelClass = () => {
+    const disabled = props.disabled ? "opacity-50" : "";
+    return ["text-sm text-foreground", disabled].filter(Boolean).join(" ");
+  };
+  const checkSymbol = () => isChecked() ? "\u2713" : " ";
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("button");
+    insertNode(_el$, _el$2);
+    setProp(_el$2, "onClick", handleClick);
+    setProp(_el$2, "role", "checkbox");
+    insert(_el$2, checkSymbol);
+    insert(_el$, createComponent2(Show, {
+      get when() {
+        return props.label;
+      },
+      get children() {
+        var _el$3 = createElement("p");
+        insert(_el$3, () => props.label);
+        effect((_$p) => setProp(_el$3, "class", labelClass(), _$p));
+        return _el$3;
+      }
+    }), null);
+    effect((_p$) => {
+      var _v$ = wrapperClass(), _v$2 = boxClasses(), _v$3 = props.disabled, _v$4 = isChecked(), _v$5 = props.disabled, _v$6 = props.label;
+      _v$ !== _p$.e && (_p$.e = setProp(_el$, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$2, "class", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = setProp(_el$2, "disabled", _v$3, _p$.a));
+      _v$4 !== _p$.o && (_p$.o = setProp(_el$2, "ariaChecked", _v$4, _p$.o));
+      _v$5 !== _p$.i && (_p$.i = setProp(_el$2, "ariaDisabled", _v$5, _p$.i));
+      _v$6 !== _p$.n && (_p$.n = setProp(_el$2, "ariaLabel", _v$6, _p$.n));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined,
+      a: undefined,
+      o: undefined,
+      i: undefined,
+      n: undefined
+    });
+    return _el$;
+  })();
+};
+// solid/components/radio-group.tsx
+var RadioGroupContext = createContext();
+var useRadioGroupContext = () => {
+  const ctx = useContext(RadioGroupContext);
+  if (!ctx) {
+    throw new Error("Radio components must be used within a <RadioGroup> container");
+  }
+  return ctx;
+};
+var RadioGroup = (props) => {
+  const [local, others] = splitProps(props, ["value", "defaultValue", "onChange", "class", "className", "children"]);
+  const [internalValue, setInternalValue] = createSignal(local.defaultValue);
+  const isControlled = () => local.value !== undefined;
+  const currentValue = () => isControlled() ? local.value : internalValue();
+  const setValue = (value) => {
+    if (!isControlled()) {
+      setInternalValue(value);
+    }
+    local.onChange?.(value);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-2", userClass].filter(Boolean).join(" ");
+  };
+  return createComponent2(RadioGroupContext.Provider, {
+    value: {
+      value: currentValue,
+      setValue,
+      isControlled
+    },
+    get children() {
+      var _el$ = createElement("div");
+      setProp(_el$, "role", "radiogroup");
+      setProp(_el$, "roving", true);
+      spread(_el$, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$, () => local.children);
+      return _el$;
+    }
+  });
+};
+var Radio = (props) => {
+  const ctx = useRadioGroupContext();
+  const [local, others] = splitProps(props, ["value", "label", "class", "className", "disabled", "onClick", "onFocus"]);
+  const isChecked = () => ctx.value() === local.value;
+  const handleActivate = (event) => {
+    if (local.disabled)
+      return;
+    ctx.setValue(local.value);
+    return event;
+  };
+  const handleClick = (event) => {
+    handleActivate(event);
+    local.onClick?.(event);
+  };
+  const handleFocus = (event) => {
+    handleActivate(event);
+    local.onFocus?.(event);
+  };
+  const wrapperClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex items-center gap-2", userClass].filter(Boolean).join(" ");
+  };
+  const radioClasses = () => {
+    const base = isChecked() ? "bg-primary text-primary-foreground border border-primary" : "bg-transparent text-foreground border border-input";
+    const size = "h-4 w-4 rounded-full";
+    const disabled = local.disabled ? "opacity-50" : "";
+    return ["flex items-center justify-center text-xs", size, base, disabled].filter(Boolean).join(" ");
+  };
+  const labelClass = () => {
+    const disabled = local.disabled ? "opacity-50" : "";
+    return ["text-sm text-foreground", disabled].filter(Boolean).join(" ");
+  };
+  const dotSymbol = () => isChecked() ? "\u25CF" : " ";
+  return (() => {
+    var _el$2 = createElement("div"), _el$3 = createElement("button");
+    insertNode(_el$2, _el$3);
+    setProp(_el$3, "onClick", handleClick);
+    setProp(_el$3, "onFocus", handleFocus);
+    setProp(_el$3, "role", "radio");
+    spread(_el$3, mergeProps2({
+      get ["class"]() {
+        return radioClasses();
+      },
+      get disabled() {
+        return local.disabled;
+      },
+      get ariaChecked() {
+        return isChecked();
+      },
+      get ariaDisabled() {
+        return local.disabled;
+      },
+      get ariaLabel() {
+        return local.label;
+      }
+    }, others), true);
+    insert(_el$3, dotSymbol);
+    insert(_el$2, createComponent2(Show, {
+      get when() {
+        return local.label;
+      },
+      get children() {
+        var _el$4 = createElement("p");
+        insert(_el$4, () => local.label);
+        effect((_$p) => setProp(_el$4, "class", labelClass(), _$p));
+        return _el$4;
+      }
+    }), null);
+    effect((_$p) => setProp(_el$2, "class", wrapperClass(), _$p));
+    return _el$2;
+  })();
+};
+// solid/components/alert.tsx
+var alertVariantClasses = {
+  default: "bg-background text-foreground border border-border",
+  destructive: "bg-background text-destructive border border-destructive",
+  success: "bg-background text-emerald-500 border border-emerald-500",
+  warning: "bg-background text-amber-500 border border-amber-500"
+};
+var Alert = (props) => {
+  const merged = mergeProps({
+    variant: "default"
+  }, props);
+  const computedClass = () => {
+    const variant = alertVariantClasses[merged.variant];
+    return `flex flex-col gap-1 rounded-lg p-4 ${variant} ${props.class ?? ""}`;
+  };
+  return (() => {
+    var _el$ = createElement("div"), _el$3 = createElement("p");
+    insertNode(_el$, _el$3);
+    insert(_el$, createComponent2(Show, {
+      get when() {
+        return props.title;
+      },
+      get children() {
+        var _el$2 = createElement("p");
+        setProp(_el$2, "class", "text-sm");
+        insert(_el$2, () => props.title);
+        return _el$2;
+      }
+    }), _el$3);
+    setProp(_el$3, "class", "text-sm text-muted-foreground");
+    insert(_el$3, () => props.children);
+    effect((_$p) => setProp(_el$, "class", computedClass(), _$p));
+    return _el$;
+  })();
+};
+// solid/components/badge.tsx
+var badgeVariantClasses = {
+  default: "bg-primary text-primary-foreground",
+  secondary: "bg-secondary text-secondary-foreground",
+  destructive: "bg-destructive text-destructive-foreground",
+  outline: "bg-transparent text-foreground border border-border"
+};
+var Badge = (props) => {
+  const merged = mergeProps({
+    variant: "default"
+  }, props);
+  const computedClass = () => {
+    const variant = badgeVariantClasses[merged.variant];
+    return `inline-flex items-center rounded-full px-2 py-1 text-xs ${variant} ${props.class ?? ""}`;
+  };
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("p");
+    insertNode(_el$, _el$2);
+    insert(_el$2, () => props.children);
+    effect((_$p) => setProp(_el$, "class", computedClass(), _$p));
+    return _el$;
+  })();
+};
+// solid/components/tag.tsx
+var Tag = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("p");
+    insertNode(_el$, _el$2);
+    setProp(_el$, "class", `inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground ${cls}`);
+    insert(_el$2, () => props.children);
+    return _el$;
+  })();
+};
+// solid/components/kbd.tsx
+var Kbd = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("p");
+    insertNode(_el$, _el$2);
+    setProp(_el$, "class", `inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 text-xs font-mono text-foreground ${cls}`);
+    insert(_el$2, () => props.children);
+    return _el$;
+  })();
+};
+// solid/components/progress.tsx
+var Progress = (props) => {
+  const merged = mergeProps({
+    value: 0,
+    max: 100
+  }, props);
+  const percentage = () => {
+    const max = Number(merged.max);
+    const value = Number(merged.value);
+    if (!Number.isFinite(max) || max <= 0)
+      return 0;
+    if (!Number.isFinite(value))
+      return 0;
+    return Math.min(100, Math.max(0, value / max * 100));
+  };
+  const userClass = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("div");
+    insertNode(_el$, _el$2);
+    setProp(_el$, "class", `h-2 w-full overflow-hidden rounded-full bg-secondary ${userClass}`);
+    setProp(_el$2, "class", "h-full bg-primary");
+    effect((_$p) => setProp(_el$2, "style", {
+      width: `${percentage()}%`
+    }, _$p));
+    return _el$;
+  })();
+};
+// solid/components/pagination.tsx
+var clampPaginationPage = (value, totalPages) => {
+  if (!Number.isFinite(totalPages) || totalPages <= 0)
+    return 1;
+  const normalized = Number.isFinite(value) ? Math.floor(value) : 1;
+  return Math.min(Math.floor(totalPages), Math.max(1, normalized));
+};
+var buildPaginationRange = (current, total, siblingCount) => {
+  const totalPages = Math.max(1, Math.floor(total));
+  const clampedCurrent = clampPaginationPage(current, totalPages);
+  const count = Math.max(0, Math.floor(siblingCount));
+  const totalPageNumbers = count * 2 + 5;
+  if (totalPages <= totalPageNumbers) {
+    return Array.from({
+      length: totalPages
+    }, (_, index) => index + 1);
+  }
+  const leftSiblingIndex = Math.max(clampedCurrent - count, 1);
+  const rightSiblingIndex = Math.min(clampedCurrent + count, totalPages);
+  const showLeftEllipsis = leftSiblingIndex > 2;
+  const showRightEllipsis = rightSiblingIndex < totalPages - 1;
+  if (!showLeftEllipsis && showRightEllipsis) {
+    const leftItemCount = 3 + count * 2;
+    return [...Array.from({
+      length: leftItemCount
+    }, (_, index) => index + 1), "ellipsis", totalPages];
+  }
+  if (showLeftEllipsis && !showRightEllipsis) {
+    const rightItemCount = 3 + count * 2;
+    const start = totalPages - rightItemCount + 1;
+    return [1, "ellipsis", ...Array.from({
+      length: rightItemCount
+    }, (_, index) => start + index)];
+  }
+  return [1, "ellipsis", ...Array.from({
+    length: rightSiblingIndex - leftSiblingIndex + 1
+  }, (_, index) => leftSiblingIndex + index), "ellipsis", totalPages];
+};
+var Pagination = (props) => {
+  const [local, others] = splitProps(props, ["page", "defaultPage", "totalPages", "siblingCount", "onChange", "class", "className"]);
+  const [internalPage, setInternalPage] = createSignal(local.defaultPage ?? 1);
+  const totalPages = () => {
+    const total = Number(local.totalPages ?? 1);
+    return Number.isFinite(total) && total > 0 ? Math.floor(total) : 1;
+  };
+  const currentPage = () => clampPaginationPage(local.page ?? internalPage(), totalPages());
+  const siblingCount = () => {
+    const count = Number(local.siblingCount ?? 1);
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 1;
+  };
+  const pageItems = createMemo(() => buildPaginationRange(currentPage(), totalPages(), siblingCount()));
+  const setPage = (nextPage) => {
+    const next = clampPaginationPage(nextPage, totalPages());
+    if (next === currentPage())
+      return;
+    if (local.page === undefined) {
+      setInternalPage(next);
+    }
+    local.onChange?.(next);
+  };
+  const buttonClass = (active, disabled) => {
+    const base = "flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs text-foreground";
+    const state = active ? "bg-primary text-primary-foreground border-primary" : "";
+    const disabledClass = disabled ? "opacity-50" : "";
+    return [base, state, disabledClass].filter(Boolean).join(" ");
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex items-center gap-1", userClass].filter(Boolean).join(" ");
+  };
+  const canPrev = () => currentPage() > 1;
+  const canNext = () => currentPage() < totalPages();
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("button"), _el$3 = createElement("p"), _el$5 = createElement("button"), _el$6 = createElement("p");
+    insertNode(_el$, _el$2);
+    insertNode(_el$, _el$5);
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      }
+    }, others), true);
+    insertNode(_el$2, _el$3);
+    setProp(_el$2, "onClick", () => setPage(currentPage() - 1));
+    setProp(_el$2, "ariaLabel", "Previous page");
+    insertNode(_el$3, createTextNode(`\u2039`));
+    setProp(_el$3, "class", "text-xs");
+    insert(_el$, () => pageItems().map((item) => {
+      if (item === "ellipsis") {
+        return (() => {
+          var _el$8 = createElement("p");
+          insertNode(_el$8, createTextNode(`\u2026`));
+          setProp(_el$8, "class", "px-2 text-xs text-muted-foreground");
+          return _el$8;
+        })();
+      }
+      const isActive = item === currentPage();
+      return (() => {
+        var _el$0 = createElement("button"), _el$1 = createElement("p");
+        insertNode(_el$0, _el$1);
+        setProp(_el$0, "onClick", () => setPage(item));
+        setProp(_el$0, "ariaSelected", isActive);
+        setProp(_el$0, "ariaLabel", `Page ${item}`);
+        setProp(_el$1, "class", "text-xs");
+        insert(_el$1, item);
+        effect((_$p) => setProp(_el$0, "class", buttonClass(isActive, false), _$p));
+        return _el$0;
+      })();
+    }), _el$5);
+    insertNode(_el$5, _el$6);
+    setProp(_el$5, "onClick", () => setPage(currentPage() + 1));
+    setProp(_el$5, "ariaLabel", "Next page");
+    insertNode(_el$6, createTextNode(`\u203A`));
+    setProp(_el$6, "class", "text-xs");
+    effect((_p$) => {
+      var _v$ = buttonClass(false, !canPrev()), _v$2 = !canPrev(), _v$3 = !canPrev(), _v$4 = buttonClass(false, !canNext()), _v$5 = !canNext(), _v$6 = !canNext();
+      _v$ !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$2, "disabled", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = setProp(_el$2, "ariaDisabled", _v$3, _p$.a));
+      _v$4 !== _p$.o && (_p$.o = setProp(_el$5, "class", _v$4, _p$.o));
+      _v$5 !== _p$.i && (_p$.i = setProp(_el$5, "disabled", _v$5, _p$.i));
+      _v$6 !== _p$.n && (_p$.n = setProp(_el$5, "ariaDisabled", _v$6, _p$.n));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined,
+      a: undefined,
+      o: undefined,
+      i: undefined,
+      n: undefined
+    });
+    return _el$;
+  })();
+};
+// solid/components/stepper.tsx
+var Stepper = (props) => {
+  const [local, others] = splitProps(props, ["steps", "value", "defaultValue", "onChange", "orientation", "class", "className"]);
+  const [internalValue, setInternalValue] = createSignal(local.defaultValue ?? 0);
+  const steps = () => local.steps ?? [];
+  const maxIndex = () => Math.max(0, steps().length - 1);
+  const currentStep = () => {
+    const raw = local.value ?? internalValue();
+    const value = Number(raw);
+    if (!Number.isFinite(value))
+      return 0;
+    return Math.min(maxIndex(), Math.max(0, Math.floor(value)));
+  };
+  const setCurrentStep = (value) => {
+    const next = Math.min(maxIndex(), Math.max(0, Math.floor(Number.isFinite(value) ? value : 0)));
+    if (next === currentStep())
+      return;
+    if (local.value === undefined) {
+      setInternalValue(next);
+    }
+    local.onChange?.(next);
+  };
+  const orientation = () => local.orientation ?? "horizontal";
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = orientation() === "vertical" ? "flex flex-col gap-3" : "flex flex-row items-center gap-3";
+    return [base, userClass].filter(Boolean).join(" ");
+  };
+  const stepState = (index) => {
+    if (index < currentStep())
+      return "complete";
+    if (index === currentStep())
+      return "active";
+    return "upcoming";
+  };
+  const indicatorClass = (state, disabled) => {
+    const base = "flex h-7 w-7 items-center justify-center rounded-full border text-xs";
+    const stateClass = state === "complete" ? "bg-primary text-primary-foreground border-primary" : state === "active" ? "border-primary text-foreground" : "border-border text-muted-foreground";
+    const disabledClass = disabled ? "opacity-50" : "";
+    return [base, stateClass, disabledClass].filter(Boolean).join(" ");
+  };
+  const titleClass = (state, disabled, align) => {
+    const base = "text-sm";
+    const stateClass = state === "upcoming" ? "text-muted-foreground" : "text-foreground";
+    const disabledClass = disabled ? "opacity-50" : "";
+    const alignClass = align === "center" ? "text-center" : "text-left";
+    return [base, stateClass, disabledClass, alignClass].filter(Boolean).join(" ");
+  };
+  const descriptionClass = (disabled, align) => {
+    const alignClass = align === "center" ? "text-center" : "text-left";
+    const disabledClass = disabled ? "opacity-50" : "";
+    return ["text-xs text-muted-foreground", alignClass, disabledClass].filter(Boolean).join(" ");
+  };
+  const stepButtonClass = (orientationValue, disabled) => {
+    const base = orientationValue === "vertical" ? "flex flex-row items-start gap-3" : "flex flex-col items-center gap-1";
+    const disabledClass = disabled ? "opacity-50" : "";
+    return [base, disabledClass].filter(Boolean).join(" ");
+  };
+  if (steps().length === 0) {
+    return null;
+  }
+  if (orientation() === "vertical") {
+    return (() => {
+      var _el$ = createElement("div");
+      spread(_el$, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$, () => steps().map((step, index) => {
+        const state = stepState(index);
+        const disabled = Boolean(step.disabled);
+        const isLast = index === steps().length - 1;
+        return (() => {
+          var _el$2 = createElement("button"), _el$3 = createElement("div"), _el$4 = createElement("div"), _el$6 = createElement("div"), _el$7 = createElement("p");
+          insertNode(_el$2, _el$3);
+          insertNode(_el$2, _el$6);
+          setProp(_el$2, "onClick", () => {
+            if (disabled)
+              return;
+            setCurrentStep(index);
+          });
+          setProp(_el$2, "disabled", disabled);
+          setProp(_el$2, "ariaDisabled", disabled);
+          setProp(_el$2, "ariaSelected", state === "active");
+          insertNode(_el$3, _el$4);
+          setProp(_el$3, "class", "flex flex-col items-center");
+          insert(_el$4, state === "complete" ? "\u2713" : index + 1);
+          insert(_el$3, createComponent2(Show, {
+            when: !isLast,
+            get children() {
+              var _el$5 = createElement("div");
+              setProp(_el$5, "class", "h-6 w-px bg-border");
+              return _el$5;
+            }
+          }), null);
+          insertNode(_el$6, _el$7);
+          setProp(_el$6, "class", "flex flex-col gap-1");
+          insert(_el$7, () => step.title);
+          insert(_el$6, createComponent2(Show, {
+            get when() {
+              return step.description;
+            },
+            get children() {
+              var _el$8 = createElement("p");
+              insert(_el$8, () => step.description);
+              effect((_$p) => setProp(_el$8, "class", descriptionClass(disabled, "left"), _$p));
+              return _el$8;
+            }
+          }), null);
+          effect((_p$) => {
+            var _v$ = stepButtonClass("vertical", disabled), _v$2 = indicatorClass(state, disabled), _v$3 = titleClass(state, disabled, "left");
+            _v$ !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$, _p$.e));
+            _v$2 !== _p$.t && (_p$.t = setProp(_el$4, "class", _v$2, _p$.t));
+            _v$3 !== _p$.a && (_p$.a = setProp(_el$7, "class", _v$3, _p$.a));
+            return _p$;
+          }, {
+            e: undefined,
+            t: undefined,
+            a: undefined
+          });
+          return _el$2;
+        })();
+      }));
+      return _el$;
+    })();
+  }
+  return (() => {
+    var _el$9 = createElement("div");
+    spread(_el$9, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      }
+    }, others), true);
+    insert(_el$9, () => steps().map((step, index) => {
+      const state = stepState(index);
+      const disabled = Boolean(step.disabled);
+      const isLast = index === steps().length - 1;
+      return (() => {
+        var _el$0 = createElement("div"), _el$1 = createElement("button"), _el$10 = createElement("div"), _el$11 = createElement("div"), _el$12 = createElement("p");
+        insertNode(_el$0, _el$1);
+        setProp(_el$0, "class", "flex flex-row items-center gap-3");
+        insertNode(_el$1, _el$10);
+        insertNode(_el$1, _el$11);
+        setProp(_el$1, "onClick", () => {
+          if (disabled)
+            return;
+          setCurrentStep(index);
+        });
+        setProp(_el$1, "disabled", disabled);
+        setProp(_el$1, "ariaDisabled", disabled);
+        setProp(_el$1, "ariaSelected", state === "active");
+        insert(_el$10, state === "complete" ? "\u2713" : index + 1);
+        insertNode(_el$11, _el$12);
+        setProp(_el$11, "class", "flex flex-col items-center gap-1");
+        insert(_el$12, () => step.title);
+        insert(_el$11, createComponent2(Show, {
+          get when() {
+            return step.description;
+          },
+          get children() {
+            var _el$13 = createElement("p");
+            insert(_el$13, () => step.description);
+            effect((_$p) => setProp(_el$13, "class", descriptionClass(disabled, "center"), _$p));
+            return _el$13;
+          }
+        }), null);
+        insert(_el$0, createComponent2(Show, {
+          when: !isLast,
+          get children() {
+            var _el$14 = createElement("div");
+            setProp(_el$14, "class", "h-px w-8 bg-border");
+            return _el$14;
+          }
+        }), null);
+        effect((_p$) => {
+          var _v$4 = stepButtonClass("horizontal", disabled), _v$5 = indicatorClass(state, disabled), _v$6 = titleClass(state, disabled, "center");
+          _v$4 !== _p$.e && (_p$.e = setProp(_el$1, "class", _v$4, _p$.e));
+          _v$5 !== _p$.t && (_p$.t = setProp(_el$10, "class", _v$5, _p$.t));
+          _v$6 !== _p$.a && (_p$.a = setProp(_el$12, "class", _v$6, _p$.a));
+          return _p$;
+        }, {
+          e: undefined,
+          t: undefined,
+          a: undefined
+        });
+        return _el$0;
+      })();
+    }));
+    return _el$9;
+  })();
+};
+// solid/components/tabs.tsx
+var TabsContext = createContext();
+var useTabsContext = () => {
+  const ctx = useContext(TabsContext);
+  if (!ctx) {
+    throw new Error("Tabs components must be used within a <Tabs> container");
+  }
+  return ctx;
+};
+var Tabs = (props) => {
+  const [local, others] = splitProps(props, ["value", "defaultValue", "onChange", "orientation", "class", "className", "children"]);
+  const [internalValue, setInternalValue] = createSignal(local.defaultValue);
+  const isControlled = () => local.value !== undefined;
+  const currentValue = () => isControlled() ? local.value : internalValue();
+  const setValue = (value) => {
+    if (!isControlled()) {
+      setInternalValue(value);
+    }
+    local.onChange?.(value);
+  };
+  const orientation = () => local.orientation ?? "horizontal";
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-2", userClass].filter(Boolean).join(" ");
+  };
+  return createComponent2(TabsContext.Provider, {
+    value: {
+      value: currentValue,
+      setValue,
+      orientation,
+      isControlled
+    },
+    get children() {
+      var _el$ = createElement("div");
+      spread(_el$, mergeProps2({
+        get ["class"]() {
+          return computedClass();
+        }
+      }, others), true);
+      insert(_el$, () => local.children);
+      return _el$;
+    }
+  });
+};
+var TabsList = (props) => {
+  const ctx = useTabsContext();
+  const [local, others] = splitProps(props, ["class", "className", "children"]);
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = ctx.orientation() === "vertical" ? "flex flex-col gap-1 rounded-md bg-muted p-1" : "flex flex-row gap-1 rounded-md bg-muted p-1";
+    return [base, userClass].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$2 = createElement("div");
+    setProp(_el$2, "role", "tablist");
+    setProp(_el$2, "roving", true);
+    spread(_el$2, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      }
+    }, others), true);
+    insert(_el$2, () => local.children);
+    return _el$2;
+  })();
+};
+var TabsTrigger = (props) => {
+  const ctx = useTabsContext();
+  const [local, others] = splitProps(props, ["value", "class", "className", "disabled", "children", "onClick", "onFocus"]);
+  const isActive = () => ctx.value() === local.value;
+  createEffect(() => {
+    if (!ctx.isControlled() && ctx.value() == null) {
+      ctx.setValue(local.value);
+    }
+  });
+  const handleActivate = (event) => {
+    if (local.disabled)
+      return;
+    ctx.setValue(local.value);
+    return event;
+  };
+  const handleClick = (event) => {
+    handleActivate(event);
+    local.onClick?.(event);
+  };
+  const handleFocus = (event) => {
+    handleActivate(event);
+    local.onFocus?.(event);
+  };
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = "inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm";
+    const stateClass = isActive() ? "bg-background text-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground";
+    const disabled = local.disabled ? "opacity-50" : "";
+    return [base, stateClass, disabled, userClass].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$3 = createElement("button");
+    setProp(_el$3, "role", "tab");
+    setProp(_el$3, "onClick", handleClick);
+    setProp(_el$3, "onFocus", handleFocus);
+    spread(_el$3, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      },
+      get ariaSelected() {
+        return isActive();
+      },
+      get ariaDisabled() {
+        return local.disabled;
+      },
+      get disabled() {
+        return local.disabled;
+      }
+    }, others), true);
+    insert(_el$3, () => local.children);
+    return _el$3;
+  })();
+};
+var TabsContent = (props) => {
+  const ctx = useTabsContext();
+  const [local, others] = splitProps(props, ["value", "forceMount", "class", "className", "children"]);
+  const isActive = () => ctx.value() === local.value;
+  const computedClass = (hidden = false) => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = "rounded-md border border-border p-4";
+    return [base, hidden ? "hidden" : "", userClass].filter(Boolean).join(" ");
+  };
+  if (local.forceMount) {
+    return (() => {
+      var _el$4 = createElement("div");
+      setProp(_el$4, "role", "tabpanel");
+      spread(_el$4, mergeProps2({
+        get ["class"]() {
+          return computedClass(!isActive());
+        },
+        get ariaHidden() {
+          return !isActive();
+        }
+      }, others), true);
+      insert(_el$4, () => local.children);
+      return _el$4;
+    })();
+  }
+  return createComponent2(Show, {
+    get when() {
+      return isActive();
+    },
+    get children() {
+      var _el$5 = createElement("div");
+      setProp(_el$5, "role", "tabpanel");
+      setProp(_el$5, "ariaHidden", false);
+      spread(_el$5, mergeProps2({
+        get ["class"]() {
+          return computedClass(false);
+        }
+      }, others), true);
+      insert(_el$5, () => local.children);
+      return _el$5;
+    }
+  });
+};
+// solid/components/group-box.tsx
+var GroupBox = (props) => {
+  const [local, others] = splitProps(props, ["title", "description", "class", "className", "children"]);
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-3 rounded-md border border-border p-4", userClass].filter(Boolean).join(" ");
+  };
+  const headerClass = () => "flex flex-col gap-1";
+  return (() => {
+    var _el$ = createElement("div");
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      }
+    }, others), true);
+    insert(_el$, createComponent2(Show, {
+      get when() {
+        return local.title || local.description;
+      },
+      get children() {
+        var _el$2 = createElement("div");
+        insert(_el$2, createComponent2(Show, {
+          get when() {
+            return local.title;
+          },
+          get children() {
+            var _el$3 = createElement("p");
+            setProp(_el$3, "class", "text-sm text-foreground");
+            insert(_el$3, () => local.title);
+            return _el$3;
+          }
+        }), null);
+        insert(_el$2, createComponent2(Show, {
+          get when() {
+            return local.description;
+          },
+          get children() {
+            var _el$4 = createElement("p");
+            setProp(_el$4, "class", "text-xs text-muted-foreground");
+            insert(_el$4, () => local.description);
+            return _el$4;
+          }
+        }), null);
+        effect((_$p) => setProp(_el$2, "class", headerClass(), _$p));
+        return _el$2;
+      }
+    }), null);
+    insert(_el$, () => local.children, null);
+    return _el$;
+  })();
+};
+// solid/components/description-list.tsx
+var DescriptionList = (props) => {
+  const [local, others] = splitProps(props, ["items", "class", "className", "itemClass", "termClass", "descriptionClass", "children"]);
+  const listClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["flex flex-col gap-3", userClass].filter(Boolean).join(" ");
+  };
+  const itemClass = () => {
+    const userClass = local.itemClass ?? "";
+    return ["flex flex-col gap-1", userClass].filter(Boolean).join(" ");
+  };
+  const termClass = () => {
+    const userClass = local.termClass ?? "";
+    return ["text-xs text-muted-foreground", userClass].filter(Boolean).join(" ");
+  };
+  const descriptionClass = () => {
+    const userClass = local.descriptionClass ?? "";
+    return ["text-sm text-foreground", userClass].filter(Boolean).join(" ");
+  };
+  const renderItems = () => local.items?.map((item) => (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("p"), _el$3 = createElement("p");
+    insertNode(_el$, _el$2);
+    insertNode(_el$, _el$3);
+    insert(_el$2, () => item.term);
+    insert(_el$3, () => item.description);
+    effect((_p$) => {
+      var _v$ = itemClass(), _v$2 = termClass(), _v$3 = descriptionClass();
+      _v$ !== _p$.e && (_p$.e = setProp(_el$, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$2, "class", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = setProp(_el$3, "class", _v$3, _p$.a));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined,
+      a: undefined
+    });
+    return _el$;
+  })());
+  return (() => {
+    var _el$4 = createElement("div");
+    spread(_el$4, mergeProps2({
+      get ["class"]() {
+        return listClass();
+      }
+    }, others), true);
+    insert(_el$4, (() => {
+      var _c$ = memo2(() => !!(local.items && local.items.length > 0));
+      return () => _c$() ? renderItems() : local.children;
+    })());
+    return _el$4;
+  })();
+};
+// solid/components/separator.tsx
+var Separator = (props) => {
+  const isHorizontal = () => (props.orientation ?? "horizontal") === "horizontal";
+  const separatorClass = () => {
+    if (isHorizontal()) {
+      return `h-px w-full bg-border ${props.class ?? ""}`;
+    }
+    return `h-full w-px bg-border ${props.class ?? ""}`;
+  };
+  return (() => {
+    var _el$ = createElement("div");
+    effect((_$p) => setProp(_el$, "class", separatorClass(), _$p));
+    return _el$;
+  })();
+};
+// solid/components/switch.tsx
+var Switch = (props) => {
+  const [local, others] = splitProps(props, ["checked", "defaultChecked", "onChange", "disabled", "class", "className", "role", "ariaLabel", "onClick"]);
+  const [internalChecked, setInternalChecked] = createSignal(local.defaultChecked ?? false);
+  const isChecked = () => local.checked !== undefined ? local.checked : internalChecked();
+  const handleClick = (event) => {
+    if (local.disabled)
+      return;
+    const newValue = !isChecked();
+    if (local.checked === undefined) {
+      setInternalChecked(newValue);
+    }
+    local.onChange?.(newValue);
+    local.onClick?.(event);
+  };
+  const trackClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = isChecked() ? "bg-primary" : "bg-input";
+    const disabled = local.disabled ? "opacity-50" : "";
+    return ["flex flex-row items-center h-6 w-11 rounded-full", base, disabled, userClass].filter(Boolean).join(" ");
+  };
+  const thumbClass = () => {
+    return "h-5 w-5 rounded-full bg-white";
+  };
+  const spacerClass = () => {
+    return isChecked() ? "w-5" : "w-px";
+  };
+  return (() => {
+    var _el$ = createElement("button"), _el$2 = createElement("div"), _el$4 = createElement("div");
+    insertNode(_el$, _el$2);
+    insertNode(_el$, _el$4);
+    setProp(_el$, "onClick", handleClick);
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return trackClass();
+      },
+      get disabled() {
+        return local.disabled;
+      },
+      get role() {
+        return local.role ?? "switch";
+      },
+      get ariaChecked() {
+        return isChecked();
+      },
+      get ariaDisabled() {
+        return local.disabled;
+      },
+      get ariaLabel() {
+        return local.ariaLabel;
+      }
+    }, others), true);
+    insertNode(_el$2, createTextNode(` `));
+    insertNode(_el$4, createTextNode(` `));
+    effect((_p$) => {
+      var _v$ = spacerClass(), _v$2 = thumbClass();
+      _v$ !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$4, "class", _v$2, _p$.t));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined
+    });
+    return _el$;
+  })();
+};
+// solid/components/toggle.tsx
+var Toggle = (props) => {
+  const [local, others] = splitProps(props, ["pressed", "defaultPressed", "onChange", "disabled", "class", "className", "role", "ariaLabel", "children", "onClick"]);
+  const [internalPressed, setInternalPressed] = createSignal(local.defaultPressed ?? false);
+  const isPressed = () => local.pressed !== undefined ? local.pressed : internalPressed();
+  const handleClick = (event) => {
+    if (local.disabled)
+      return;
+    const nextValue = !isPressed();
+    if (local.pressed === undefined) {
+      setInternalPressed(nextValue);
+    }
+    local.onChange?.(nextValue);
+    local.onClick?.(event);
+  };
+  const toggleClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    const base = "inline-flex items-center justify-center rounded-md border px-3 py-1 text-sm";
+    const state = isPressed() ? "bg-primary text-primary-foreground border-primary" : "bg-transparent text-foreground border-input";
+    const disabled = local.disabled ? "opacity-50" : "";
+    return [base, state, disabled, userClass].filter(Boolean).join(" ");
+  };
+  return (() => {
+    var _el$ = createElement("button");
+    setProp(_el$, "onClick", handleClick);
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return toggleClass();
+      },
+      get disabled() {
+        return local.disabled;
+      },
+      get role() {
+        return local.role ?? "button";
+      },
+      get ariaPressed() {
+        return isPressed();
+      },
+      get ariaDisabled() {
+        return local.disabled;
+      },
+      get ariaLabel() {
+        return local.ariaLabel;
+      }
+    }, others), true);
+    insert(_el$, () => local.children);
+    return _el$;
+  })();
+};
+// solid/components/skeleton.tsx
+var Skeleton = (props) => {
+  const cls = props.class ?? props.className ?? "";
+  return (() => {
+    var _el$ = createElement("div");
+    setProp(_el$, "class", `bg-muted rounded-md ${cls}`);
+    return _el$;
+  })();
+};
+// solid/components/textarea.tsx
+var Textarea = (props) => {
   const [localValue, setLocalValue] = createSignal(props.value ?? "");
   const displayValue = () => props.value !== undefined ? props.value : localValue();
   const handleInput = (e) => {
@@ -2690,184 +4551,710 @@ var Input = (props) => {
   };
   const computedClass = () => {
     const disabled = props.disabled ? "opacity-50" : "";
-    return `h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
+    return `flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ${disabled} ${props.class ?? ""}`;
   };
   return (() => {
-    var _el$11 = createElement("input");
-    setProp(_el$11, "onInput", handleInput);
+    var _el$ = createElement("textarea");
+    setProp(_el$, "onInput", handleInput);
     effect((_p$) => {
-      var _v$6 = computedClass(), _v$7 = displayValue(), _v$8 = props.placeholder, _v$9 = props.disabled;
-      _v$6 !== _p$.e && (_p$.e = setProp(_el$11, "class", _v$6, _p$.e));
-      _v$7 !== _p$.t && (_p$.t = setProp(_el$11, "value", _v$7, _p$.t));
-      _v$8 !== _p$.a && (_p$.a = setProp(_el$11, "placeholder", _v$8, _p$.a));
-      _v$9 !== _p$.o && (_p$.o = setProp(_el$11, "disabled", _v$9, _p$.o));
+      var _v$ = computedClass(), _v$2 = displayValue(), _v$3 = props.placeholder, _v$4 = props.rows ?? 3, _v$5 = props.disabled;
+      _v$ !== _p$.e && (_p$.e = setProp(_el$, "class", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$, "value", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = setProp(_el$, "placeholder", _v$3, _p$.a));
+      _v$4 !== _p$.o && (_p$.o = setProp(_el$, "rows", _v$4, _p$.o));
+      _v$5 !== _p$.i && (_p$.i = setProp(_el$, "disabled", _v$5, _p$.i));
       return _p$;
     }, {
       e: undefined,
       t: undefined,
       a: undefined,
-      o: undefined
+      o: undefined,
+      i: undefined
     });
-    return _el$11;
+    return _el$;
   })();
 };
-var Card = (props) => {
+// solid/components/scrollable.tsx
+var Scrollable = (props) => {
+  const [local, others] = splitProps(props, ["class", "className", "scrollX", "scrollY", "canvasWidth", "canvasHeight", "autoCanvas", "onScroll", "children"]);
+  const computedClass = () => {
+    const userClass = local.class ?? local.className ?? "";
+    return ["overflow-hidden", userClass].filter(Boolean).join(" ");
+  };
   return (() => {
-    var _el$12 = createElement("div");
-    setProp(_el$12, "class", "rounded-lg border border-border bg-neutral-900 text-foreground p-6 w-96");
-    insert(_el$12, () => props.children);
-    return _el$12;
+    var _el$ = createElement("div");
+    setProp(_el$, "scroll", true);
+    spread(_el$, mergeProps2({
+      get ["class"]() {
+        return computedClass();
+      },
+      get scrollX() {
+        return local.scrollX;
+      },
+      get scrollY() {
+        return local.scrollY;
+      },
+      get canvasWidth() {
+        return local.canvasWidth;
+      },
+      get canvasHeight() {
+        return local.canvasHeight;
+      },
+      get autoCanvas() {
+        return local.autoCanvas ?? true;
+      },
+      get onScroll() {
+        return local.onScroll;
+      }
+    }, others), true);
+    insert(_el$, () => local.children);
+    return _el$;
   })();
 };
-var CardHeader = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$13 = createElement("div");
-    setProp(_el$13, "class", `flex flex-row justify-between items-start pb-4 ${cls}`);
-    insert(_el$13, () => props.children);
-    return _el$13;
-  })();
+// solid/components/list.tsx
+var decodeScrollPayload = (payload) => {
+  if (!payload || payload.length === 0)
+    return "";
+  return new TextDecoder().decode(payload);
 };
-var CardHeaderContent = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$14 = createElement("div");
-    setProp(_el$14, "class", `flex flex-col gap-1 ${cls}`);
-    insert(_el$14, () => props.children);
-    return _el$14;
-  })();
-};
-var CardTitle = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$15 = createElement("p");
-    setProp(_el$15, "class", `text-lg text-foreground ${cls}`);
-    insert(_el$15, () => props.children);
-    return _el$15;
-  })();
-};
-var CardDescription = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$16 = createElement("p");
-    setProp(_el$16, "class", `text-sm text-muted-foreground ${cls}`);
-    insert(_el$16, () => props.children);
-    return _el$16;
-  })();
-};
-var CardAction = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$17 = createElement("div");
-    setProp(_el$17, "class", cls);
-    insert(_el$17, () => props.children);
-    return _el$17;
-  })();
-};
-var CardContent = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$18 = createElement("div");
-    setProp(_el$18, "class", `gap-4 ${cls}`);
-    insert(_el$18, () => props.children);
-    return _el$18;
-  })();
-};
-var CardFooter = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$19 = createElement("div");
-    setProp(_el$19, "class", `gap-2 pt-4 ${cls}`);
-    insert(_el$19, () => props.children);
-    return _el$19;
-  })();
-};
-var Label = (props) => {
-  const cls = props.class ?? props.className ?? "";
-  return (() => {
-    var _el$20 = createElement("p");
-    setProp(_el$20, "class", `text-sm text-foreground ${cls}`);
-    insert(_el$20, () => props.children);
-    return _el$20;
-  })();
-};
-
-// solid/App.tsx
-var App = () => {
-  return createComponent2(Card, {
-    className: "w-full max-w-sm",
+var List = (props) => {
+  const [scrollDetail, setScrollDetail] = createSignal(null);
+  const items = () => props.items ?? [];
+  const itemCount = () => items().length;
+  const itemSize = () => {
+    const value = Number(props.itemSize ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  };
+  const isVirtual = () => Boolean(props.virtual) && itemSize() > 0;
+  const virtualRange = createMemo(() => {
+    const total = itemCount();
+    if (!isVirtual()) {
+      return {
+        start: 0,
+        end: total,
+        offset: 0
+      };
+    }
+    const detail = scrollDetail();
+    const viewportSize = detail?.viewportHeight ?? props.viewportHeight ?? 0;
+    if (!Number.isFinite(viewportSize) || viewportSize <= 0) {
+      return {
+        start: 0,
+        end: total,
+        offset: 0
+      };
+    }
+    return computeVirtualRange({
+      itemCount: total,
+      itemSize: itemSize(),
+      viewportSize,
+      scrollOffset: detail?.offsetY ?? 0,
+      overscan: props.overscan
+    });
+  });
+  const visibleItems = createMemo(() => {
+    const all = items();
+    if (!isVirtual())
+      return all;
+    const range = virtualRange();
+    return all.slice(range.start, range.end);
+  });
+  const totalHeight = createMemo(() => {
+    if (typeof props.canvasHeight === "number" && Number.isFinite(props.canvasHeight)) {
+      return props.canvasHeight;
+    }
+    if (isVirtual()) {
+      return itemCount() * itemSize();
+    }
+    return;
+  });
+  const contentClass = () => {
+    const userClass = props.contentClass ?? props.contentClassName ?? "";
+    return ["flex flex-col", userClass].filter(Boolean).join(" ");
+  };
+  const itemClass = () => props.itemClass ?? props.itemClassName ?? "";
+  const offsetStyle = () => {
+    if (!isVirtual())
+      return;
+    return {
+      transform: `translateY(${virtualRange().offset}px)`
+    };
+  };
+  const itemStyle = () => {
+    if (!isVirtual())
+      return;
+    const size = itemSize();
+    if (!size)
+      return;
+    return {
+      height: `${size}px`
+    };
+  };
+  const handleScroll = (payload) => {
+    const detail = parseScrollDetail(decodeScrollPayload(payload));
+    if (detail) {
+      setScrollDetail(detail);
+    }
+    if (typeof props.onScroll === "function") {
+      props.onScroll(payload);
+    }
+  };
+  const renderItem = (item, index) => {
+    if (typeof props.renderItem === "function") {
+      return props.renderItem(item, index);
+    }
+    return item;
+  };
+  const renderedItems = () => {
+    const range = virtualRange();
+    return visibleItems().map((item, index) => {
+      const realIndex = isVirtual() ? range.start + index : index;
+      return (() => {
+        var _el$ = createElement("div");
+        insert(_el$, () => renderItem(item, realIndex));
+        effect((_p$) => {
+          var _v$ = itemClass(), _v$2 = itemStyle();
+          _v$ !== _p$.e && (_p$.e = setProp(_el$, "class", _v$, _p$.e));
+          _v$2 !== _p$.t && (_p$.t = setProp(_el$, "style", _v$2, _p$.t));
+          return _p$;
+        }, {
+          e: undefined,
+          t: undefined
+        });
+        return _el$;
+      })();
+    });
+  };
+  const listClass = () => props.class ?? props.className ?? "";
+  const autoCanvas = () => props.autoCanvas ?? !isVirtual();
+  return createComponent2(Scrollable, {
+    get ["class"]() {
+      return listClass();
+    },
+    get scrollX() {
+      return props.scrollX;
+    },
+    get scrollY() {
+      return props.scrollY;
+    },
+    get canvasWidth() {
+      return props.canvasWidth;
+    },
+    get canvasHeight() {
+      return totalHeight();
+    },
+    get autoCanvas() {
+      return autoCanvas();
+    },
+    onScroll: handleScroll,
     get children() {
-      return [createComponent2(CardHeader, {
-        get children() {
-          return [createComponent2(CardHeaderContent, {
-            get children() {
-              return [createComponent2(CardTitle, {
-                children: "Login to your account"
-              }), createComponent2(CardDescription, {
-                children: "Enter your email below to login to your account"
-              })];
-            }
-          }), createComponent2(CardAction, {
-            get children() {
-              return createComponent2(Button, {
-                variant: "link",
-                children: "Sign Up"
-              });
-            }
-          })];
-        }
-      }), createComponent2(CardContent, {
-        get children() {
-          var _el$ = createElement("form"), _el$2 = createElement("div"), _el$3 = createElement("div"), _el$4 = createElement("div"), _el$5 = createElement("div"), _el$6 = createElement("a");
-          insertNode(_el$, _el$2);
-          insertNode(_el$2, _el$3);
-          insertNode(_el$2, _el$4);
-          setProp(_el$2, "className", "flex flex-col gap-6");
-          setProp(_el$3, "className", "grid gap-2");
-          insert(_el$3, createComponent2(Label, {
-            htmlFor: "email",
-            children: "Email"
-          }), null);
-          insert(_el$3, createComponent2(Input, {
-            id: "email",
-            type: "email",
-            placeholder: "m@example.com",
-            required: true
-          }), null);
-          insertNode(_el$4, _el$5);
-          setProp(_el$4, "className", "grid gap-2");
-          insertNode(_el$5, _el$6);
-          setProp(_el$5, "className", "flex items-center");
-          insert(_el$5, createComponent2(Label, {
-            htmlFor: "password",
-            children: "Password"
-          }), _el$6);
-          insertNode(_el$6, createTextNode(`Forgot your password?`));
-          setProp(_el$6, "href", "#");
-          setProp(_el$6, "className", "ml-auto inline-block text-sm underline-offset-4 hover:underline");
-          insert(_el$4, createComponent2(Input, {
-            id: "password",
-            type: "password",
-            required: true
-          }), null);
-          return _el$;
-        }
-      }), createComponent2(CardFooter, {
-        className: "flex-col gap-2",
-        get children() {
-          return [createComponent2(Button, {
-            type: "submit",
-            className: "w-full",
-            children: "Login"
-          }), createComponent2(Button, {
-            variant: "outline",
-            className: "w-full",
-            children: "Login with Google"
-          })];
-        }
-      })];
+      var _el$2 = createElement("div");
+      insert(_el$2, renderedItems);
+      effect((_p$) => {
+        var _v$3 = contentClass(), _v$4 = offsetStyle();
+        _v$3 !== _p$.e && (_p$.e = setProp(_el$2, "class", _v$3, _p$.e));
+        _v$4 !== _p$.t && (_p$.t = setProp(_el$2, "style", _v$4, _p$.t));
+        return _p$;
+      }, {
+        e: undefined,
+        t: undefined
+      });
+      return _el$2;
     }
   });
+};
+// solid/App.tsx
+var App = () => {
+  const [lastEvent, setLastEvent] = createSignal("None");
+  const [scrollDetail, setScrollDetail] = createSignal("Idle");
+  const [dragDetail, setDragDetail] = createSignal("Idle");
+  const [overlayOpen, setOverlayOpen] = createSignal(false);
+  const [activeTab, setActiveTab] = createSignal("account");
+  const [activePage, setActivePage] = createSignal(3);
+  const [activeStep, setActiveStep] = createSignal(1);
+  const [activeRadio, setActiveRadio] = createSignal("email");
+  const [togglePressed, setTogglePressed] = createSignal(false);
+  const decodePayload = (payload) => {
+    if (!payload || payload.length === 0)
+      return "";
+    return new TextDecoder().decode(payload);
+  };
+  const logEvent = (label2) => (payload) => {
+    const detail = decodePayload(payload);
+    setLastEvent(detail ? `${label2}: ${detail}` : label2);
+  };
+  const logScroll = (payload) => {
+    const detail = decodePayload(payload) || "Idle";
+    setScrollDetail(detail);
+    setLastEvent(detail === "Idle" ? "scroll" : `scroll: ${detail}`);
+  };
+  const logDrag = (label2) => (payload) => {
+    const detail = decodePayload(payload);
+    const message = detail ? `${label2}: ${detail}` : label2;
+    setDragDetail(message);
+    setLastEvent(message);
+  };
+  const listItemHeight = 32;
+  const listViewportHeight = 160;
+  const scrollItems = Array.from({
+    length: 60
+  }, (_, index) => `Row ${index + 1}`);
+  const stepItems = [{
+    title: "Profile",
+    description: "Basics"
+  }, {
+    title: "Plan",
+    description: "Billing"
+  }, {
+    title: "Confirm",
+    description: "Review"
+  }];
+  return (() => {
+    var _el$ = createElement("div"), _el$2 = createElement("div"), _el$3 = createElement("h1"), _el$5 = createElement("p"), _el$7 = createElement("div"), _el$8 = createElement("div"), _el$9 = createElement("div"), _el$0 = createElement("div"), _el$1 = createElement("h2"), _el$11 = createElement("p"), _el$12 = createTextNode(`Last event: `), _el$13 = createElement("div"), _el$14 = createElement("p"), _el$16 = createElement("input"), _el$17 = createElement("div"), _el$18 = createElement("div"), _el$19 = createElement("div"), _el$20 = createElement("div"), _el$21 = createElement("h2"), _el$23 = createElement("p"), _el$24 = createElement("div"), _el$25 = createElement("div"), _el$26 = createElement("p"), _el$28 = createElement("div"), _el$30 = createElement("div"), _el$31 = createElement("p"), _el$33 = createElement("div"), _el$35 = createElement("div"), _el$36 = createElement("h2"), _el$38 = createElement("div"), _el$39 = createElement("div"), _el$40 = createElement("p"), _el$42 = createElement("div"), _el$43 = createElement("p"), _el$44 = createElement("div"), _el$45 = createElement("div"), _el$46 = createElement("h2"), _el$48 = createElement("p"), _el$49 = createTextNode(`Active tab: `), _el$56 = createElement("div"), _el$57 = createElement("h2"), _el$60 = createElement("div"), _el$61 = createElement("div"), _el$62 = createElement("div"), _el$63 = createElement("h2"), _el$65 = createElement("p"), _el$66 = createElement("div"), _el$67 = createElement("h2"), _el$69 = createElement("p"), _el$71 = createElement("div"), _el$72 = createElement("h2"), _el$74 = createElement("div"), _el$75 = createElement("div"), _el$76 = createElement("div"), _el$77 = createElement("p"), _el$79 = createElement("div");
+    insertNode(_el$, _el$2);
+    insertNode(_el$, _el$7);
+    setProp(_el$, "class", "flex flex-col gap-6 p-6");
+    insertNode(_el$2, _el$3);
+    insertNode(_el$2, _el$5);
+    setProp(_el$2, "class", "flex flex-col gap-1");
+    insertNode(_el$3, createTextNode(`Component Harness`));
+    setProp(_el$3, "class", "text-lg text-foreground");
+    insertNode(_el$5, createTextNode(`Validate overlays, focus/keyboard routing, drag, and scroll behaviors.`));
+    setProp(_el$5, "class", "text-sm text-muted-foreground");
+    insertNode(_el$7, _el$8);
+    insertNode(_el$7, _el$60);
+    setProp(_el$7, "class", "flex flex-row gap-6");
+    insertNode(_el$8, _el$9);
+    insertNode(_el$8, _el$19);
+    insertNode(_el$8, _el$35);
+    insertNode(_el$8, _el$44);
+    insertNode(_el$8, _el$56);
+    setProp(_el$8, "class", "flex flex-col gap-6");
+    insertNode(_el$9, _el$0);
+    insertNode(_el$9, _el$13);
+    insertNode(_el$9, _el$18);
+    setProp(_el$9, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$0, _el$1);
+    insertNode(_el$0, _el$11);
+    setProp(_el$0, "class", "flex flex-col gap-1");
+    insertNode(_el$1, createTextNode(`Focus + Keyboard`));
+    setProp(_el$1, "class", "text-sm text-foreground");
+    insertNode(_el$11, _el$12);
+    setProp(_el$11, "class", "text-xs text-muted-foreground");
+    insert(_el$11, lastEvent, null);
+    insertNode(_el$13, _el$14);
+    insertNode(_el$13, _el$16);
+    insertNode(_el$13, _el$17);
+    setProp(_el$13, "focusTrap", true);
+    setProp(_el$13, "class", "flex flex-col gap-3 rounded-md border border-border p-3");
+    insertNode(_el$14, createTextNode(`Focus trap region`));
+    setProp(_el$14, "class", "text-xs text-muted-foreground");
+    setProp(_el$16, "class", "h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground");
+    setProp(_el$16, "placeholder", "Focusable input");
+    setProp(_el$17, "class", "flex flex-row gap-2");
+    insert(_el$17, createComponent2(Button, {
+      size: "sm",
+      get onClick() {
+        return logEvent("click");
+      },
+      children: "Primary"
+    }), null);
+    insert(_el$17, createComponent2(Button, {
+      size: "sm",
+      variant: "outline",
+      get onClick() {
+        return logEvent("click");
+      },
+      children: "Outline"
+    }), null);
+    setProp(_el$18, "roving", true);
+    setProp(_el$18, "class", "flex flex-row gap-2 rounded-md border border-border p-2");
+    insert(_el$18, createComponent2(Button, {
+      size: "sm",
+      tabIndex: 0,
+      get onFocus() {
+        return logEvent("roving focus");
+      },
+      children: "One"
+    }), null);
+    insert(_el$18, createComponent2(Button, {
+      size: "sm",
+      tabIndex: 0,
+      get onFocus() {
+        return logEvent("roving focus");
+      },
+      children: "Two"
+    }), null);
+    insert(_el$18, createComponent2(Button, {
+      size: "sm",
+      tabIndex: 0,
+      get onFocus() {
+        return logEvent("roving focus");
+      },
+      children: "Three"
+    }), null);
+    insertNode(_el$19, _el$20);
+    insertNode(_el$19, _el$24);
+    setProp(_el$19, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$20, _el$21);
+    insertNode(_el$20, _el$23);
+    setProp(_el$20, "class", "flex flex-col gap-1");
+    insertNode(_el$21, createTextNode(`Drag + Drop`));
+    setProp(_el$21, "class", "text-sm text-foreground");
+    setProp(_el$23, "class", "text-xs text-muted-foreground");
+    insert(_el$23, dragDetail);
+    insertNode(_el$24, _el$25);
+    insertNode(_el$24, _el$30);
+    setProp(_el$24, "class", "flex flex-row gap-4");
+    insertNode(_el$25, _el$26);
+    insertNode(_el$25, _el$28);
+    setProp(_el$25, "class", "flex flex-col gap-2 rounded-md border border-border p-3 w-44");
+    insertNode(_el$26, createTextNode(`Drag source`));
+    setProp(_el$26, "class", "text-xs text-muted-foreground");
+    insertNode(_el$28, createTextNode(`Drag me`));
+    setProp(_el$28, "class", "flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground");
+    insertNode(_el$30, _el$31);
+    insertNode(_el$30, _el$33);
+    setProp(_el$30, "class", "flex flex-col gap-2 rounded-md border border-border p-3 w-44");
+    insertNode(_el$31, createTextNode(`Drop target`));
+    setProp(_el$31, "class", "text-xs text-muted-foreground");
+    insertNode(_el$33, createTextNode(`Drop here`));
+    setProp(_el$33, "class", "flex h-10 items-center justify-center rounded-md bg-muted text-muted-foreground");
+    insertNode(_el$35, _el$36);
+    insertNode(_el$35, _el$38);
+    setProp(_el$35, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$36, createTextNode(`Inputs + Toggles`));
+    setProp(_el$36, "class", "text-sm text-foreground");
+    insertNode(_el$38, _el$39);
+    insertNode(_el$38, _el$42);
+    setProp(_el$38, "class", "flex flex-col gap-3");
+    insert(_el$38, createComponent2(Checkbox, {
+      label: "Receive updates"
+    }), _el$39);
+    insert(_el$38, createComponent2(RadioGroup, {
+      get value() {
+        return activeRadio();
+      },
+      onChange: setActiveRadio,
+      get children() {
+        return [createComponent2(Radio, {
+          value: "email",
+          label: "Email alerts"
+        }), createComponent2(Radio, {
+          value: "sms",
+          label: "SMS alerts"
+        })];
+      }
+    }), _el$39);
+    insertNode(_el$39, _el$40);
+    setProp(_el$39, "class", "flex flex-row items-center gap-3");
+    insert(_el$39, createComponent2(Switch, {}), _el$40);
+    insertNode(_el$40, createTextNode(`Enable preview`));
+    setProp(_el$40, "class", "text-sm text-muted-foreground");
+    insertNode(_el$42, _el$43);
+    setProp(_el$42, "class", "flex flex-row items-center gap-3");
+    insert(_el$42, createComponent2(Toggle, {
+      get pressed() {
+        return togglePressed();
+      },
+      onChange: setTogglePressed,
+      children: "Auto-save"
+    }), _el$43);
+    setProp(_el$43, "class", "text-xs text-muted-foreground");
+    insert(_el$43, () => togglePressed() ? "On" : "Off");
+    insert(_el$38, createComponent2(Textarea, {
+      placeholder: "Type notes...",
+      rows: 3
+    }), null);
+    insertNode(_el$44, _el$45);
+    setProp(_el$44, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$45, _el$46);
+    insertNode(_el$45, _el$48);
+    setProp(_el$45, "class", "flex flex-col gap-1");
+    insertNode(_el$46, createTextNode(`Tabs`));
+    setProp(_el$46, "class", "text-sm text-foreground");
+    insertNode(_el$48, _el$49);
+    setProp(_el$48, "class", "text-xs text-muted-foreground");
+    insert(_el$48, activeTab, null);
+    insert(_el$44, createComponent2(Tabs, {
+      get value() {
+        return activeTab();
+      },
+      onChange: setActiveTab,
+      class: "flex flex-col gap-3",
+      get children() {
+        return [createComponent2(TabsList, {
+          get children() {
+            return [createComponent2(TabsTrigger, {
+              value: "account",
+              children: "Account"
+            }), createComponent2(TabsTrigger, {
+              value: "billing",
+              children: "Billing"
+            }), createComponent2(TabsTrigger, {
+              value: "team",
+              children: "Team"
+            })];
+          }
+        }), createComponent2(TabsContent, {
+          value: "account",
+          get children() {
+            var _el$50 = createElement("p");
+            insertNode(_el$50, createTextNode(`Manage profile and password.`));
+            setProp(_el$50, "class", "text-sm text-muted-foreground");
+            return _el$50;
+          }
+        }), createComponent2(TabsContent, {
+          value: "billing",
+          get children() {
+            var _el$52 = createElement("p");
+            insertNode(_el$52, createTextNode(`Update payment details.`));
+            setProp(_el$52, "class", "text-sm text-muted-foreground");
+            return _el$52;
+          }
+        }), createComponent2(TabsContent, {
+          value: "team",
+          get children() {
+            var _el$54 = createElement("p");
+            insertNode(_el$54, createTextNode(`Invite collaborators.`));
+            setProp(_el$54, "class", "text-sm text-muted-foreground");
+            return _el$54;
+          }
+        })];
+      }
+    }), null);
+    insertNode(_el$56, _el$57);
+    setProp(_el$56, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$57, createTextNode(`Actions + Containers`));
+    setProp(_el$57, "class", "text-sm text-foreground");
+    insert(_el$56, createComponent2(GroupBox, {
+      title: "Team Access",
+      description: "Manage roles and visibility.",
+      get children() {
+        var _el$59 = createElement("div");
+        setProp(_el$59, "class", "flex flex-row gap-2");
+        insert(_el$59, createComponent2(Button, {
+          size: "sm",
+          children: "Invite"
+        }), null);
+        insert(_el$59, createComponent2(Button, {
+          size: "sm",
+          variant: "secondary",
+          children: "Settings"
+        }), null);
+        return _el$59;
+      }
+    }), null);
+    insert(_el$56, createComponent2(Accordion, {
+      type: "single",
+      defaultValue: "overview",
+      collapsible: true,
+      get children() {
+        return [createComponent2(AccordionItem, {
+          value: "overview",
+          get children() {
+            return [createComponent2(AccordionTrigger, {
+              children: "Overview"
+            }), createComponent2(AccordionContent, {
+              children: "Quick status and usage details."
+            })];
+          }
+        }), createComponent2(AccordionItem, {
+          value: "details",
+          get children() {
+            return [createComponent2(AccordionTrigger, {
+              children: "Details"
+            }), createComponent2(AccordionContent, {
+              children: "Additional configuration and metadata."
+            })];
+          }
+        })];
+      }
+    }), null);
+    insert(_el$56, createComponent2(Collapsible, {
+      defaultOpen: true,
+      get children() {
+        return [createComponent2(CollapsibleTrigger, {
+          class: "rounded-md bg-muted px-2 py-1",
+          children: "Notes"
+        }), createComponent2(CollapsibleContent, {
+          children: "Use collapsible panels for optional helper copy."
+        })];
+      }
+    }), null);
+    insertNode(_el$60, _el$61);
+    insertNode(_el$60, _el$66);
+    insertNode(_el$60, _el$71);
+    setProp(_el$60, "class", "flex flex-col gap-6");
+    insertNode(_el$61, _el$62);
+    setProp(_el$61, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$62, _el$63);
+    insertNode(_el$62, _el$65);
+    setProp(_el$62, "class", "flex flex-col gap-1");
+    insertNode(_el$63, createTextNode(`Scroll Region`));
+    setProp(_el$63, "class", "text-sm text-foreground");
+    setProp(_el$65, "class", "text-xs text-muted-foreground");
+    insert(_el$65, scrollDetail);
+    insert(_el$61, createComponent2(List, {
+      class: "h-40 w-full rounded-md border border-border",
+      items: scrollItems,
+      itemSize: listItemHeight,
+      viewportHeight: listViewportHeight,
+      virtual: true,
+      itemClass: "flex h-8 items-center rounded-md border border-border px-2 text-sm text-foreground",
+      onScroll: logScroll
+    }), null);
+    insertNode(_el$66, _el$67);
+    insertNode(_el$66, _el$69);
+    setProp(_el$66, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$67, createTextNode(`Overlay Staging`));
+    setProp(_el$67, "class", "text-sm text-foreground");
+    insertNode(_el$69, createTextNode(`Open the modal to validate portal layering and focus trapping.`));
+    setProp(_el$69, "class", "text-xs text-muted-foreground");
+    insert(_el$66, createComponent2(Button, {
+      size: "sm",
+      onClick: () => setOverlayOpen(true),
+      children: "Open overlay"
+    }), null);
+    insertNode(_el$71, _el$72);
+    insertNode(_el$71, _el$74);
+    insertNode(_el$71, _el$75);
+    insertNode(_el$71, _el$76);
+    insertNode(_el$71, _el$79);
+    setProp(_el$71, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-96");
+    insertNode(_el$72, createTextNode(`Status + Feedback`));
+    setProp(_el$72, "class", "text-sm text-foreground");
+    setProp(_el$74, "class", "flex flex-row gap-2");
+    insert(_el$74, createComponent2(Badge, {
+      children: "Beta"
+    }), null);
+    insert(_el$74, createComponent2(Badge, {
+      variant: "secondary",
+      children: "Stable"
+    }), null);
+    insert(_el$74, createComponent2(Badge, {
+      variant: "outline",
+      children: "Outline"
+    }), null);
+    setProp(_el$75, "class", "flex flex-row gap-2");
+    insert(_el$75, createComponent2(Tag, {
+      children: "Internal"
+    }), null);
+    insert(_el$75, createComponent2(Tag, {
+      class: "bg-secondary text-secondary-foreground",
+      children: "Release"
+    }), null);
+    insertNode(_el$76, _el$77);
+    setProp(_el$76, "class", "flex flex-row items-center gap-1");
+    insertNode(_el$77, createTextNode(`Shortcut`));
+    setProp(_el$77, "class", "text-xs text-muted-foreground");
+    insert(_el$76, createComponent2(Kbd, {
+      children: "\u2318"
+    }), null);
+    insert(_el$76, createComponent2(Kbd, {
+      children: "K"
+    }), null);
+    insert(_el$71, createComponent2(Alert, {
+      title: "Snapshot note",
+      children: "Validate new styling before shipping."
+    }), _el$79);
+    insert(_el$71, createComponent2(DescriptionList, {
+      items: [{
+        term: "Status",
+        description: "Operational"
+      }, {
+        term: "Region",
+        description: "us-east-1"
+      }]
+    }), _el$79);
+    insert(_el$71, createComponent2(Separator, {}), _el$79);
+    insert(_el$71, createComponent2(Progress, {
+      value: 42
+    }), _el$79);
+    setProp(_el$79, "class", "flex flex-row gap-2");
+    insert(_el$79, createComponent2(Skeleton, {
+      class: "h-4 w-24"
+    }), null);
+    insert(_el$79, createComponent2(Skeleton, {
+      class: "h-4 w-16"
+    }), null);
+    insert(_el$79, createComponent2(Skeleton, {
+      class: "h-4 w-12"
+    }), null);
+    insert(_el$71, createComponent2(Stepper, {
+      steps: stepItems,
+      get value() {
+        return activeStep();
+      },
+      onChange: setActiveStep
+    }), null);
+    insert(_el$71, createComponent2(Pagination, {
+      get page() {
+        return activePage();
+      },
+      totalPages: 8,
+      onChange: setActivePage
+    }), null);
+    insert(_el$, createComponent2(Show, {
+      get when() {
+        return overlayOpen();
+      },
+      get children() {
+        var _el$80 = createElement("portal"), _el$81 = createElement("div"), _el$82 = createElement("div"), _el$83 = createElement("h3"), _el$85 = createElement("p"), _el$87 = createElement("div");
+        insertNode(_el$80, _el$81);
+        setProp(_el$80, "modal", true);
+        setProp(_el$80, "focusTrap", true);
+        insertNode(_el$81, _el$82);
+        setProp(_el$81, "class", "flex h-full w-full items-center justify-center");
+        insertNode(_el$82, _el$83);
+        insertNode(_el$82, _el$85);
+        insertNode(_el$82, _el$87);
+        setProp(_el$82, "class", "flex flex-col gap-3 rounded-lg border border-border bg-neutral-900 p-4 w-80");
+        insertNode(_el$83, createTextNode(`Overlay Preview`));
+        setProp(_el$83, "class", "text-sm text-foreground");
+        insertNode(_el$85, createTextNode(`Press buttons and use Tab to ensure focus stays inside.`));
+        setProp(_el$85, "class", "text-xs text-muted-foreground");
+        setProp(_el$87, "class", "flex flex-row gap-2");
+        insert(_el$87, createComponent2(Button, {
+          size: "sm",
+          onClick: () => setOverlayOpen(false),
+          children: "Close"
+        }), null);
+        insert(_el$87, createComponent2(Button, {
+          size: "sm",
+          variant: "secondary",
+          children: "Action"
+        }), null);
+        return _el$80;
+      }
+    }), null);
+    effect((_p$) => {
+      var _v$ = logEvent("focus"), _v$2 = logEvent("blur"), _v$3 = logEvent("keydown"), _v$4 = logEvent("keyup"), _v$5 = logDrag("dragstart"), _v$6 = logDrag("drag"), _v$7 = logDrag("dragend"), _v$8 = logDrag("dragenter"), _v$9 = logDrag("dragleave"), _v$0 = logDrag("drop");
+      _v$ !== _p$.e && (_p$.e = setProp(_el$16, "onFocus", _v$, _p$.e));
+      _v$2 !== _p$.t && (_p$.t = setProp(_el$16, "onBlur", _v$2, _p$.t));
+      _v$3 !== _p$.a && (_p$.a = setProp(_el$16, "onKeyDown", _v$3, _p$.a));
+      _v$4 !== _p$.o && (_p$.o = setProp(_el$16, "onKeyUp", _v$4, _p$.o));
+      _v$5 !== _p$.i && (_p$.i = setProp(_el$25, "onDragStart", _v$5, _p$.i));
+      _v$6 !== _p$.n && (_p$.n = setProp(_el$25, "onDrag", _v$6, _p$.n));
+      _v$7 !== _p$.s && (_p$.s = setProp(_el$25, "onDragEnd", _v$7, _p$.s));
+      _v$8 !== _p$.h && (_p$.h = setProp(_el$30, "onDragEnter", _v$8, _p$.h));
+      _v$9 !== _p$.r && (_p$.r = setProp(_el$30, "onDragLeave", _v$9, _p$.r));
+      _v$0 !== _p$.d && (_p$.d = setProp(_el$30, "onDrop", _v$0, _p$.d));
+      return _p$;
+    }, {
+      e: undefined,
+      t: undefined,
+      a: undefined,
+      o: undefined,
+      i: undefined,
+      n: undefined,
+      s: undefined,
+      h: undefined,
+      r: undefined,
+      d: undefined
+    });
+    return _el$;
+  })();
 };
 
 // solid/solid-entry.tsx
