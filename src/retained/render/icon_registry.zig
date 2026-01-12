@@ -321,7 +321,7 @@ fn ensureVectorBytes(entry: *IconEntry) ![]const u8 {
     const tvg_bytes = try dvui.svgToTvg(icon_allocator, vector_ptr.svg_bytes);
     icon_allocator.free(vector_ptr.svg_bytes);
     vector_ptr.svg_bytes = &.{};
-    vector_ptr.tvg_bytes = tvg_bytes;
+    vector_ptr.tvg_bytes = @constCast(tvg_bytes);
     return vector_ptr.tvg_bytes;
 }
 

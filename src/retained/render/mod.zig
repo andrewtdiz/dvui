@@ -887,10 +887,11 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         const overlay_rect = if (overlay_state.modal) screen_rect else overlay_state.hit_rect orelse types.Rect{};
         const overlay_rect_phys = direct.rectToPhysical(overlay_rect);
         const overlay_rect_nat = physicalToDvuiRect(overlay_rect);
+        const overlay_rect_natural = dvui.Rect.Natural.cast(overlay_rect_nat);
         const overlay_mouse_events = overlay_state.modal or overlay_state.hit_rect != null;
 
         dvui.subwindowAdd(overlay_id, overlay_rect_nat, overlay_rect_phys, overlay_state.modal, null, overlay_mouse_events);
-        const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_nat);
+        const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_natural);
         defer dvui.subwindowCurrentSet(prev.id, prev.rect);
 
         render_layer = .overlay;
@@ -1969,7 +1970,6 @@ fn renderSlider(
                     fraction = @max(0, @min(1, value));
                     changed = true;
                 },
-                else => {},
             }
         }
 
