@@ -1,8 +1,13 @@
 const std = @import("std");
 
 const dvui = @import("dvui");
-const build_options = @import("build_options");
 const FontStyle = dvui.Options.FontStyle;
+
+const msdf_placeholder_font_id: ?dvui.Font.FontId = if (@hasDecl(dvui.Font, "msdf_placeholder_font_id"))
+    @field(dvui.Font, "msdf_placeholder_font_id")
+else
+    null;
+const msdf_enabled = msdf_placeholder_font_id != null;
 
 const color_data = @import("colors.zig");
 
@@ -351,7 +356,7 @@ pub fn resolveFont(spec: *const Spec, options: *dvui.Options) void {
             resolved_font = resolved_font.switchFont(resolved_id);
         }
     }
-    if (spec.font_render_mode != .raster and build_options.msdf) {
+    if (spec.font_render_mode != .raster and msdf_enabled) {
         if (msdfFontIdFor(resolved_font.id)) |msdf_id| {
             if (msdf_id != resolved_font.id) {
                 resolved_font = resolved_font.switchFont(msdf_id);
@@ -664,13 +669,14 @@ fn fontIdForDyslexic(weight: FontWeight, slant: FontSlant) dvui.Font.FontId {
 }
 
 fn msdfFontIdFor(font_id: dvui.Font.FontId) ?dvui.Font.FontId {
-    if (font_id == dvui.Font.msdf_placeholder_font_id) return font_id;
+    const placeholder = msdf_placeholder_font_id orelse return null;
+    if (font_id == placeholder) return font_id;
     return switch (font_id) {
         .SegoeUI,
         .SegoeUIBd,
         .SegoeUIIl,
         .SegoeUILt,
-        => dvui.Font.msdf_placeholder_font_id,
+        => placeholder,
         else => null,
     };
 }

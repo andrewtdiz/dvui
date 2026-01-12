@@ -3,7 +3,8 @@ const dvui = @import("dvui");
 const types = @import("../core/types.zig");
 const flex = @import("flex.zig");
 const measure = @import("measure.zig");
-const build_options = @import("build_options");
+
+const use_yoga_layout = true;
 
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
@@ -241,7 +242,7 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     }
 
     if (spec.is_flex) {
-        if (comptime build_options.yoga) {
+        if (use_yoga_layout) {
             const yoga_layout = @import("yoga.zig");
             yoga_layout.layoutFlexChildren(store, node, layout_rect, spec);
         } else {
