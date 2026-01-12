@@ -37,6 +37,36 @@ var button_text_error_log_count: usize = 0;
 var paragraph_log_count: usize = 0;
 var input_enabled_state: bool = true;
 
+pub fn init() void {
+    gizmo_override_rect = null;
+    gizmo_rect_pending = null;
+    logged_tree_dump = false;
+    logged_render_state = false;
+    logged_button_render = false;
+    button_debug_count = 0;
+    button_text_error_log_count = 0;
+    paragraph_log_count = 0;
+    input_enabled_state = true;
+    drag_drop.init();
+    paint_cache.init();
+    image_loader.init();
+}
+
+pub fn deinit() void {
+    drag_drop.deinit();
+    image_loader.deinit();
+    paint_cache.deinit();
+    gizmo_override_rect = null;
+    gizmo_rect_pending = null;
+    logged_tree_dump = false;
+    logged_render_state = false;
+    logged_button_render = false;
+    button_debug_count = 0;
+    button_text_error_log_count = 0;
+    paragraph_log_count = 0;
+    input_enabled_state = true;
+}
+
 fn physicalToDvuiRect(rect: types.Rect) dvui.Rect {
     const scale = dvui.windowNaturalScale();
     const inv_scale: f32 = if (scale != 0) 1.0 / scale else 1.0;

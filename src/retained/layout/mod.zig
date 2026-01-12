@@ -9,6 +9,16 @@ const use_yoga_layout = true;
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
 
+pub fn init() void {
+    last_screen_size = .{};
+    last_natural_scale = 0;
+}
+
+pub fn deinit() void {
+    last_screen_size = .{};
+    last_natural_scale = 0;
+}
+
 pub fn updateLayouts(store: *types.NodeStore) void {
     const win = dvui.currentWindow();
     const screen_w = win.rect_pixels.w;

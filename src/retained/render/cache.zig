@@ -10,6 +10,14 @@ const log = std.log.scoped(.solid_bridge);
 
 var paint_clip_debug_count: usize = 0;
 
+pub fn init() void {
+    paint_clip_debug_count = 0;
+}
+
+pub fn deinit() void {
+    paint_clip_debug_count = 0;
+}
+
 pub const DirtyRegionTracker = struct {
     regions: std.ArrayList(types.Rect) = .empty,
     allocator: std.mem.Allocator,
@@ -127,14 +135,14 @@ pub fn renderCachedOrDirectBackground(
 
         if (has_border) {
             const uniform = border_left == border_right and border_left == border_top and border_left == border_bottom;
-                if (uniform and border_left > 0) {
-                    if (bg_color_opt) |bg_color| {
-                        outer_phys.fill(outer_radius, .{ .color = bg_color, .fade = fade });
-                    }
-                    const stroke_rect = outer_phys.insetAll(border_left * 0.5);
-                    // Normal borders should respect paint order; don't use `.after` which forces overlay.
-                    stroke_rect.stroke(outer_radius, .{ .thickness = border_left, .color = border_color });
-                } else {
+            if (uniform and border_left > 0) {
+                if (bg_color_opt) |bg_color| {
+                    outer_phys.fill(outer_radius, .{ .color = bg_color, .fade = fade });
+                }
+                const stroke_rect = outer_phys.insetAll(border_left * 0.5);
+                // Normal borders should respect paint order; don't use `.after` which forces overlay.
+                stroke_rect.stroke(outer_radius, .{ .thickness = border_left, .color = border_color });
+            } else {
                 // Non-uniform borders: fill outer with border color, then inner with background.
                 outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
                 if (bg_color_opt) |bg_color| {

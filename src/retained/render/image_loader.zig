@@ -11,6 +11,24 @@ pub const ImageResource = struct {
 const ImageCache = std.StringHashMap(ImageResource);
 var image_cache = ImageCache.init(image_allocator);
 
+pub fn init() void {
+    image_cache = ImageCache.init(image_allocator);
+}
+
+pub fn deinit() void {
+    clearCache();
+    image_cache.deinit();
+    image_cache = ImageCache.init(image_allocator);
+}
+
+fn clearCache() void {
+    var iter = image_cache.iterator();
+    while (iter.next()) |entry| {
+        image_allocator.free(entry.key_ptr.*);
+        image_allocator.free(entry.value_ptr.bytes);
+    }
+}
+
 pub const ImageError = error{
     MissingImageSource,
     ImageNotFound,
