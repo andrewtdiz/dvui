@@ -1575,23 +1575,27 @@ var createFlushController = (ctx) => {
   let seq = 0;
   let syncedOnce = false;
   let needFullSync = false;
+  let mutationsOnlySynced = false;
   const snapshotEveryFlush = mutationMode === "snapshot_every_flush";
   const snapshotOnceThenMutations = mutationMode === "snapshot_once";
   const mutationsOnlyAfterSnapshot = mutationMode === "mutations_only";
   const flush = () => {
     flushPending = false;
-    const nodes = serializeTree(root.children);
-    encoder.reset();
-    for (const child of root.children) {
-      emitNode(child, encoder, 0);
-    }
+    let nodes = null;
+    const ensureNodes = () => {
+      if (!nodes)
+        nodes = serializeTree(root.children);
+      return nodes;
+    };
+    let shouldEncodeCommands = native.setSolidTree == null;
     for (const node of nodeIndex.values()) {
       if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
         emitPendingListeners(node, ops);
       }
     }
-    if (mutationsOnlyAfterSnapshot && ops.length === 0) {
-      for (const n of nodes) {
+    const needsCreateOps = mutationsOnlyAfterSnapshot && !mutationsOnlySynced && ops.length === 0;
+    if (needsCreateOps) {
+      for (const n of ensureNodes()) {
         if (n.id === 0)
           continue;
         const createOp = {
@@ -1646,6 +1650,7 @@ var createFlushController = (ctx) => {
         };
         ops.push(createOp);
       }
+      shouldEncodeCommands = true;
     }
     if (mutationsSupported && native.applyOps && ops.length > 0 && !needFullSync && (syncedOnce || mutationsOnlyAfterSnapshot)) {
       const payloadObj = { seq: ++seq, ops };
@@ -1654,19 +1659,25 @@ var createFlushController = (ctx) => {
       ops.length = 0;
       if (!ok) {
         needFullSync = true;
+      } else if (mutationsOnlyAfterSnapshot) {
+        mutationsOnlySynced = true;
       }
     }
     const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || !mutationsSupported && native.setSolidTree != null;
     let sentSnapshot = false;
     if (native.setSolidTree && shouldSnapshot) {
-      const payloadObj = { nodes };
+      const payloadObj = { nodes: ensureNodes() };
       const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       native.setSolidTree(payload);
       markCreated(root);
       syncedOnce = true;
+      if (mutationsOnlyAfterSnapshot) {
+        mutationsOnlySynced = true;
+      }
       needFullSync = false;
       ops.length = 0;
       sentSnapshot = true;
+      shouldEncodeCommands = true;
       for (const node of nodeIndex.values()) {
         if (node.sentListeners.size > 0) {
           node.sentListeners.clear();
@@ -1690,6 +1701,12 @@ var createFlushController = (ctx) => {
         }
       }
       ops.length = 0;
+    }
+    if (shouldEncodeCommands) {
+      encoder.reset();
+      for (const child of root.children) {
+        emitNode(child, encoder, 0);
+      }
     }
     native.commit(encoder);
   };
@@ -2546,6 +2563,21 @@ var createCallbackBundle = (callbacks = {}) => {
 };
 
 // solid/native/adapter.ts
+var EVENT_KIND_TO_NAME = {
+  0: "click",
+  1: "input",
+  2: "focus",
+  3: "blur",
+  4: "mouseenter",
+  5: "mouseleave",
+  6: "keydown",
+  7: "keyup",
+  8: "change",
+  9: "submit",
+  20: "scroll"
+};
+var EVENT_DECODER = new TextDecoder;
+
 class NativeRenderer {
   lib;
   callbacks;
@@ -2555,6 +2587,8 @@ class NativeRenderer {
   textEncoder = new TextEncoder;
   callbackDepth = 0;
   closeDeferred = false;
+  lastEventOverflow = 0;
+  lastDetailOverflow = 0;
   encoder;
   capabilities = { window: true };
   disposed = false;
@@ -2645,7 +2679,7 @@ class NativeRenderer {
   pollEvents(nodeIndex) {
     if (this.disposed)
       return 0;
-    const headerBuffer = new Uint8Array(16);
+    const headerBuffer = new Uint8Array(24);
     const copied = this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length);
     if (Number(copied) !== headerBuffer.length)
       return 0;
@@ -2654,6 +2688,22 @@ class NativeRenderer {
     const writeHead = headerView.getUint32(4, true);
     const capacity = headerView.getUint32(8, true);
     const detailCapacity = headerView.getUint32(12, true);
+    const droppedEvents = headerView.getUint32(16, true);
+    const droppedDetails = headerView.getUint32(20, true);
+    if (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow) {
+      const eventDelta = droppedEvents >= this.lastEventOverflow ? droppedEvents - this.lastEventOverflow : droppedEvents;
+      const detailDelta = droppedDetails >= this.lastDetailOverflow ? droppedDetails - this.lastDetailOverflow : droppedDetails;
+      if (eventDelta > 0 || detailDelta > 0) {
+        const parts = [];
+        if (eventDelta > 0)
+          parts.push(`${eventDelta} events`);
+        if (detailDelta > 0)
+          parts.push(`${detailDelta} detail payloads`);
+        console.warn(`[native] Event ring overflow: dropped ${parts.join(" and ")}.`);
+      }
+      this.lastEventOverflow = droppedEvents;
+      this.lastDetailOverflow = droppedDetails;
+    }
     if (readHead === writeHead || capacity === 0)
       return 0;
     const bufferPtr = this.lib.symbols.getEventRingBuffer(this.handle);
@@ -2663,20 +2713,6 @@ class NativeRenderer {
     const EVENT_ENTRY_SIZE = 16;
     const bufferView = new DataView(toArrayBuffer2(bufferPtr, 0, capacity * EVENT_ENTRY_SIZE));
     const detailBuffer = detailPtr ? new Uint8Array(toArrayBuffer2(detailPtr, 0, detailCapacity)) : new Uint8Array(0);
-    const decoder = new TextDecoder;
-    const eventKindToName = {
-      0: "click",
-      1: "input",
-      2: "focus",
-      3: "blur",
-      4: "mouseenter",
-      5: "mouseleave",
-      6: "keydown",
-      7: "keyup",
-      8: "change",
-      9: "submit",
-      20: "scroll"
-    };
     let current = readHead;
     let dispatched = 0;
     while (current < writeHead) {
@@ -2686,14 +2722,14 @@ class NativeRenderer {
       const nodeId = bufferView.getUint32(offset + 4, true);
       const detailOffset = bufferView.getUint32(offset + 8, true);
       const detailLen = bufferView.getUint16(offset + 12, true);
-      const eventName = eventKindToName[kind] ?? "unknown";
+      const eventName = EVENT_KIND_TO_NAME[kind] ?? "unknown";
       const node = nodeIndex.get(nodeId);
       if (node) {
         const handlers = node.listeners.get(eventName);
         if (handlers && handlers.size > 0) {
           let detail;
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
-            detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+            detail = EVENT_DECODER.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
           const isKeyEvent = eventName === "keydown" || eventName === "keyup";
           const keyValue = isKeyEvent ? detail : undefined;
@@ -2831,6 +2867,42 @@ var resolveValue = (input) => {
   }
   return resolved;
 };
+var normalizeResolvedValue = (resolved) => {
+  if (resolved == null || resolved === true || resolved === false)
+    return null;
+  if (typeof resolved === "string" || typeof resolved === "number")
+    return resolved;
+  if (resolved instanceof HostNode)
+    return resolved;
+  return null;
+};
+var normalizeInsertValue = (value) => {
+  const resolved = resolveValue(value);
+  if (Array.isArray(resolved)) {
+    const items = [];
+    for (const entry of resolved) {
+      const normalized = normalizeResolvedValue(resolveValue(entry));
+      if (normalized != null)
+        items.push(normalized);
+    }
+    return items;
+  }
+  return normalizeResolvedValue(resolved);
+};
+var updateTextNode = (node, value) => {
+  if (node.tag !== "text")
+    return false;
+  const nextValue = String(value);
+  if (node.props.text === nextValue)
+    return false;
+  const hostOps = getRuntimeHostOps();
+  if (hostOps?.replaceText) {
+    hostOps.replaceText(node, nextValue);
+  } else {
+    node.props.text = nextValue;
+  }
+  return true;
+};
 var appendContent = (parent, value) => {
   if (value == null || value === true || value === false)
     return false;
@@ -2851,17 +2923,83 @@ var clearChildren = (node) => {
     removeNode(node, child);
   }
 };
-var applyInsertValue = (parent, value) => {
-  const resolved = resolveValue(value);
-  clearChildren(parent);
-  if (Array.isArray(resolved)) {
-    for (const item of resolved) {
-      appendContent(parent, resolveValue(item));
+var syncInsertSingle = (parent, value) => {
+  const children2 = parent.children;
+  if (children2.length === 1) {
+    const existing = children2[0];
+    if (value instanceof HostNode) {
+      if (existing === value)
+        return false;
+    } else if (existing.tag === "text") {
+      return updateTextNode(existing, value);
     }
-  } else {
-    appendContent(parent, resolved);
   }
-  notifyRuntimePropChange();
+  clearChildren(parent);
+  appendContent(parent, value);
+  return true;
+};
+var syncInsertArray = (parent, values) => {
+  const children2 = parent.children;
+  if (values.length === 0) {
+    if (children2.length === 0)
+      return false;
+    clearChildren(parent);
+    return true;
+  }
+  if (children2.length !== values.length) {
+    clearChildren(parent);
+    for (const item of values) {
+      appendContent(parent, item);
+    }
+    return true;
+  }
+  for (let i = 0;i < values.length; i += 1) {
+    const value = values[i];
+    const child = children2[i];
+    if (value instanceof HostNode) {
+      if (child !== value) {
+        clearChildren(parent);
+        for (const item of values) {
+          appendContent(parent, item);
+        }
+        return true;
+      }
+    } else if (child.tag !== "text") {
+      clearChildren(parent);
+      for (const item of values) {
+        appendContent(parent, item);
+      }
+      return true;
+    }
+  }
+  let changed = false;
+  for (let i = 0;i < values.length; i += 1) {
+    const value = values[i];
+    if (typeof value === "string" || typeof value === "number") {
+      if (updateTextNode(children2[i], value))
+        changed = true;
+    }
+  }
+  return changed;
+};
+var syncInsertValue = (parent, value) => {
+  if (value == null) {
+    if (parent.children.length === 0)
+      return false;
+    clearChildren(parent);
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return syncInsertArray(parent, value);
+  }
+  return syncInsertSingle(parent, value);
+};
+var applyInsertValue = (parent, value) => {
+  const normalized = normalizeInsertValue(value);
+  const changed = syncInsertValue(parent, normalized);
+  if (changed) {
+    notifyRuntimePropChange();
+  }
 };
 var insert = (parent, value, anchor) => {
   const hostOps = getRuntimeHostOps();
