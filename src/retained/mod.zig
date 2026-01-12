@@ -45,6 +45,52 @@ const SolidSnapshot = struct {
     nodes: []const SolidSnapshotNode = &.{},
 };
 
+const SolidOp = struct {
+    op: []const u8,
+    id: u32 = 0,
+    parent: ?u32 = null,
+    before: ?u32 = null,
+    tag: ?[]const u8 = null,
+    text: ?[]const u8 = null,
+    className: ?[]const u8 = null,
+    eventType: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+    value: ?[]const u8 = null,
+    src: ?[]const u8 = null,
+    rotation: ?f32 = null,
+    scaleX: ?f32 = null,
+    scaleY: ?f32 = null,
+    anchorX: ?f32 = null,
+    anchorY: ?f32 = null,
+    translateX: ?f32 = null,
+    translateY: ?f32 = null,
+    opacity: ?f32 = null,
+    cornerRadius: ?f32 = null,
+    background: ?u32 = null,
+    textColor: ?u32 = null,
+    clipChildren: ?bool = null,
+    scroll: ?bool = null,
+    scrollX: ?f32 = null,
+    scrollY: ?f32 = null,
+    canvasWidth: ?f32 = null,
+    canvasHeight: ?f32 = null,
+    autoCanvas: ?bool = null,
+};
+
+const SolidOpBatch = struct {
+    ops: []const SolidOp = &.{},
+    seq: ?u64 = null,
+};
+
+const OpError = error{
+    OutOfMemory,
+    UnknownOp,
+    MissingId,
+    MissingParent,
+    MissingChild,
+    MissingTag,
+};
+
 pub fn init() void {
     layout.init();
     render_mod.init();
@@ -199,6 +245,225 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
         return root_node.children.items.len > 0;
     }
     return false;
+}
+
+pub fn applyOps(store: *types.NodeStore, seq_last: *u64, json_bytes: []const u8) bool {
+    const store_allocator = store.allocator;
+    var parsed = std.json.parseFromSlice(SolidOpBatch, store_allocator, json_bytes, .{
+        .ignore_unknown_fields = true,
+    }) catch return false;
+    defer parsed.deinit();
+
+    const batch = parsed.value;
+    const seq = batch.seq orelse seq_last.* + 1;
+    if (seq <= seq_last.*) {
+        return false;
+    }
+
+    for (batch.ops) |op| {
+        applySolidOp(store, op) catch return false;
+    }
+    seq_last.* = seq;
+
+    const root_node = store.node(0) orelse return false;
+    return root_node.children.items.len > 0;
+}
+
+fn applyTransformFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.rotation) |value| {
+        target.transform.rotation = value;
+        changed = true;
+    }
+    if (op.scaleX) |value| {
+        target.transform.scale[0] = value;
+        changed = true;
+    }
+    if (op.scaleY) |value| {
+        target.transform.scale[1] = value;
+        changed = true;
+    }
+    if (op.anchorX) |value| {
+        target.transform.anchor[0] = value;
+        changed = true;
+    }
+    if (op.anchorY) |value| {
+        target.transform.anchor[1] = value;
+        changed = true;
+    }
+    if (op.translateX) |value| {
+        target.transform.translation[0] = value;
+        changed = true;
+    }
+    if (op.translateY) |value| {
+        target.transform.translation[1] = value;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
+fn applyVisualFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.opacity) |value| {
+        target.visual_props.opacity = value;
+        changed = true;
+    }
+    if (op.cornerRadius) |value| {
+        target.visual_props.corner_radius = value;
+        changed = true;
+    }
+    if (op.background) |color| {
+        target.visual_props.background = .{ .value = color };
+        changed = true;
+    }
+    if (op.textColor) |color| {
+        target.visual_props.text_color = .{ .value = color };
+        changed = true;
+    }
+    if (op.clipChildren) |flag| {
+        target.visual_props.clip_children = flag;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
+fn applyScrollFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.scroll) |flag| {
+        target.scroll.enabled = flag;
+        changed = true;
+    }
+    if (op.scrollX) |value| {
+        target.scroll.offset_x = value;
+        changed = true;
+    }
+    if (op.scrollY) |value| {
+        target.scroll.offset_y = value;
+        changed = true;
+    }
+    if (op.canvasWidth) |value| {
+        target.scroll.canvas_width = value;
+        changed = true;
+    }
+    if (op.canvasHeight) |value| {
+        target.scroll.canvas_height = value;
+        changed = true;
+    }
+    if (op.autoCanvas) |flag| {
+        target.scroll.auto_canvas = flag;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
+fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
+    if (op.op.len == 0) return error.UnknownOp;
+
+    if (std.mem.eql(u8, op.op, "create")) {
+        const tag = op.tag orelse return error.MissingTag;
+        if (std.mem.eql(u8, tag, "text")) {
+            try store.setTextNode(op.id, op.text orelse "");
+        } else if (std.mem.eql(u8, tag, "slot")) {
+            try store.upsertSlot(op.id);
+        } else {
+            try store.upsertElement(op.id, tag);
+        }
+        if (op.className) |cls| {
+            try store.setClassName(op.id, cls);
+        }
+        try applyTransformFields(store, op.id, op);
+        try applyVisualFields(store, op.id, op);
+        try applyScrollFields(store, op.id, op);
+        const parent_id: u32 = op.parent orelse 0;
+        try store.insert(parent_id, op.id, op.before);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "remove")) {
+        if (op.id == 0) return error.MissingId;
+        store.remove(op.id);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "move") or std.mem.eql(u8, op.op, "insert")) {
+        if (op.id == 0) return error.MissingId;
+        const parent_id = op.parent orelse return error.MissingParent;
+        if (store.node(op.id) == null) return error.MissingChild;
+        if (store.node(parent_id) == null) return error.MissingParent;
+        try store.insert(parent_id, op.id, op.before);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_text")) {
+        if (op.id == 0) return error.MissingId;
+        try store.setTextNode(op.id, op.text orelse "");
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_class")) {
+        if (op.id == 0) return error.MissingId;
+        const cls = op.className orelse return error.MissingTag;
+        try store.setClassName(op.id, cls);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_transform")) {
+        if (op.id == 0) return error.MissingId;
+        try applyTransformFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_visual")) {
+        if (op.id == 0) return error.MissingId;
+        try applyVisualFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_scroll")) {
+        if (op.id == 0) return error.MissingId;
+        try applyScrollFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "listen")) {
+        if (op.id == 0) return error.MissingId;
+        const event_type = op.eventType orelse return error.MissingTag;
+        try store.addListener(op.id, event_type);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set")) {
+        if (op.id == 0) return error.MissingId;
+        const prop_name = op.name orelse return error.MissingTag;
+
+        if (std.mem.eql(u8, prop_name, "class") or std.mem.eql(u8, prop_name, "className")) {
+            const val = op.value orelse op.className orelse return error.MissingTag;
+            try store.setClassName(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "src")) {
+            const val = op.value orelse op.src orelse return error.MissingTag;
+            try store.setImageSource(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "value")) {
+            const val = op.value orelse return error.MissingTag;
+            try store.setInputValue(op.id, val);
+            return;
+        }
+        return;
+    }
+
+    return error.UnknownOp;
 }
 
 pub fn getNodeRect(store: *types.NodeStore, node_id: u32) ?types.Rect {
