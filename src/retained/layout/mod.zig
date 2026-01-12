@@ -1,1 +1,321 @@
-pub const placeholder = struct {};
+const dvui = @import("dvui");
+
+const types = @import("../core/types.zig");
+const flex = @import("flex.zig");
+const measure = @import("measure.zig");
+const build_options = @import("build_options");
+
+var last_screen_size: types.Size = .{};
+var last_natural_scale: f32 = 0;
+
+pub fn updateLayouts(store: *types.NodeStore) void {
+    const win = dvui.currentWindow();
+    const screen_w = win.rect_pixels.w;
+    const screen_h = win.rect_pixels.h;
+    const natural_scale = dvui.windowNaturalScale();
+
+    const root_rect = types.Rect{
+        .x = 0,
+        .y = 0,
+        .w = screen_w,
+        .h = screen_h,
+    };
+
+    const root = store.node(0) orelse return;
+
+    const missing_layout = hasMissingLayout(store, root);
+
+    // If screen size changed, invalidate the entire layout tree so descendants recompute.
+    const size_changed = last_screen_size.w != screen_w or last_screen_size.h != screen_h;
+    const scale_changed = last_natural_scale != natural_scale;
+    if (size_changed or scale_changed) {
+        invalidateLayoutSubtree(store, root);
+        store.markNodeChanged(root.id);
+        last_screen_size = .{ .w = screen_w, .h = screen_h };
+        last_natural_scale = natural_scale;
+    }
+
+    // Skip work when nothing is dirty and the screen size is stable.
+    if (!size_changed and !scale_changed and !root.hasDirtySubtree() and !missing_layout) {
+        return;
+    }
+
+    updateLayoutIfDirty(store, root, root_rect);
+}
+
+pub fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void {
+    node.invalidateLayout();
+    node.invalidatePaint();
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            invalidateLayoutSubtree(store, child);
+        }
+    }
+}
+
+fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
+    // Skip hidden elements entirely - they should not take up layout space
+    const spec = node.prepareClassSpec();
+    if (spec.hidden) {
+        node.layout.rect = types.Rect{}; // Zero rect
+        return;
+    }
+
+    if (!node.needsLayoutUpdate()) {
+        const child_rect = node.layout.rect orelse parent_rect;
+        for (node.children.items) |child_id| {
+            if (store.node(child_id)) |child| {
+                updateLayoutIfDirty(store, child, child_rect);
+            }
+        }
+        return;
+    }
+
+    computeNodeLayout(store, node, parent_rect);
+}
+
+fn sideValue(value: ?f32) f32 {
+    return value orelse 0;
+}
+
+pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
+    const prev_rect = node.layout.rect;
+    const prev_scale = node.layout.layout_scale;
+    const spec = node.prepareClassSpec();
+    const base_scale = dvui.windowNaturalScale();
+    var parent_scale = base_scale;
+    if (node.parent) |pid| {
+        if (store.node(pid)) |parent| {
+            if (parent.layout.layout_scale != 0) {
+                parent_scale = parent.layout.layout_scale;
+            }
+        }
+    }
+    const local_scale = spec.scale orelse 1.0;
+    const node_scale = parent_scale * local_scale;
+    node.layout.layout_scale = node_scale;
+    const scale = if (node_scale != 0) node_scale else base_scale;
+    const parent_w_scaled = parent_rect.w * local_scale;
+    const parent_h_scaled = parent_rect.h * local_scale;
+
+    // Skip hidden elements
+    if (spec.hidden) {
+        node.layout.rect = types.Rect{};
+        return;
+    }
+
+    var rect: types.Rect = undefined;
+    const is_absolute = spec.position != null and spec.position.? == .absolute;
+
+    if (is_absolute) {
+        rect = types.Rect{
+            .x = parent_rect.x,
+            .y = parent_rect.y,
+            .w = 0,
+            .h = 0,
+        };
+
+        const left_offset = sideValue(spec.left) * scale;
+        const right_offset = sideValue(spec.right) * scale;
+        const top_offset = sideValue(spec.top) * scale;
+        const bottom_offset = sideValue(spec.bottom) * scale;
+
+        if (spec.width) |w| {
+            switch (w) {
+                .full => rect.w = parent_w_scaled,
+                .pixels => |px| rect.w = px * scale,
+            }
+        } else if (spec.left != null and spec.right != null) {
+            rect.w = @max(0.0, parent_w_scaled - left_offset - right_offset);
+        }
+
+        if (spec.height) |h| {
+            switch (h) {
+                .full => rect.h = parent_h_scaled,
+                .pixels => |px| rect.h = px * scale,
+            }
+        } else if (spec.top != null and spec.bottom != null) {
+            rect.h = @max(0.0, parent_h_scaled - top_offset - bottom_offset);
+        }
+
+        if (node.kind == .text) {
+            const measured = measure.measureTextCached(store, node);
+            if (rect.w == 0) rect.w = measured.w;
+            if (rect.h == 0) rect.h = measured.h;
+        }
+        if (rect.w == 0 or rect.h == 0) {
+            const intrinsic = measure.measureNodeSize(store, node, .{ .w = parent_rect.w, .h = parent_rect.h });
+            if (rect.w == 0) rect.w = intrinsic.w;
+            if (rect.h == 0) rect.h = intrinsic.h;
+        }
+
+        if (spec.left != null) {
+            rect.x = parent_rect.x + left_offset;
+        } else if (spec.right != null) {
+            rect.x = parent_rect.x + parent_rect.w - right_offset - rect.w;
+        }
+        if (spec.top != null) {
+            rect.y = parent_rect.y + top_offset;
+        } else if (spec.bottom != null) {
+            rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
+        }
+    } else {
+        rect = parent_rect;
+
+        const margin_left = sideValue(spec.margin.left) * scale;
+        const margin_right = sideValue(spec.margin.right) * scale;
+        const margin_top = sideValue(spec.margin.top) * scale;
+        const margin_bottom = sideValue(spec.margin.bottom) * scale;
+
+        rect.x += margin_left;
+        rect.y += margin_top;
+        rect.w = @max(0.0, parent_w_scaled - (margin_left + margin_right));
+        rect.h = @max(0.0, parent_h_scaled - (margin_top + margin_bottom));
+
+        if (spec.width) |w| {
+            switch (w) {
+                .full => rect.w = @max(0.0, parent_w_scaled - (margin_left + margin_right)),
+                .pixels => |px| rect.w = px * scale,
+            }
+        }
+        if (spec.height) |h| {
+            switch (h) {
+                .full => rect.h = @max(0.0, parent_h_scaled - (margin_top + margin_bottom)),
+                .pixels => |px| rect.h = px * scale,
+            }
+        }
+
+        if (node.kind == .text) {
+            const measured = measure.measureTextCached(store, node);
+            if (rect.w == 0) rect.w = measured.w;
+            if (rect.h == 0) rect.h = measured.h;
+        }
+        if (rect.w == 0 or rect.h == 0) {
+            const intrinsic = measure.measureNodeSize(store, node, .{ .w = rect.w, .h = rect.h });
+            if (rect.w == 0) rect.w = intrinsic.w;
+            if (rect.h == 0) rect.h = intrinsic.h;
+        }
+    }
+
+    node.layout.rect = rect;
+    node.layout.version = store.currentVersion();
+
+    if (prev_rect) |prev| {
+        if (prev.x != rect.x or prev.y != rect.y or prev.w != rect.w or prev.h != rect.h or prev_scale != node.layout.layout_scale) {
+            invalidateLayoutSubtree(store, node);
+            node.layout.rect = rect;
+            node.layout.version = store.currentVersion();
+        }
+    }
+
+    const pad_left = sideValue(spec.padding.left) * scale;
+    const pad_right = sideValue(spec.padding.right) * scale;
+    const pad_top = sideValue(spec.padding.top) * scale;
+    const pad_bottom = sideValue(spec.padding.bottom) * scale;
+    const border_left = sideValue(spec.border.left) * scale;
+    const border_right = sideValue(spec.border.right) * scale;
+    const border_top = sideValue(spec.border.top) * scale;
+    const border_bottom = sideValue(spec.border.bottom) * scale;
+
+    var child_rect = rect;
+    child_rect.x += pad_left + border_left;
+    child_rect.y += pad_top + border_top;
+    child_rect.w = @max(0.0, child_rect.w - (pad_left + pad_right + border_left + border_right));
+    child_rect.h = @max(0.0, child_rect.h - (pad_top + pad_bottom + border_top + border_bottom));
+
+    var layout_rect = child_rect;
+    const scroll_enabled = node.scroll.enabled;
+    if (scroll_enabled) {
+        var content_w = child_rect.w;
+        var content_h = child_rect.h;
+        if (node.scroll.canvas_width > 0) {
+            content_w = @max(content_w, node.scroll.canvas_width);
+        }
+        if (node.scroll.canvas_height > 0) {
+            content_h = @max(content_h, node.scroll.canvas_height);
+        }
+        layout_rect.w = content_w;
+        layout_rect.h = content_h;
+        layout_rect.x -= node.scroll.offset_x;
+        layout_rect.y -= node.scroll.offset_y;
+    }
+
+    if (spec.is_flex) {
+        if (comptime build_options.yoga) {
+            const yoga_layout = @import("yoga.zig");
+            yoga_layout.layoutFlexChildren(store, node, layout_rect, spec);
+        } else {
+            flex.layoutFlexChildren(store, node, layout_rect, spec);
+        }
+    } else {
+        for (node.children.items) |child_id| {
+            if (store.node(child_id)) |child| {
+                updateLayoutIfDirty(store, child, layout_rect);
+            }
+        }
+    }
+
+    if (scroll_enabled) {
+        updateScrollContentSize(store, node, child_rect);
+    }
+}
+
+fn updateScrollContentSize(store: *types.NodeStore, node: *types.SolidNode, viewport: types.Rect) void {
+    var content_w = viewport.w;
+    var content_h = viewport.h;
+    if (node.scroll.canvas_width > 0) {
+        content_w = @max(content_w, node.scroll.canvas_width);
+    }
+    if (node.scroll.canvas_height > 0) {
+        content_h = @max(content_h, node.scroll.canvas_height);
+    }
+    if (node.scroll.auto_canvas) {
+        const auto_size = computeScrollAutoSize(store, node, viewport);
+        content_w = @max(content_w, auto_size.w);
+        content_h = @max(content_h, auto_size.h);
+    }
+    node.scroll.content_width = content_w;
+    node.scroll.content_height = content_h;
+}
+
+fn computeScrollAutoSize(store: *types.NodeStore, node: *types.SolidNode, viewport: types.Rect) types.Size {
+    var min_x = viewport.x;
+    var min_y = viewport.y;
+    var max_x = viewport.x + viewport.w;
+    var max_y = viewport.y + viewport.h;
+    var saw = false;
+
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        const rect_opt = child.layout.rect;
+        if (rect_opt) |rect| {
+            if (rect.w == 0 and rect.h == 0) continue;
+            const x = rect.x + node.scroll.offset_x;
+            const y = rect.y + node.scroll.offset_y;
+            min_x = @min(min_x, x);
+            min_y = @min(min_y, y);
+            max_x = @max(max_x, x + rect.w);
+            max_y = @max(max_y, y + rect.h);
+            saw = true;
+        }
+    }
+
+    if (!saw) {
+        return types.Size{ .w = viewport.w, .h = viewport.h };
+    }
+
+    return types.Size{
+        .w = @max(0.0, max_x - min_x),
+        .h = @max(0.0, max_y - min_y),
+    };
+}
+
+fn hasMissingLayout(store: *types.NodeStore, node: *types.SolidNode) bool {
+    if (node.layout.rect == null) return true;
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            if (hasMissingLayout(store, child)) return true;
+        }
+    }
+    return false;
+}
