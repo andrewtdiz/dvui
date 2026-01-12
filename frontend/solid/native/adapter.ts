@@ -180,6 +180,7 @@ export class NativeRenderer implements RendererAdapter {
       7: "keyup",
       8: "change",
       9: "submit",
+      20: "scroll",
     };
 
     let current = readHead;

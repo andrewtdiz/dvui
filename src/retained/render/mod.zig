@@ -922,6 +922,8 @@ fn renderScrollFrame(
 
     const scroll_id = scrollContentId(node.id);
     const hit_rect = transformedRect(node, rect) orelse rect;
+    const prev_x = node.scroll.offset_x;
+    const prev_y = node.scroll.offset_y;
 
     _ = handleScrollInput(node, hit_rect, &scroll_info, scroll_id);
 
@@ -929,11 +931,30 @@ fn renderScrollFrame(
 
     _ = renderScrollBars(node, rect, &scroll_info, scroll_id);
 
-    if (scroll_info.viewport.x != node.scroll.offset_x or scroll_info.viewport.y != node.scroll.offset_y) {
+    if (scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y) {
         node.scroll.offset_x = scroll_info.viewport.x;
         node.scroll.offset_y = scroll_info.viewport.y;
         layout.invalidateLayoutSubtree(store, node);
         store.markNodeChanged(node.id);
+
+        if (event_ring) |ring| {
+            if (node.hasListener("scroll")) {
+                var detail_buffer: [192]u8 = undefined;
+                const detail: []const u8 = std.fmt.bufPrint(
+                    &detail_buffer,
+                    "{{\"x\":{},\"y\":{},\"viewportW\":{},\"viewportH\":{},\"contentW\":{},\"contentH\":{}}}",
+                    .{
+                        scroll_info.viewport.x,
+                        scroll_info.viewport.y,
+                        scroll_info.viewport.w,
+                        scroll_info.viewport.h,
+                        scroll_info.virtual_size.w,
+                        scroll_info.virtual_size.h,
+                    },
+                ) catch "";
+                _ = ring.pushScroll(node.id, detail);
+            }
+        }
     }
 
     node.markRendered();

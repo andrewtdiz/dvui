@@ -22,6 +22,7 @@ pub const EventKind = enum(u8) {
     dragenter = 17,
     dragleave = 18,
     drop = 19,
+    scroll = 20,
 };
 
 /// Packed event entry for efficient memory layout
@@ -133,6 +134,11 @@ pub const EventRing = struct {
         return self.push(.blur, node_id, null);
     }
 
+    /// Push a scroll event with detail payload
+    pub fn pushScroll(self: *EventRing, node_id: u32, detail: []const u8) bool {
+        return self.push(.scroll, node_id, detail);
+    }
+
     /// Get number of pending events
     pub fn pendingCount(self: *const EventRing) u32 {
         return self.write_head - self.read_head;
@@ -213,6 +219,7 @@ pub fn eventKindFromName(name: []const u8) ?EventKind {
         .{ "dragenter", .dragenter },
         .{ "dragleave", .dragleave },
         .{ "drop", .drop },
+        .{ "scroll", .scroll },
     });
     return map.get(name);
 }

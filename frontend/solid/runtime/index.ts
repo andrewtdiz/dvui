@@ -389,3 +389,70 @@ export const removeEventListener = (node: HostNode, name: string, handler: Event
 };
 
 export const delegateEvents = (_events: string[]) => {};
+
+export type ScrollDetail = {
+  offsetX: number;
+  offsetY: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  contentWidth: number;
+  contentHeight: number;
+};
+
+export const parseScrollDetail = (detail?: string | null): ScrollDetail | null => {
+  if (!detail) return null;
+  let parsed: any;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  const offsetX = Number(parsed?.x);
+  const offsetY = Number(parsed?.y);
+  const viewportWidth = Number(parsed?.viewportW);
+  const viewportHeight = Number(parsed?.viewportH);
+  const contentWidth = Number(parsed?.contentW);
+  const contentHeight = Number(parsed?.contentH);
+  if (
+    !Number.isFinite(offsetX) ||
+    !Number.isFinite(offsetY) ||
+    !Number.isFinite(viewportWidth) ||
+    !Number.isFinite(viewportHeight) ||
+    !Number.isFinite(contentWidth) ||
+    !Number.isFinite(contentHeight)
+  ) {
+    return null;
+  }
+  return { offsetX, offsetY, viewportWidth, viewportHeight, contentWidth, contentHeight };
+};
+
+export type VirtualRange = {
+  start: number;
+  end: number;
+  offset: number;
+};
+
+export type VirtualRangeOptions = {
+  itemCount: number;
+  itemSize: number;
+  viewportSize: number;
+  scrollOffset: number;
+  overscan?: number;
+};
+
+export const computeVirtualRange = (options: VirtualRangeOptions): VirtualRange => {
+  const itemCount = Math.max(0, Math.floor(options.itemCount));
+  const itemSize = options.itemSize > 0 ? options.itemSize : 0;
+  const viewportSize = Math.max(0, options.viewportSize);
+  const scrollOffset = Math.max(0, options.scrollOffset);
+  const overscan = Math.max(0, Math.floor(options.overscan ?? 2));
+
+  if (itemCount == 0 || itemSize == 0) {
+    return { start: 0, end: 0, offset: 0 };
+  }
+
+  const start = Math.max(0, Math.floor(scrollOffset / itemSize) - overscan);
+  const visibleCount = Math.ceil(viewportSize / itemSize) + overscan * 2;
+  const end = Math.min(itemCount, start + Math.max(0, visibleCount));
+  return { start, end, offset: start * itemSize };
+};
