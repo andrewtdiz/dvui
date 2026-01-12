@@ -1,5 +1,5 @@
 import type { HostNode } from "./node";
-import { extractAnchor, extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
+import { extractAnchor, extractFocus, extractIcon, extractScroll, extractTransform, extractVisual } from "./props";
 
 export type SerializedNode = {
   id: number;
@@ -8,6 +8,8 @@ export type SerializedNode = {
   text?: string;
   value?: string;
   src?: string;
+  iconKind?: string;
+  iconGlyph?: string;
   className?: string;
   rotation?: number;
   scaleX?: number;
@@ -58,7 +60,8 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       extractVisual(node.props),
       extractScroll(node.props),
       extractFocus(node.props),
-      extractAnchor(node.props)
+      extractAnchor(node.props),
+      extractIcon(node.props)
     );
     nodes.push(entry);
     for (const child of node.children) {

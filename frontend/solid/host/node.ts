@@ -8,6 +8,7 @@ export type ColorInput =
 
 export type AnchorSide = "top" | "bottom" | "left" | "right";
 export type AnchorAlign = "start" | "center" | "end";
+export type IconKind = "auto" | "svg" | "tvg" | "image" | "raster" | "glyph";
 
 export type NodeProps = {
   x?: number;
@@ -18,6 +19,8 @@ export type NodeProps = {
   text?: string;
   value?: string | number;
   src?: string;
+  iconKind?: IconKind;
+  iconGlyph?: string;
   class?: string;
   className?: string;
   rotation?: number;

@@ -120,6 +120,8 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           className: n.className,
           text: n.text,
           src: n.src,
+          iconKind: n.iconKind,
+          iconGlyph: n.iconGlyph,
           value: n.value,
           rotation: n.rotation,
           scaleX: n.scaleX,

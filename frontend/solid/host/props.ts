@@ -56,6 +56,8 @@ export const focusFields = ["tabIndex", "focusTrap", "roving", "modal"] as const
 
 export const anchorFields = ["anchorId", "anchorSide", "anchorAlign", "anchorOffset"] as const;
 
+export const iconFields = ["iconKind", "iconGlyph"] as const;
+
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
   if (!raw) return false;
@@ -201,4 +203,15 @@ export const extractAnchor = (props: NodeProps) => {
     a.anchorOffset = props.anchorOffset;
   }
   return a;
+};
+
+export const extractIcon = (props: NodeProps) => {
+  const icon: Partial<Record<(typeof iconFields)[number], string>> = {};
+  if (typeof props.iconKind === "string") {
+    icon.iconKind = props.iconKind;
+  }
+  if (typeof props.iconGlyph === "string") {
+    icon.iconGlyph = props.iconGlyph;
+  }
+  return icon;
 };

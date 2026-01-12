@@ -8,6 +8,14 @@ const text_wrap = @import("../layout/text_wrap.zig");
 pub const AnchorSide = dvui.AnchorSide;
 pub const AnchorAlign = dvui.AnchorAlign;
 
+pub const IconKind = enum {
+    auto,
+    svg,
+    tvg,
+    image,
+    glyph,
+};
+
 pub const NodeKind = enum {
     root,
     element,
@@ -207,6 +215,8 @@ pub const SolidNode = struct {
     text: []u8 = &.{},
     class_name: []u8 = &.{},
     image_src: []u8 = &.{},
+    icon_kind: IconKind = .auto,
+    icon_glyph: []u8 = &.{},
     parent: ?u32 = null,
     children: std.ArrayList(u32),
     listeners: ListenerSet,
@@ -277,6 +287,7 @@ pub const SolidNode = struct {
         if (self.text.len > 0) allocator.free(self.text);
         if (self.class_name.len > 0) allocator.free(self.class_name);
         if (self.image_src.len > 0) allocator.free(self.image_src);
+        if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
         if (self.input_state) |*state| {
             state.deinit();
         }
@@ -323,6 +334,21 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, value);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         self.image_src = copy;
+    }
+
+    pub fn setIconGlyph(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        const copy = try allocator.dupe(u8, value);
+        if (self.icon_glyph.len > 0) allocator.free(self.icon_glyph);
+        self.icon_glyph = copy;
+        self.invalidatePaint();
+    }
+
+    pub fn iconGlyph(self: *const SolidNode) []const u8 {
+        return self.icon_glyph;
+    }
+
+    pub fn iconKind(self: *const SolidNode) IconKind {
+        return self.icon_kind;
     }
 
     pub fn ensureInputState(self: *SolidNode, allocator: std.mem.Allocator) !*InputState {
@@ -564,6 +590,19 @@ pub const NodeStore = struct {
     pub fn setImageSource(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
         try target.setImageSource(self.allocator, value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setIconGlyph(self: *NodeStore, id: u32, value: []const u8) !void {
+        const target = self.nodes.getPtr(id) orelse return;
+        try target.setIconGlyph(self.allocator, value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setIconKind(self: *NodeStore, id: u32, value: IconKind) void {
+        const target = self.nodes.getPtr(id) orelse return;
+        if (target.icon_kind == value) return;
+        target.icon_kind = value;
         self.markNodeChanged(id);
     }
 

@@ -18,7 +18,7 @@ import {
 } from "./flush";
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
-import { extractAnchor, extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
+import { extractAnchor, extractFocus, extractIcon, extractScroll, extractTransform, extractVisual } from "./props";
 
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
@@ -70,7 +70,8 @@ export const createSolidHost = (native: RendererAdapter) => {
         extractVisual(node.props),
         extractScroll(node.props),
         extractFocus(node.props),
-        extractAnchor(node.props)
+        extractAnchor(node.props),
+        extractIcon(node.props)
       );
       push(createOp);
 
@@ -171,6 +172,16 @@ export const createSolidHost = (native: RendererAdapter) => {
         if (node.created) {
           const src = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "src", src });
+        }
+      } else if (name === "iconKind") {
+        if (node.created) {
+          const nextKind = value == null ? "auto" : String(value);
+          push({ op: "set", id: node.id, name: "iconKind", value: nextKind, iconKind: nextKind });
+        }
+      } else if (name === "iconGlyph") {
+        if (node.created) {
+          const nextGlyph = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "iconGlyph", value: nextGlyph, iconGlyph: nextGlyph });
         }
       } else if (name === "value") {
         if (node.created) {

@@ -19,6 +19,7 @@ const drawTriangleDirect = direct.drawTriangleDirect;
 const shouldDirectDraw = direct.shouldDirectDraw;
 const packedColorToDvui = direct.packedColorToDvui;
 const image_loader = @import("image_loader.zig");
+const icon_registry = @import("icon_registry.zig");
 const paint_cache = @import("cache.zig");
 const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 const renderCachedOrDirectBackground = paint_cache.renderCachedOrDirectBackground;
@@ -66,12 +67,14 @@ pub fn init() void {
     focus.init();
     paint_cache.init();
     image_loader.init();
+    icon_registry.init();
 }
 
 pub fn deinit() void {
     drag_drop.deinit();
     focus.deinit();
     image_loader.deinit();
+    icon_registry.deinit();
     paint_cache.deinit();
     gizmo_override_rect = null;
     gizmo_rect_pending = null;
@@ -836,6 +839,11 @@ fn renderElementBody(
         node.markRendered();
         return;
     }
+    if (std.mem.eql(u8, node.tag, "icon")) {
+        renderIcon(event_ring, store, node_id, node, class_spec, allocator, tracker);
+        node.markRendered();
+        return;
+    }
     if (std.mem.eql(u8, node.tag, "gizmo")) {
         renderGizmo(event_ring, store, node_id, node, class_spec);
         node.markRendered();
@@ -1486,6 +1494,53 @@ fn renderButton(
                 log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
             }
         }
+    }
+
+    renderChildElements(event_ring, store, node, allocator, tracker);
+}
+
+fn renderIcon(
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node_id: u32,
+    node: *types.SolidNode,
+    class_spec: tailwind.Spec,
+    allocator: std.mem.Allocator,
+    tracker: *DirtyRegionTracker,
+) void {
+    const src = node.imageSource();
+    const glyph = node.iconGlyph();
+    const resolved = icon_registry.resolve(node.iconKind(), src, glyph) catch |err| {
+        if (src.len > 0) {
+            log.err("Solid icon load failed for {s}: {s}", .{ src, @errorName(err) });
+        } else {
+            log.err("Solid icon load failed for node {d}: {s}", .{ node_id, @errorName(err) });
+        }
+        return;
+    };
+
+    var options = dvui.Options{
+        .name = "solid-icon",
+        .id_extra = nodeIdExtra(node_id),
+    };
+    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.resolveFont(&class_spec, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyVisualToOptions(node, &options);
+    applyTransformToOptions(node, &options);
+
+    switch (resolved) {
+        .vector => |tvg_bytes| {
+            const icon_name = if (src.len > 0) src else "solid-icon";
+            dvui.icon(@src(), icon_name, tvg_bytes, .{}, options);
+        },
+        .raster => |resource| {
+            const image_source = image_loader.imageSource(resource);
+            _ = dvui.image(@src(), .{ .source = image_source }, options);
+        },
+        .glyph => |text| {
+            dvui.labelNoFmt(@src(), text, .{}, options);
+        },
     }
 
     renderChildElements(event_ring, store, node, allocator, tracker);

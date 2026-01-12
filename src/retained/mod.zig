@@ -21,6 +21,8 @@ const SolidSnapshotNode = struct {
     text: ?[]const u8 = null,
     value: ?[]const u8 = null,
     src: ?[]const u8 = null,
+    iconKind: ?[]const u8 = null,
+    iconGlyph: ?[]const u8 = null,
     className: ?[]const u8 = null,
     rotation: ?f32 = null,
     scaleX: ?f32 = null,
@@ -66,6 +68,8 @@ const SolidOp = struct {
     name: ?[]const u8 = null,
     value: ?[]const u8 = null,
     src: ?[]const u8 = null,
+    iconKind: ?[]const u8 = null,
+    iconGlyph: ?[]const u8 = null,
     rotation: ?f32 = null,
     scaleX: ?f32 = null,
     scaleY: ?f32 = null,
@@ -286,6 +290,16 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
                 target.anchor_offset = value;
                 touched = true;
             }
+            if (node.iconKind) |value| {
+                if (parseIconKind(value)) |kind| {
+                    target.icon_kind = kind;
+                    touched = true;
+                }
+            }
+            if (node.iconGlyph) |value| {
+                target.setIconGlyph(store_allocator, value) catch {};
+                touched = true;
+            }
             if (touched) {
                 store.markNodeChanged(node.id);
             }
@@ -461,6 +475,16 @@ fn parseAnchorAlign(value: []const u8) ?types.AnchorAlign {
     return null;
 }
 
+fn parseIconKind(value: []const u8) ?types.IconKind {
+    if (std.mem.eql(u8, value, "auto")) return .auto;
+    if (std.mem.eql(u8, value, "svg")) return .svg;
+    if (std.mem.eql(u8, value, "tvg")) return .tvg;
+    if (std.mem.eql(u8, value, "image")) return .image;
+    if (std.mem.eql(u8, value, "raster")) return .image;
+    if (std.mem.eql(u8, value, "glyph")) return .glyph;
+    return null;
+}
+
 fn applyAnchorFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
     const target = store.node(id) orelse return error.MissingId;
     var changed = false;
@@ -482,6 +506,24 @@ fn applyAnchorFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void
     }
     if (op.anchorOffset) |value| {
         target.anchor_offset = value;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
+fn applyIconFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.iconKind) |value| {
+        if (parseIconKind(value)) |kind| {
+            target.icon_kind = kind;
+            changed = true;
+        }
+    }
+    if (op.iconGlyph) |value| {
+        try target.setIconGlyph(store.allocator, value);
         changed = true;
     }
     if (changed) {
@@ -515,6 +557,7 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         try applyScrollFields(store, op.id, op);
         try applyFocusFields(store, op.id, op);
         try applyAnchorFields(store, op.id, op);
+        try applyIconFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
         return;
@@ -597,6 +640,18 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         if (std.mem.eql(u8, prop_name, "src")) {
             const val = op.value orelse op.src orelse return error.MissingTag;
             try store.setImageSource(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "iconKind")) {
+            const val = op.value orelse op.iconKind orelse return error.MissingTag;
+            if (parseIconKind(val)) |kind| {
+                store.setIconKind(op.id, kind);
+            }
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "iconGlyph")) {
+            const val = op.value orelse op.iconGlyph orelse return error.MissingTag;
+            try store.setIconGlyph(op.id, val);
             return;
         }
         if (std.mem.eql(u8, prop_name, "value")) {
