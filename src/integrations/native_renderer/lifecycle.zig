@@ -56,6 +56,23 @@ pub fn sendWindowClosedEvent(renderer: *Renderer) void {
     }
 }
 
+pub fn sendWindowResizeEvent(renderer: *Renderer, width: u32, height: u32, pixel_width: u32, pixel_height: u32) void {
+    if (renderer.event_cb) |event_fn| {
+        var payload: [16]u8 = undefined;
+        std.mem.writeInt(u32, payload[0..4], width, .little);
+        std.mem.writeInt(u32, payload[4..8], height, .little);
+        std.mem.writeInt(u32, payload[8..12], pixel_width, .little);
+        std.mem.writeInt(u32, payload[12..16], pixel_height, .little);
+        const name = "window_resize";
+        renderer.callback_depth += 1;
+        defer {
+            renderer.callback_depth -= 1;
+            tryFinalize(renderer);
+        }
+        event_fn(name, name.len, &payload, payload.len);
+    }
+}
+
 // ============================================================
 // Finalization & Destruction
 // ============================================================
@@ -121,6 +138,7 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .payload = .{},
         .frame_arena = undefined,
         .size = .{ 0, 0 },
+        .pixel_size = .{ 0, 0 },
         .window_ready = false,
         .busy = false,
         .callback_depth = 0,

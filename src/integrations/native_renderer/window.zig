@@ -85,6 +85,18 @@ pub fn teardownWindow(renderer: *Renderer) void {
 // Frame Rendering
 // ============================================================
 
+fn sendResizeEventIfNeeded(renderer: *Renderer) void {
+    const screen_w: u32 = @intCast(ray.getScreenWidth());
+    const screen_h: u32 = @intCast(ray.getScreenHeight());
+    const pixel_w: u32 = @intCast(ray.getRenderWidth());
+    const pixel_h: u32 = @intCast(ray.getRenderHeight());
+    const logical_changed = screen_w != renderer.size[0] or screen_h != renderer.size[1];
+    const pixel_changed = pixel_w != renderer.pixel_size[0] or pixel_h != renderer.pixel_size[1];
+    if (!logical_changed and !pixel_changed) return;
+    renderer.pixel_size = .{ pixel_w, pixel_h };
+    lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
+}
+
 pub fn renderFrame(renderer: *Renderer) void {
     if (!renderer.window_ready) return;
 
@@ -94,6 +106,8 @@ pub fn renderFrame(renderer: *Renderer) void {
         lifecycle.sendWindowClosedEvent(renderer);
         return;
     }
+
+    sendResizeEventIfNeeded(renderer);
 
     _ = renderer.frame_arena.reset(.retain_capacity);
 

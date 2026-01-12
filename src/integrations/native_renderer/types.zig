@@ -46,6 +46,7 @@ pub const Renderer = struct {
     payload: std.ArrayListUnmanaged(u8) = .{},
     frame_arena: std.heap.ArenaAllocator,
     size: [2]u32 = .{ 0, 0 },
+    pixel_size: [2]u32 = .{ 0, 0 },
     window_ready: bool = false,
     busy: bool = false,
     callback_depth: usize = 0,

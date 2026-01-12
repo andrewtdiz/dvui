@@ -6,14 +6,43 @@ import { setTime } from "./solid/state/time";
 const screenWidth = 800;
 const screenHeight = 450;
 
+type WindowResizePayload = {
+  width: number;
+  height: number;
+  pixelWidth: number;
+  pixelHeight: number;
+};
+
+const parseWindowResize = (payload: Uint8Array): WindowResizePayload | null => {
+  if (payload.byteLength < 16) return null;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const width = view.getUint32(0, true);
+  const height = view.getUint32(4, true);
+  const pixelWidth = view.getUint32(8, true);
+  const pixelHeight = view.getUint32(12, true);
+  return { width, height, pixelWidth, pixelHeight };
+};
+
+let logicalWidth = screenWidth;
+let logicalHeight = screenHeight;
+let pixelWidth = 0;
+let pixelHeight = 0;
+let pendingResize: WindowResizePayload | null = null;
+
 const renderer = new NativeRenderer({
   callbacks: {
     onLog(level, message) {
       // console.log(`[native:${level}] ${message}`);
     },
-    onEvent(name) {
+    onEvent(name, payload) {
       if (name === "window_closed") {
         shutdown();
+        return;
+      }
+      if (name === "window_resize") {
+        const parsed = parseWindowResize(payload);
+        if (!parsed) return;
+        pendingResize = parsed;
       }
     },
   },
@@ -60,7 +89,21 @@ const loop = () => {
 
   host.flush();
   renderer.present();
-  
+
+  if (pendingResize) {
+    const next = pendingResize;
+    pendingResize = null;
+    const logicalChanged = next.width !== logicalWidth || next.height !== logicalHeight;
+    const pixelChanged = next.pixelWidth !== pixelWidth || next.pixelHeight !== pixelHeight;
+    if (logicalChanged || pixelChanged) {
+      logicalWidth = next.width;
+      logicalHeight = next.height;
+      pixelWidth = next.pixelWidth;
+      pixelHeight = next.pixelHeight;
+      renderer.resize(next.width, next.height);
+    }
+  }
+
   // Poll event ring buffer and dispatch to Solid handlers
   const nodeIndex = host.getNodeIndex?.() ?? new Map();
   renderer.pollEvents(nodeIndex);
