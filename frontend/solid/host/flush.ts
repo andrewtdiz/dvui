@@ -97,12 +97,12 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
   const flush = () => {
     flushPending = false;
 
-    const nodes: SerializedNode[] = serializeTree(root.children);
-
-    encoder.reset();
-    for (const child of root.children) {
-      emitNode(child, encoder, 0);
-    }
+    let nodes: SerializedNode[] | null = null;
+    const ensureNodes = () => {
+      if (!nodes) nodes = serializeTree(root.children);
+      return nodes;
+    };
+    let shouldEncodeCommands = native.setSolidTree == null;
 
     for (const node of nodeIndex.values()) {
       if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
@@ -110,8 +110,9 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       }
     }
 
-    if (mutationsOnlyAfterSnapshot && !mutationsOnlySynced && ops.length === 0) {
-      for (const n of nodes) {
+    const needsCreateOps = mutationsOnlyAfterSnapshot && !mutationsOnlySynced && ops.length === 0;
+    if (needsCreateOps) {
+      for (const n of ensureNodes()) {
         if (n.id === 0) continue;
         const createOp: MutationOp = {
           op: "create",
@@ -165,6 +166,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
         };
         ops.push(createOp);
       }
+      shouldEncodeCommands = true;
     }
 
     if (mutationsSupported && native.applyOps && ops.length > 0 && !needFullSync && (syncedOnce || mutationsOnlyAfterSnapshot)) {
@@ -184,7 +186,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
     let sentSnapshot = false;
 
     if (native.setSolidTree && shouldSnapshot) {
-      const payloadObj = { nodes };
+      const payloadObj = { nodes: ensureNodes() };
       const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       native.setSolidTree(payload);
       markCreated(root);
@@ -195,6 +197,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
       needFullSync = false;
       ops.length = 0;
       sentSnapshot = true;
+      shouldEncodeCommands = true;
 
       for (const node of nodeIndex.values()) {
         if (node.sentListeners.size > 0) {
@@ -220,6 +223,13 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
         }
       }
       ops.length = 0;
+    }
+
+    if (shouldEncodeCommands) {
+      encoder.reset();
+      for (const child of root.children) {
+        emitNode(child, encoder, 0);
+      }
     }
 
     native.commit(encoder);
