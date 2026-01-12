@@ -606,6 +606,14 @@ fn retainedEventRing() ?*EventRing {
     return null;
 }
 
+pub fn sharedStore() ?*types.NodeStore {
+    return ensureRetainedStore();
+}
+
+pub fn sharedEventRing() ?*EventRing {
+    return ensureRetainedEventRing();
+}
+
 fn writeRectOut(rect: types.Rect, out_ptr: [*]u8, out_len: usize) bool {
     if (out_len < @sizeOf(RectOut)) return false;
     const out = RectOut{
