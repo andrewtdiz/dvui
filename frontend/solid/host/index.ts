@@ -4,17 +4,19 @@ import { registerRuntimeBridge } from "../runtime/bridge";
 import type { RendererAdapter } from "../native/adapter";
 import { CommandEncoder } from "../native/encoder";
 import {
+  applyFocusMutation,
   applyScrollMutation,
   applyTransformMutation,
   applyVisualMutation,
   createFlushController,
+  isFocusField,
   isScrollField,
   isTransformField,
   isVisualField,
 } from "./flush";
 import { HostNode, type EventHandler } from "./node";
 import { createMutationQueue, type MutationOp } from "./mutation-queue";
-import { extractScroll, extractTransform, extractVisual } from "./props";
+import { extractFocus, extractScroll, extractTransform, extractVisual } from "./props";
 
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
@@ -60,7 +62,13 @@ export const createSolidHost = (native: RendererAdapter) => {
       if (cls) createOp.className = cls;
       if (node.props.src != null) createOp.src = String(node.props.src);
       if (node.props.value != null) createOp.value = String(node.props.value);
-      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props));
+      Object.assign(
+        createOp,
+        extractTransform(node.props),
+        extractVisual(node.props),
+        extractScroll(node.props),
+        extractFocus(node.props)
+      );
       push(createOp);
 
       for (const [eventType] of node.listeners) {
@@ -143,8 +151,9 @@ export const createSolidHost = (native: RendererAdapter) => {
       }
 
       if (eventName) {
-        if (typeof prev === "function") node.off(eventName, prev as unknown as EventHandler);
-        if (typeof value === "function") node.on(eventName, value as unknown as EventHandler);
+        const normalized = eventName.toLowerCase();
+        if (typeof prev === "function") node.off(normalized, prev as unknown as EventHandler);
+        if (typeof value === "function") node.on(normalized, value as unknown as EventHandler);
         flushController.scheduleFlush();
         return;
       }
@@ -171,6 +180,8 @@ export const createSolidHost = (native: RendererAdapter) => {
         applyVisualMutation(node, name, value, ops);
       } else if (node.created && isScrollField(name)) {
         applyScrollMutation(node, name, value, ops);
+      } else if (node.created && isFocusField(name)) {
+        applyFocusMutation(node, name, value, ops);
       }
       flushController.scheduleFlush();
     },

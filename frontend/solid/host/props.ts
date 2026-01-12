@@ -52,6 +52,8 @@ export const visualFields = ["opacity", "cornerRadius", "background", "textColor
 
 export const scrollFields = ["scroll", "scrollX", "scrollY", "canvasWidth", "canvasHeight", "autoCanvas"] as const;
 
+export const focusFields = ["tabIndex", "focusTrap", "roving"] as const;
+
 export const hasAbsoluteClass = (props: NodeProps) => {
   const raw = props.className ?? props.class;
   if (!raw) return false;
@@ -160,4 +162,18 @@ export const extractScroll = (props: NodeProps) => {
     }
   }
   return s;
+};
+
+export const extractFocus = (props: NodeProps) => {
+  const f: Partial<Record<(typeof focusFields)[number], number | boolean>> = {};
+  if (typeof props.tabIndex === "number" && Number.isFinite(props.tabIndex)) {
+    f.tabIndex = props.tabIndex;
+  }
+  if (props.focusTrap != null) {
+    f.focusTrap = Boolean(props.focusTrap);
+  }
+  if (props.roving != null) {
+    f.roving = Boolean(props.roving);
+  }
+  return f;
 };

@@ -8,6 +8,7 @@ import {
   frameFromProps,
   hasAbsoluteClass,
   packColor,
+  focusFields,
   scrollFields,
   transformFields,
   visualFields,
@@ -135,6 +136,9 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           canvasWidth: n.canvasWidth,
           canvasHeight: n.canvasHeight,
           autoCanvas: n.autoCanvas,
+          tabIndex: n.tabIndex,
+          focusTrap: n.focusTrap,
+          roving: n.roving,
         };
         ops.push(createOp);
       }
@@ -255,6 +259,21 @@ export const applyScrollMutation = (node: HostNode, name: string, value: unknown
   }
 };
 
+export const applyFocusMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
+  const payload: MutationOp = { op: "set_focus", id: node.id };
+  if (name === "tabIndex" && typeof value === "number" && Number.isFinite(value)) {
+    payload.tabIndex = value;
+  } else if (name === "focusTrap") {
+    payload.focusTrap = Boolean(value);
+  } else if (name === "roving") {
+    payload.roving = Boolean(value);
+  }
+  const hasField = payload.tabIndex != null || payload.focusTrap != null || payload.roving != null;
+  if (hasField) {
+    ops.push(payload);
+  }
+};
+
 export const applyTransformMutation = (node: HostNode, name: string, value: unknown, ops: MutationOp[]) => {
   if (typeof value === "number" && Number.isFinite(value)) {
     const payload: MutationOp = { op: "set_transform", id: node.id, [name]: value } as MutationOp;
@@ -272,4 +291,8 @@ export const isVisualField = (name: string): name is (typeof visualFields)[numbe
 
 export const isScrollField = (name: string): name is (typeof scrollFields)[number] => {
   return (scrollFields as readonly string[]).includes(name);
+};
+
+export const isFocusField = (name: string): name is (typeof focusFields)[number] => {
+  return (focusFields as readonly string[]).includes(name);
 };

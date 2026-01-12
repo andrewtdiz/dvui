@@ -205,6 +205,9 @@ export class NativeRenderer implements RendererAdapter {
             detail = decoder.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
           }
 
+          const isKeyEvent = eventName === "keydown" || eventName === "keyup";
+          const keyValue = isKeyEvent ? detail : undefined;
+
           // Construct a mock event object that SolidJS expects
           // We include 'target' and 'currentTarget' which point to an object with properties
           // like 'value' for input elements.
@@ -213,6 +216,7 @@ export class NativeRenderer implements RendererAdapter {
             target: { id: nodeId, value: detail, tagName: node.tag },
             currentTarget: { id: nodeId, value: detail, tagName: node.tag },
             detail: detail,
+            key: keyValue,
             // Fallback for handlers that still expect Uint8Array for some reason
             _nativePayload: new Uint8Array([nodeId & 0xff, (nodeId >> 8) & 0xff, (nodeId >> 16) & 0xff, (nodeId >> 24) & 0xff]),
           };

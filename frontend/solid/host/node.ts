@@ -35,6 +35,9 @@ export type NodeProps = {
   canvasWidth?: number;
   canvasHeight?: number;
   autoCanvas?: boolean;
+  tabIndex?: number;
+  focusTrap?: boolean;
+  roving?: boolean;
 };
 
 export type EventHandler = (payload: Uint8Array) => void;
@@ -58,6 +61,8 @@ export class HostNode {
   private _onBlur?: EventHandler;
   private _onMouseEnter?: EventHandler;
   private _onMouseLeave?: EventHandler;
+  private _onKeyDown?: EventHandler;
+  private _onKeyUp?: EventHandler;
 
   constructor(tag: string) {
     this.tag = tag;
@@ -115,6 +120,24 @@ export class HostNode {
   }
   get onMouseLeave() {
     return this._onMouseLeave;
+  }
+
+  set onKeyDown(handler: EventHandler | undefined) {
+    if (this._onKeyDown) this.off("keydown", this._onKeyDown);
+    this._onKeyDown = handler;
+    if (handler) this.on("keydown", handler);
+  }
+  get onKeyDown() {
+    return this._onKeyDown;
+  }
+
+  set onKeyUp(handler: EventHandler | undefined) {
+    if (this._onKeyUp) this.off("keyup", this._onKeyUp);
+    this._onKeyUp = handler;
+    if (handler) this.on("keyup", handler);
+  }
+  get onKeyUp() {
+    return this._onKeyUp;
   }
 
   get firstChild(): HostNode | undefined {

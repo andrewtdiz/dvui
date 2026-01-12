@@ -40,6 +40,9 @@ const SolidSnapshotNode = struct {
     canvasWidth: ?f32 = null,
     canvasHeight: ?f32 = null,
     autoCanvas: ?bool = null,
+    tabIndex: ?i32 = null,
+    focusTrap: ?bool = null,
+    roving: ?bool = null,
 };
 
 const SolidSnapshot = struct {
@@ -76,6 +79,9 @@ const SolidOp = struct {
     canvasWidth: ?f32 = null,
     canvasHeight: ?f32 = null,
     autoCanvas: ?bool = null,
+    tabIndex: ?i32 = null,
+    focusTrap: ?bool = null,
+    roving: ?bool = null,
 };
 
 const SolidOpBatch = struct {
@@ -234,6 +240,18 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
                 target.scroll.auto_canvas = flag;
                 touched = true;
             }
+            if (node.tabIndex) |value| {
+                target.tab_index = value;
+                touched = true;
+            }
+            if (node.focusTrap) |flag| {
+                target.focus_trap = flag;
+                touched = true;
+            }
+            if (node.roving) |flag| {
+                target.roving = flag;
+                touched = true;
+            }
             if (touched) {
                 store.markNodeChanged(node.id);
             }
@@ -370,6 +388,26 @@ fn applyScrollFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void
     }
 }
 
+fn applyFocusFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void {
+    const target = store.node(id) orelse return error.MissingId;
+    var changed = false;
+    if (op.tabIndex) |value| {
+        target.tab_index = value;
+        changed = true;
+    }
+    if (op.focusTrap) |flag| {
+        target.focus_trap = flag;
+        changed = true;
+    }
+    if (op.roving) |flag| {
+        target.roving = flag;
+        changed = true;
+    }
+    if (changed) {
+        store.markNodeChanged(id);
+    }
+}
+
 fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (op.op.len == 0) return error.UnknownOp;
 
@@ -394,6 +432,7 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         try applyTransformFields(store, op.id, op);
         try applyVisualFields(store, op.id, op);
         try applyScrollFields(store, op.id, op);
+        try applyFocusFields(store, op.id, op);
         const parent_id: u32 = op.parent orelse 0;
         try store.insert(parent_id, op.id, op.before);
         return;
@@ -442,6 +481,12 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_scroll")) {
         if (op.id == 0) return error.MissingId;
         try applyScrollFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_focus")) {
+        if (op.id == 0) return error.MissingId;
+        try applyFocusFields(store, op.id, op);
         return;
     }
 

@@ -24,6 +24,7 @@ const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 const renderCachedOrDirectBackground = paint_cache.renderCachedOrDirectBackground;
 const updatePaintCache = paint_cache.updatePaintCache;
 const drag_drop = @import("../events/drag_drop.zig");
+const focus = @import("../events/focus.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
@@ -48,12 +49,14 @@ pub fn init() void {
     paragraph_log_count = 0;
     input_enabled_state = true;
     drag_drop.init();
+    focus.init();
     paint_cache.init();
     image_loader.init();
 }
 
 pub fn deinit() void {
     drag_drop.deinit();
+    focus.deinit();
     image_loader.deinit();
     paint_cache.deinit();
     gizmo_override_rect = null;
@@ -442,6 +445,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     const root = store.node(0) orelse return false;
 
     input_enabled_state = input_enabled;
+    focus.beginFrame(store);
     layout.updateLayouts(store);
     if (input_enabled_state) {
         drag_drop.cancelIfMissing(event_ring, store);
@@ -479,6 +483,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     }
 
     renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, false);
+    focus.endFrame(event_ring, store, input_enabled_state);
     return true;
 }
 
@@ -817,6 +822,8 @@ fn renderContainer(
         renderCachedOrDirectBackground(node, rect, allocator, class_spec.background);
     }
 
+    const tab_info = focus.tabIndexForNode(store, node);
+
     var options = dvui.Options{
         .name = "solid-div",
         .background = false,
@@ -834,6 +841,13 @@ fn renderContainer(
 
     var box = dvui.box(@src(), .{}, options);
     defer box.deinit();
+
+    if (tab_info.focusable and input_enabled_state) {
+        dvui.tabIndexSet(box.data().id, tab_info.tab_index);
+    }
+    if (tab_info.focusable) {
+        focus.registerFocusable(store, node, box.data());
+    }
 
     renderChildrenOrdered(event_ring, store, node, allocator, tracker, false);
     if (input_enabled_state) {
@@ -1121,6 +1135,10 @@ fn renderButton(
         // Respect layout positions exactly; DVUI's default button margin would offset the rect.
         .margin = dvui.Rect{},
     };
+    const tab_info = focus.tabIndexForNode(store, node);
+    if (tab_info.focusable) {
+        options.tab_index = tab_info.tab_index;
+    }
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
@@ -1142,6 +1160,9 @@ fn renderButton(
     // gets a unique ID even though they all originate from the same source location.
     var bw = dvui.ButtonWidget.init(@src(), .{ .draw_focus = false }, options);
     bw.install();
+    if (tab_info.focusable) {
+        focus.registerFocusable(store, node, bw.data());
+    }
     if (input_enabled_state) {
         bw.processEvents();
     }
@@ -1248,6 +1269,8 @@ fn renderInput(
     applyVisualToOptions(node, &options);
     applyTransformToOptions(node, &options);
 
+    const tab_info = focus.tabIndexForNode(store, node);
+
     var state = node.ensureInputState(store.allocator) catch |err| {
         log.err("Solid input state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
         return;
@@ -1270,12 +1293,17 @@ fn renderInput(
     defer box.deinit();
 
     const wd = box.data();
+    if (tab_info.focusable) {
+        focus.registerFocusable(store, node, wd);
+    }
     var prev_focused = state.focused;
     var focused_now = false;
     var text_changed = false;
 
     if (input_enabled_state) {
-        dvui.tabIndexSet(wd.id, wd.options.tab_index);
+        if (tab_info.focusable) {
+            dvui.tabIndexSet(wd.id, tab_info.tab_index);
+        }
 
         var hovered = false;
         _ = dvui.clickedEx(wd, .{ .hovered = &hovered, .hover_cursor = class_spec.cursor orelse .ibeam });

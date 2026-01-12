@@ -10,6 +10,7 @@ export type MutationOp = {
     | "set_transform"
     | "set_visual"
     | "set_scroll"
+    | "set_focus"
     | "listen"
     | "set";
   id: number;
@@ -40,6 +41,9 @@ export type MutationOp = {
   canvasWidth?: number;
   canvasHeight?: number;
   autoCanvas?: boolean;
+  tabIndex?: number;
+  focusTrap?: boolean;
+  roving?: boolean;
 };
 
 export const createMutationQueue = () => {
