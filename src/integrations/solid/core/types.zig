@@ -204,6 +204,7 @@ pub const SolidNode = struct {
     kind: NodeKind,
     tag: []u8 = &.{},
     text: []u8 = &.{},
+    placeholder: []u8 = &.{},
     class_name: []u8 = &.{},
     image_src: []u8 = &.{},
     parent: ?u32 = null,
@@ -264,6 +265,7 @@ pub const SolidNode = struct {
     pub fn deinit(self: *SolidNode, allocator: std.mem.Allocator) void {
         if (self.tag.len > 0) allocator.free(self.tag);
         if (self.text.len > 0) allocator.free(self.text);
+        if (self.placeholder.len > 0) allocator.free(self.placeholder);
         if (self.class_name.len > 0) allocator.free(self.class_name);
         if (self.image_src.len > 0) allocator.free(self.image_src);
         if (self.input_state) |*state| {
@@ -285,6 +287,13 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, value);
         if (self.tag.len > 0) allocator.free(self.tag);
         self.tag = copy;
+    }
+
+    pub fn setPlaceholder(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        const copy = try allocator.dupe(u8, value);
+        if (self.placeholder.len > 0) allocator.free(self.placeholder);
+        self.placeholder = copy;
+        self.invalidatePaint();
     }
 
     pub fn addListener(self: *SolidNode, name: []const u8) !bool {
@@ -480,6 +489,14 @@ pub const NodeStore = struct {
         if (self.nodes.getPtr(id)) |found_node| {
             if (!std.mem.eql(u8, found_node.tag, "input")) return;
             try found_node.setInputValue(self.allocator, value);
+            self.markNodeChanged(id);
+        }
+    }
+
+    pub fn setPlaceholder(self: *NodeStore, id: u32, value: []const u8) !void {
+        if (self.nodes.getPtr(id)) |found_node| {
+            if (!std.mem.eql(u8, found_node.tag, "input") and !std.mem.eql(u8, found_node.tag, "textarea")) return;
+            try found_node.setPlaceholder(self.allocator, value);
             self.markNodeChanged(id);
         }
     }

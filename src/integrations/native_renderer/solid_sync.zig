@@ -22,6 +22,7 @@ pub const SolidOp = struct {
     // Generic set op fields
     name: ?[]const u8 = null,
     value: ?[]const u8 = null,
+    placeholder: ?[]const u8 = null,
     src: ?[]const u8 = null,
     // Transform fields (optional; last-write-wins)
     rotation: ?f32 = null,
@@ -274,6 +275,7 @@ pub fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8, lo
         parent: ?u32 = null,
         text: ?[]const u8 = null,
         className: ?[]const u8 = null,
+        placeholder: ?[]const u8 = null,
         // Transform fields
         rotation: ?f32 = null,
         scaleX: ?f32 = null,
@@ -338,6 +340,11 @@ pub fn rebuildSolidStoreFromJson(renderer: *Renderer, json_bytes: []const u8, lo
         if (node.className) |cls| {
             store.setClassName(node.id, cls) catch |err| {
                 logMessage(renderer, 3, "setClassName failed for {d}: {s}", .{ node.id, @errorName(err) });
+            };
+        }
+        if (node.placeholder) |value| {
+            store.setPlaceholder(node.id, value) catch |err| {
+                logMessage(renderer, 3, "setPlaceholder failed for {d}: {s}", .{ node.id, @errorName(err) });
             };
         }
         if (store.node(node.id)) |target| {
@@ -476,6 +483,9 @@ pub fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
         if (op.className) |cls| {
             try store.setClassName(op.id, cls);
         }
+        if (op.placeholder) |value| {
+            try store.setPlaceholder(op.id, value);
+        }
         // Apply inline transform/visual props carried with create, so nodes are born with correct style.
         try applyTransformFields(store, op.id, op);
         try applyVisualFields(store, op.id, op);
@@ -565,6 +575,11 @@ pub fn applySolidOp(store: *solid.NodeStore, op: SolidOp) OpError!void {
         if (std.mem.eql(u8, prop_name, "value")) {
             const val = op.value orelse return error.MissingTag;
             try store.setInputValue(op.id, val);
+            return;
+        }
+        if (std.mem.eql(u8, prop_name, "placeholder")) {
+            const val = op.value orelse op.placeholder orelse return error.MissingTag;
+            try store.setPlaceholder(op.id, val);
             return;
         }
         // Unknown property - log but don't fail

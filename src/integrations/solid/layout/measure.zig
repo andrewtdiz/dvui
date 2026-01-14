@@ -134,6 +134,15 @@ fn measureCombinedElementText(
     var options = dvui.Options{};
     if (spec.font_style) |style| {
         options.font_style = style;
+    } else {
+        const tag = node.tag;
+        if (std.mem.eql(u8, tag, "h1")) {
+            options.font_style = .title;
+        } else if (std.mem.eql(u8, tag, "h2")) {
+            options.font_style = .title_1;
+        } else if (std.mem.eql(u8, tag, "h3")) {
+            options.font_style = .title_2;
+        }
     }
     const font = options.fontGet();
     const nat = font.textSize(trimmed);

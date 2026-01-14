@@ -97,6 +97,7 @@ pub const InitOptions = struct {
 pub fn createWindow(options: InitOptions) void {
     c.SetConfigFlags(c.FLAG_WINDOW_RESIZABLE);
     c.SetConfigFlags(c.FLAG_WINDOW_HIGHDPI);
+    c.SetConfigFlags(c.FLAG_MSAA_4X_HINT);
     if (dvui.accesskit_enabled) {
         c.SetConfigFlags(c.FLAG_WINDOW_HIDDEN);
     }

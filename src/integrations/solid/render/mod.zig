@@ -285,7 +285,9 @@ fn renderParagraphDirect(
             var options = dvui.Options{};
             style_apply.applyToOptions(&class_spec, &options);
             if (font_override) |style_name| {
-                options.font_style = style_name;
+                if (options.font_style == null) {
+                    options.font_style = style_name;
+                }
             }
             // Text rendering honors scale/translation via the transformed bounds; rotation is handled for backgrounds only.
             // Apply Tailwind padding and horizontal alignment manually for the direct draw path.
@@ -608,7 +610,7 @@ fn renderButton(
     // log.info("renderButton node={d} tag={s}", .{ node_id, node.tag });
     const text = buildText(store, node, allocator);
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
-    const caption = if (trimmed.len == 0) "Button" else trimmed;
+    const has_caption = trimmed.len > 0;
 
     // Ensure we have a concrete rect; if layout is missing, compute a fallback using the parent rect/screen.
     var rect_opt = node.layout.rect;
@@ -655,34 +657,36 @@ fn renderButton(
     bw.processEvents();
     bw.drawBackground();
 
-    // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
-    // This fixes cases where button text doesn't appear until a later repaint.
-    const content_rs = bw.data().contentRectScale();
-    const text_style = options.strip().override(bw.style());
-    const font = text_style.fontGet();
-    const size_nat = font.textSize(caption);
-    const text_w = size_nat.w * content_rs.s;
-    const text_h = size_nat.h * content_rs.s;
+    if (has_caption) {
+        // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
+        // This fixes cases where button text doesn't appear until a later repaint.
+        const content_rs = bw.data().contentRectScale();
+        const text_style = options.strip().override(bw.style());
+        const font = text_style.fontGet();
+        const size_nat = font.textSize(trimmed);
+        const text_w = size_nat.w * content_rs.s;
+        const text_h = size_nat.h * content_rs.s;
 
-    var text_rs = content_rs;
-    if (text_w < text_rs.r.w) text_rs.r.x += (text_rs.r.w - text_w) * 0.5;
-    if (text_h < text_rs.r.h) text_rs.r.y += (text_rs.r.h - text_h) * 0.5;
-    text_rs.r.w = text_w;
-    text_rs.r.h = text_h;
+        var text_rs = content_rs;
+        if (text_w < text_rs.r.w) text_rs.r.x += (text_rs.r.w - text_w) * 0.5;
+        if (text_h < text_rs.r.h) text_rs.r.y += (text_rs.r.h - text_h) * 0.5;
+        text_rs.r.w = text_w;
+        text_rs.r.h = text_h;
 
-    const prev_clip = dvui.clip(content_rs.r);
-    defer dvui.clipSet(prev_clip);
-    dvui.renderText(.{
-        .font = font,
-        .text = caption,
-        .rs = text_rs,
-        .color = text_style.color(.text),
-    }) catch |err| {
-        if (button_text_error_log_count < 8) {
-            button_text_error_log_count += 1;
-            log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
-        }
-    };
+        const prev_clip = dvui.clip(content_rs.r);
+        defer dvui.clipSet(prev_clip);
+        dvui.renderText(.{
+            .font = font,
+            .text = trimmed,
+            .rs = text_rs,
+            .color = text_style.color(.text),
+        }) catch |err| {
+            if (button_text_error_log_count < 8) {
+                button_text_error_log_count += 1;
+                log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
+            }
+        };
+    }
 
     bw.drawFocus();
     const pressed = bw.clicked();
@@ -851,7 +855,17 @@ fn renderInput(
         .h = text_rect_nat.h,
     };
     const text_slice = state.currentText();
-    direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
+    if (text_slice.len > 0) {
+        direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
+    } else {
+        const placeholder = std.mem.trim(u8, node.placeholder, " \n\r\t");
+        if (placeholder.len > 0) {
+            var placeholder_visual = node.visual;
+            const placeholder_color = wd.options.color(.text).opacity(0.5);
+            placeholder_visual.text_color = dvuiColorToPacked(placeholder_color);
+            direct.drawTextDirect(text_rect, placeholder, placeholder_visual, wd.options.font_style);
+        }
+    }
 
     if (event_ring) |ring| {
         if (!prev_focused and focused_now and node.hasListener("focus")) {

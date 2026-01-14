@@ -90,9 +90,11 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     const screen_h: u32 = @intCast(ray.getScreenHeight());
     const pixel_w: u32 = @intCast(ray.getRenderWidth());
     const pixel_h: u32 = @intCast(ray.getRenderHeight());
+    if (screen_w == 0 or screen_h == 0) return;
     const logical_changed = screen_w != renderer.size[0] or screen_h != renderer.size[1];
     const pixel_changed = pixel_w != renderer.pixel_size[0] or pixel_h != renderer.pixel_size[1];
     if (!logical_changed and !pixel_changed) return;
+    renderer.size = .{ screen_w, screen_h };
     renderer.pixel_size = .{ pixel_w, pixel_h };
     lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
 }

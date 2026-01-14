@@ -34,9 +34,14 @@ pub export fn resizeRenderer(renderer: ?*Renderer, width: u32, height: u32) call
             ptr.busy = false;
             lifecycle.tryFinalize(ptr);
         }
+        if (width == 0 or height == 0) return;
         ptr.size = .{ width, height };
         if (ptr.window_ready) {
-            ray.setWindowSize(@intCast(width), @intCast(height));
+            const current_w: u32 = @intCast(ray.getScreenWidth());
+            const current_h: u32 = @intCast(ray.getScreenHeight());
+            if (current_w != width or current_h != height) {
+                ray.setWindowSize(@intCast(width), @intCast(height));
+            }
         } else {
             window.ensureWindow(ptr) catch |err| {
                 logMessage(ptr, 3, "resize failed to open window: {s}", .{@errorName(err)});

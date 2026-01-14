@@ -93,6 +93,7 @@ pub fn createWindow(options: InitOptions) void {
     raylib.setConfigFlags(raylib.ConfigFlags{
         .window_resizable = true,
         .window_highdpi = true,
+        .msaa_4x_hint = true,
         .window_hidden = dvui.accesskit_enabled,
         .vsync_hint = options.vsync,
     });
