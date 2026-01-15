@@ -3,7 +3,6 @@ import {
   extractAccessibility,
   extractAnchor,
   extractFocus,
-  extractIcon,
   extractScroll,
   extractTransform,
   extractVisual,
@@ -16,8 +15,6 @@ export type SerializedNode = {
   text?: string;
   value?: string;
   src?: string;
-  iconKind?: string;
-  iconGlyph?: string;
   className?: string;
   rotation?: number;
   scaleX?: number;
@@ -80,7 +77,6 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       extractScroll(node.props),
       extractFocus(node.props),
       extractAnchor(node.props),
-      extractIcon(node.props),
       extractAccessibility(node.props)
     );
     nodes.push(entry);

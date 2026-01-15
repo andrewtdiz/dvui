@@ -25,8 +25,6 @@ export type MutationOp = {
   name?: string;
   value?: string;
   src?: string;
-  iconKind?: string;
-  iconGlyph?: string;
   rotation?: number;
   scaleX?: number;
   scaleY?: number;

@@ -25,7 +25,6 @@ import {
   extractAccessibility,
   extractAnchor,
   extractFocus,
-  extractIcon,
   extractScroll,
   extractTransform,
   extractVisual,
@@ -83,7 +82,6 @@ export const createSolidHost = (native: RendererAdapter) => {
         extractScroll(node.props),
         extractFocus(node.props),
         extractAnchor(node.props),
-        extractIcon(node.props),
         extractAccessibility(node.props)
       );
       push(createOp);
@@ -186,16 +184,6 @@ export const createSolidHost = (native: RendererAdapter) => {
         if (node.created) {
           const src = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "src", src });
-        }
-      } else if (propName === "iconKind") {
-        if (node.created) {
-          const nextKind = value == null ? "auto" : String(value);
-          push({ op: "set", id: node.id, name: "iconKind", value: nextKind, iconKind: nextKind });
-        }
-      } else if (propName === "iconGlyph") {
-        if (node.created) {
-          const nextGlyph = value == null ? "" : String(value);
-          push({ op: "set", id: node.id, name: "iconGlyph", value: nextGlyph, iconGlyph: nextGlyph });
         }
       } else if (propName === "value") {
         if (node.created) {

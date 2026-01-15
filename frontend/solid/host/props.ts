@@ -56,7 +56,6 @@ export const focusFields = ["tabIndex", "focusTrap", "roving", "modal"] as const
 
 export const anchorFields = ["anchorId", "anchorSide", "anchorAlign", "anchorOffset"] as const;
 
-export const iconFields = ["iconKind", "iconGlyph"] as const;
 
 export const accessibilityFields = [
   "role",
@@ -229,16 +228,6 @@ export const extractAnchor = (props: NodeProps) => {
   return a;
 };
 
-export const extractIcon = (props: NodeProps) => {
-  const icon: Partial<Record<(typeof iconFields)[number], string>> = {};
-  if (typeof props.iconKind === "string") {
-    icon.iconKind = props.iconKind;
-  }
-  if (typeof props.iconGlyph === "string") {
-    icon.iconGlyph = props.iconGlyph;
-  }
-  return icon;
-};
 
 const normalizeAriaBool = (value: unknown) => {
   if (typeof value === "boolean") return value;
