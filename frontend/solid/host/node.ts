@@ -18,6 +18,7 @@ export type NodeProps = {
   color?: ColorInput;
   text?: string;
   value?: string | number;
+  placeholder?: string;
   src?: string;
   iconKind?: IconKind;
   iconGlyph?: string;

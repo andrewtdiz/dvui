@@ -33,6 +33,36 @@ const EVENT_KIND_TO_NAME: Record<number, string> = {
 };
 
 const EVENT_DECODER = new TextDecoder();
+const POINTER_EVENT_NAMES = new Set([
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "pointercancel",
+  "dragstart",
+  "drag",
+  "dragend",
+  "dragenter",
+  "dragleave",
+  "drop",
+]);
+
+type PointerDetail = {
+  x: number;
+  y: number;
+  button: number;
+  modifiers: number;
+};
+
+const decodePointerDetail = (payload: Uint8Array): PointerDetail | undefined => {
+  if (payload.byteLength < 12) return undefined;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  return {
+    x: view.getFloat32(0, true),
+    y: view.getFloat32(4, true),
+    button: view.getUint8(8),
+    modifiers: view.getUint8(9),
+  };
+};
 
 export type RendererCapabilities = {
   window: boolean;
@@ -241,22 +271,32 @@ export class NativeRenderer implements RendererAdapter {
         const handlers = node.listeners.get(eventName);
         if (handlers && handlers.size > 0) {
           let detail: string | undefined;
+          let pointerDetail: PointerDetail | undefined;
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
-            detail = EVENT_DECODER.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+            const detailBytes = detailBuffer.subarray(detailOffset, detailOffset + detailLen);
+            if (POINTER_EVENT_NAMES.has(eventName)) {
+              pointerDetail = decodePointerDetail(detailBytes);
+            }
+            if (!pointerDetail) {
+              detail = EVENT_DECODER.decode(detailBytes);
+            }
           }
 
           const isKeyEvent = eventName === "keydown" || eventName === "keyup";
           const keyValue = isKeyEvent ? detail : undefined;
+          const targetValue = typeof detail === "string" ? detail : undefined;
+          const eventDetail = pointerDetail ?? detail;
 
           // Construct a mock event object that SolidJS expects
           // We include 'target' and 'currentTarget' which point to an object with properties
           // like 'value' for input elements.
           const eventObj = {
             type: eventName,
-            target: { id: nodeId, value: detail, tagName: node.tag },
-            currentTarget: { id: nodeId, value: detail, tagName: node.tag },
-            detail: detail,
+            target: { id: nodeId, value: targetValue, tagName: node.tag },
+            currentTarget: { id: nodeId, value: targetValue, tagName: node.tag },
+            detail: eventDetail,
             key: keyValue,
+            pointer: pointerDetail,
             // Fallback for handlers that still expect Uint8Array for some reason
             _nativePayload: new Uint8Array([nodeId & 0xff, (nodeId >> 8) & 0xff, (nodeId >> 16) & 0xff, (nodeId >> 24) & 0xff]),
           };

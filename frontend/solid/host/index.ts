@@ -31,6 +31,7 @@ import {
   normalizeAriaName,
 } from "./props";
 
+
 const removeFromIndex = (node: HostNode, index: Map<number, HostNode>) => {
   index.delete(node.id);
   for (const child of node.children) {
@@ -83,6 +84,7 @@ export const createSolidHost = (native: RendererAdapter) => {
         extractFocus(node.props),
         extractAnchor(node.props),
         extractAccessibility(node.props)
+
       );
       push(createOp);
 
@@ -186,9 +188,15 @@ export const createSolidHost = (native: RendererAdapter) => {
           push({ op: "set", id: node.id, name: "src", src });
         }
       } else if (propName === "value") {
+
         if (node.created) {
           const nextValue = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "value", value: nextValue });
+        }
+      } else if (propName === "placeholder") {
+        if (node.created) {
+          const nextValue = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "placeholder", value: nextValue, placeholder: nextValue });
         }
       } else if (node.created && isAccessibilityField(propName)) {
         applyAccessibilityMutation(node, propName, value, ops);

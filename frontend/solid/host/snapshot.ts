@@ -8,14 +8,17 @@ import {
   extractVisual,
 } from "./props";
 
+
 export type SerializedNode = {
   id: number;
   tag: string;
   parent?: number;
   text?: string;
   value?: string;
+  placeholder?: string;
   src?: string;
   className?: string;
+
   rotation?: number;
   scaleX?: number;
   scaleY?: number;
@@ -69,6 +72,7 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       entry.text = node.props.text ?? "";
     }
     if (node.props.value != null) entry.value = String(node.props.value);
+    if (node.props.placeholder != null) entry.placeholder = String(node.props.placeholder);
     if (node.props.src != null) entry.src = String(node.props.src);
     Object.assign(
       entry,
@@ -78,6 +82,7 @@ export const serializeTree = (roots: HostNode[]): SerializedNode[] => {
       extractFocus(node.props),
       extractAnchor(node.props),
       extractAccessibility(node.props)
+
     );
     nodes.push(entry);
     for (const child of node.children) {

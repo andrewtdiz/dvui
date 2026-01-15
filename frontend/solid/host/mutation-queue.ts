@@ -24,8 +24,10 @@ export type MutationOp = {
   eventType?: string;
   name?: string;
   value?: string;
+  placeholder?: string;
   src?: string;
   rotation?: number;
+
   scaleX?: number;
   scaleY?: number;
   anchorX?: number;

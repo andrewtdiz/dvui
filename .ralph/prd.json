@@ -1,0 +1,73 @@
+[
+  {
+    "title": "Stop Bun crash on window close",
+    "description": "Eliminate the Bun segfault/panic that occurs when closing the native window.\n\nAcceptance:\n- Closing the window exits cleanly (no Bun crash) on macOS.\n- No re-entrant native calls from inside native→JS callbacks are required for shutdown.\n\nImplementation notes:\n- Audit the shutdown path in `frontend/index.ts` and `frontend/solid/native/adapter.ts`:\n  - avoid calling `renderer.close()` (and closing JSCallbacks) from inside the `window_closed` callback.\n  - consider deferring shutdown to the next tick and/or introducing an explicit \"closeRequested\" state.\n- Audit native renderer destruction semantics in `src/integrations/native_renderer/*`:\n  - ensure the renderer is not freed while JS may still call `pollEvents`/`resize` in the same loop iteration.\n  - prefer a single owner of destruction (either JS explicit destroy, or native self-destroy, but not both).\n- Add temporary logging to confirm ordering: `window_should_close` → event dispatched → JS loop stops using handle → renderer destroyed.\n\nIn scope: `frontend/index.ts`, `frontend/solid/native/adapter.ts`, `src/integrations/native_renderer/window.zig`, `src/integrations/native_renderer/lifecycle.zig`.\nOut of scope: fixing Bun itself; focus on avoiding unsafe FFI usage patterns.",
+    "complete": false,
+    "priority": "critical",
+    "complexity": "High"
+  },
+  {
+    "title": "Define and fix resize/DPI contract",
+    "description": "Make resizing stable and keep pixel scaling correct (no jumpy resize, no blurred scaling after resize).\n\nAcceptance:\n- User-driven window resize is smooth and does not snap to unexpected sizes.\n- Layout and rendering remain consistent after resize (no “fixes itself after resize”).\n- HiDPI behavior is correct: crisp text, correct element sizes.\n\nImplementation notes:\n- Establish explicit terms:\n  - logical size (layout/CSS px)\n  - framebuffer size (physical px)\n  - device scale (framebuffer/logical)\n- Ensure the native side is authoritative for user-driven resize.\n  - Avoid feeding `window_resize` back into `resizeRenderer` unless it is a programmatic resize request.\n- Ensure `dvui.Window` sees correct `windowSize()` and `pixelSize()` every frame.\n- Consider implementing real `contentScale()` for the raylib backend (or document why it stays 1.0).\n\nIn scope: `src/integrations/native_renderer/window.zig`, `src/integrations/native_renderer/exports.zig`, `frontend/index.ts`, `src/backends/raylib.zig`.\nOut of scope: adding a new backend.",
+    "complete": false,
+    "priority": "critical",
+    "complexity": "High"
+  },
+  {
+    "title": "Support inline style width/transform for harness",
+    "description": "Implement enough `style={{...}}` support so `frontend/solid/App.tsx` renders correctly.\n\nAcceptance:\n- `Progress` fill width updates via `style={{ width: \"NN%\" }}`.\n- Virtual list uses `style={{ transform: \"translateY(Npx)\" }}` to position visible rows correctly.\n\nImplementation options (pick one):\n- JS-first: parse style objects in `frontend/solid/host/index.ts` and emit explicit mutation ops (new op fields) that Zig understands.\n- Zig-first: extend snapshot/op schema in `src/integrations/native_renderer/solid_sync.zig` + `src/integrations/solid/core/types.zig` to store inline style (width px/%, translateX/Y), then apply during layout/render.\n\nNotes:\n- Percent width requires parent context; implement as `width_percent` resolved during layout.\n- Translate values must respect device scale; define whether numeric values are logical px or physical px and convert consistently.\n\nIn scope: `frontend/solid/components/progress.tsx`, `frontend/solid/components/list.tsx`, `frontend/solid/host/index.ts`, `src/integrations/native_renderer/solid_sync.zig`, `src/integrations/solid/layout/mod.zig`.\nOut of scope: full CSS; only the minimal subset needed by the harness.",
+    "complete": false,
+    "priority": "critical",
+    "complexity": "High"
+  },
+  {
+    "title": "Implement portal layering and modal behavior",
+    "description": "Make `<portal modal focusTrap>` behave like a real overlay layer instead of a pass-through node.\n\nAcceptance:\n- Overlay in `frontend/solid/App.tsx` renders above the main UI and covers the full window.\n- Modal portals block interaction with underlying content.\n- Focus is trapped within the portal when `focusTrap={true}`.\n\nImplementation notes:\n- Stop treating `portal` as pass-through in `frontend/solid/host/flush.ts`.\n- Introduce a real `portal` node in the Zig store with:\n  - out-of-flow layout (anchored to root viewport)\n  - high z-order stacking\n  - optional modal input capture\n- Define stacking rules for nested portals and z-index.\n\nIn scope: `frontend/solid/host/flush.ts`, `frontend/solid/runtime/index.ts`, `src/integrations/native_renderer/solid_sync.zig`, `src/integrations/solid/render/mod.zig`, `src/integrations/solid/layout/mod.zig`.\nOut of scope: visual dimming/backdrop styling (optional follow-up).",
+    "complete": false,
+    "priority": "critical",
+    "complexity": "High"
+  },
+  {
+    "title": "Complete flex justify-between/around and basic flex-grow",
+    "description": "Bring flex layout closer to what the harness components expect.\n\nAcceptance:\n- `justify-between` and `justify-around` produce correct spacing.\n- Common header rows (e.g. Card header, Accordion trigger) lay out correctly.\n- Add minimal support for `flex-1` (grow to fill remaining space) if needed by components.\n\nImplementation notes:\n- Tailwind already parses these tokens; implement them in `src/integrations/solid/layout/flex.zig`.\n- Prefer deterministic behavior over full CSS spec.\n\nIn scope: `src/integrations/solid/layout/flex.zig`, `src/integrations/solid/style/tailwind.zig`.\nOut of scope: full flexbox (shrink/basis/wrap) unless required by the harness.",
+    "complete": false,
+    "priority": "high",
+    "complexity": "Medium"
+  },
+  {
+    "title": "Fix pointer/drag event payload decoding",
+    "description": "Pointer and drag/drop events currently push binary payloads, but JS decodes detail bytes as UTF-8 strings.\n\nAcceptance:\n- `onPointerDown/Move/Up` handlers receive correct x/y + button/modifier data.\n- Drag handlers (`dragstart`, `drag`, `dragend`, `dragenter`, `dragleave`, `drop`) receive structured detail rather than gibberish.\n- Existing string-detail events (`input`, `scroll`, key events) continue to work.\n\nImplementation notes:\n- Update `frontend/solid/native/adapter.ts` to decode `detail` by `kind`:\n  - for pointer/drag events: parse binary struct (f32 x/y, u8 button/mods).\n  - for scroll/input: decode as UTF-8 string.\n- Consider switching to JSON detail for all events if easier (but keep perf in mind).\n\nIn scope: `frontend/solid/native/adapter.ts`, `src/integrations/solid/render/mod.zig` (event payload shape).\nOut of scope: adding new event kinds beyond what the harness uses.",
+    "complete": false,
+    "priority": "high",
+    "complexity": "Medium"
+  },
+  {
+    "title": "Keyboard event dispatch for focused nodes",
+    "description": "Enable `onKeyDown`/`onKeyUp` in the harness input and for focus-managed widgets.\n\nAcceptance:\n- `onKeyDown`/`onKeyUp` on the input in `App.tsx` fires with a usable `key` value.\n- Key events route to the currently focused node (not broadcast to all nodes).\n\nImplementation notes:\n- Decide on payload encoding for key events (string key name is fine initially).\n- Track focused node ID during render (e.g. when a node’s DVUI widget becomes focused) and route key events accordingly.\n\nIn scope: `src/integrations/solid/render/mod.zig`, `src/integrations/solid/events/mod.zig`, `frontend/solid/native/adapter.ts`.\nOut of scope: IME/composition; do basic keydown/keyup only.",
+    "complete": false,
+    "priority": "high",
+    "complexity": "High"
+  },
+  {
+    "title": "Remove clipping hacks by fixing bounds and clip semantics",
+    "description": "Current clipping correctness relies on forcing scissor for any non-fullscreen clip in `src/render/render.zig`. Replace this with correct bounds/clip detection.\n\nAcceptance:\n- `overflow-hidden` clips reliably without forcing scissor globally.\n- Nested clips and scroll clips behave correctly.\n- No regressions in non-Solid rendering paths.\n\nImplementation notes:\n- Identify which path produces incorrect `Triangles.bounds` (direct rects vs cached geometry vs transformed draws).\n- Ensure all triangle vertices and bounds are in the same coordinate space as `dvui.clipGet()` (physical).\n\nIn scope: `src/render/render.zig`, `src/integrations/solid/render/direct.zig`, `src/integrations/solid/render/cache.zig`.\nOut of scope: adding new render features.",
+    "complete": false,
+    "priority": "medium",
+    "complexity": "Medium"
+  },
+  {
+    "title": "Accessibility: map ARIA props to AccessKit for Solid nodes",
+    "description": "Use the existing AccessKit integration to expose Solid-rendered UI to assistive tech.\n\nAcceptance:\n- Core roles/labels from `App.tsx` are represented in the accessibility tree.\n- Focus changes are reflected.\n\nImplementation notes:\n- Capture ARIA fields from snapshots/ops into `SolidNode`.\n- Build an AccessKit tree for the Solid store (initially only for key controls).\n\nIn scope: `src/integrations/solid/*`, `src/accessibility/*`, `src/integrations/native_renderer/solid_sync.zig`.\nOut of scope: perfect ARIA parity; focus on minimal useful coverage.",
+    "complete": false,
+    "priority": "medium",
+    "complexity": "High"
+  },
+  {
+    "title": "Reduce JS↔Zig protocol overhead (ops-only + binary next)",
+    "description": "Make the pipeline scale beyond a demo: stop full snapshots every frame and reduce JSON costs.\n\nAcceptance:\n- After first successful sync, host sends only mutation ops unless a resync is required.\n- JSON payload sizes stay bounded under the harness.\n- Define a binary op stream plan (even if not implemented immediately).\n\nImplementation notes:\n- Ensure dirty tracking in `frontend/solid/host/*` is correct and avoids per-frame full-tree serialization.\n- Consider moving from JSON → binary op stream/shared memory for `applyOps`.\n\nIn scope: `frontend/solid/host/flush.ts`, `src/integrations/native_renderer/solid_sync.zig`.\nOut of scope: GPU renderer optimization (wgpu).",
+    "complete": false,
+    "priority": "medium",
+    "complexity": "High"
+  }
+]
+

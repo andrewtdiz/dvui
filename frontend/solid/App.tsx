@@ -44,23 +44,63 @@ export const App = () => {
   const [activeRadio, setActiveRadio] = createSignal("email");
   const [togglePressed, setTogglePressed] = createSignal(false);
 
-  const decodePayload = (payload?: Uint8Array) => {
-    if (!payload || payload.length === 0) return "";
-    return new TextDecoder().decode(payload);
+  const formatPointerDetail = (detail: Record<string, unknown>) => {
+    const x = detail.x;
+    const y = detail.y;
+    if (typeof x !== "number" || typeof y !== "number") return "";
+    const button = typeof detail.button === "number" ? detail.button : 0;
+    const modifiers = typeof detail.modifiers === "number" ? detail.modifiers : 0;
+    return `x=${x.toFixed(1)} y=${y.toFixed(1)} btn=${button} mod=${modifiers}`;
   };
 
-  const logEvent = (label: string) => (payload: Uint8Array) => {
+  const decodePayload = (payload?: unknown) => {
+    if (payload == null) return "";
+    if (typeof payload === "string") return payload;
+    if (typeof payload === "object") {
+      const detailValue = payload as Record<string, unknown>;
+      const pointerFormatted = formatPointerDetail(detailValue);
+      if (pointerFormatted) return pointerFormatted;
+    }
+    if (payload instanceof ArrayBuffer) {
+      if (payload.byteLength === 0) return "";
+      return new TextDecoder().decode(new Uint8Array(payload));
+    }
+    if (ArrayBuffer.isView(payload)) {
+      const view = payload as ArrayBufferView;
+      if (view.byteLength === 0) return "";
+      return new TextDecoder().decode(
+        new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+      );
+    }
+    if (typeof payload === "object") {
+      const record = payload as Record<string, unknown>;
+      if (typeof record.detail === "string") return record.detail;
+      if (record.detail && typeof record.detail === "object") {
+        const formatted = formatPointerDetail(record.detail as Record<string, unknown>);
+        if (formatted) return formatted;
+        return "";
+      }
+      if (record.detail != null) return String(record.detail);
+      if (typeof record.key === "string") return record.key;
+      const target = record.target as { value?: unknown } | undefined;
+      if (target?.value != null) return String(target.value);
+      return "";
+    }
+    return String(payload);
+  };
+
+  const logEvent = (label: string) => (payload: unknown) => {
     const detail = decodePayload(payload);
     setLastEvent(detail ? `${label}: ${detail}` : label);
   };
 
-  const logScroll = (payload: Uint8Array) => {
+  const logScroll = (payload: unknown) => {
     const detail = decodePayload(payload) || "Idle";
     setScrollDetail(detail);
     setLastEvent(detail === "Idle" ? "scroll" : `scroll: ${detail}`);
   };
 
-  const logDrag = (label: string) => (payload: Uint8Array) => {
+  const logDrag = (label: string) => (payload: unknown) => {
     const detail = decodePayload(payload);
     const message = detail ? `${label}: ${detail}` : label;
     setDragDetail(message);

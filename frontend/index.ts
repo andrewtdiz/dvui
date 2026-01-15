@@ -100,7 +100,7 @@ const loop = () => {
       logicalHeight = next.height;
       pixelWidth = next.pixelWidth;
       pixelHeight = next.pixelHeight;
-      renderer.resize(next.width, next.height);
+      // Native window already resized; avoid feedback that can reset HiDPI scaling.
     }
   }
 

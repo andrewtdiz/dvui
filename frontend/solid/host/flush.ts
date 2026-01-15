@@ -143,6 +143,7 @@ export const createFlushController = (ctx: FlushContext): FlushController => {
           text: n.text,
           src: n.src,
           value: n.value,
+          placeholder: n.placeholder,
           rotation: n.rotation,
           scaleX: n.scaleX,
           scaleY: n.scaleY,

@@ -1271,6 +1271,12 @@ var hasAbsoluteClass = (props) => {
     return false;
   return raw.split(/\s+/).map((c) => c.trim()).filter(Boolean).includes("absolute");
 };
+var clipChildrenFromClass = (props) => {
+  const raw = props.className ?? props.class;
+  if (!raw)
+    return false;
+  return raw.split(/\s+/).map((c) => c.trim()).filter(Boolean).includes("overflow-hidden");
+};
 var bgColorFromClass = (props) => {
   const raw = props.className ?? props.class;
   if (!raw)
@@ -1403,16 +1409,6 @@ var extractAnchor = (props) => {
   }
   return a;
 };
-var extractIcon = (props) => {
-  const icon = {};
-  if (typeof props.iconKind === "string") {
-    icon.iconKind = props.iconKind;
-  }
-  if (typeof props.iconGlyph === "string") {
-    icon.iconGlyph = props.iconGlyph;
-  }
-  return icon;
-};
 var normalizeAriaBool = (value) => {
   if (typeof value === "boolean")
     return value;
@@ -1514,9 +1510,11 @@ var serializeTree = (roots) => {
     }
     if (node.props.value != null)
       entry.value = String(node.props.value);
+    if (node.props.placeholder != null)
+      entry.placeholder = String(node.props.placeholder);
     if (node.props.src != null)
       entry.src = String(node.props.src);
-    Object.assign(entry, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractIcon(node.props), extractAccessibility(node.props));
+    Object.assign(entry, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractAccessibility(node.props));
     nodes.push(entry);
     for (const child of node.children) {
       serialize(child, node.id);
@@ -1557,14 +1555,27 @@ var markCreated = (node) => {
     markCreated(child);
   }
 };
-var emitPendingListeners = (node, ops) => {
+var queuePendingListeners = (node, ops, pending) => {
   for (const [eventType] of node.listeners) {
     if (node.sentListeners.has(eventType))
       continue;
     ops.push({ op: "listen", id: node.id, eventType });
-    node.sentListeners.add(eventType);
+    pending.push({ node, eventType });
   }
-  node.listenersDirty = false;
+};
+var commitPendingListeners = (pending) => {
+  if (pending.length === 0)
+    return;
+  const touched = new Set;
+  for (const entry of pending) {
+    entry.node.sentListeners.add(entry.eventType);
+    touched.add(entry.node);
+  }
+  for (const node of touched) {
+    if (node.sentListeners.size >= node.listeners.size) {
+      node.listenersDirty = false;
+    }
+  }
 };
 var createFlushController = (ctx) => {
   const { native, encoder, root, nodeIndex, ops } = ctx;
@@ -1588,9 +1599,10 @@ var createFlushController = (ctx) => {
       return nodes;
     };
     let shouldEncodeCommands = native.setSolidTree == null;
+    const pendingListeners = [];
     for (const node of nodeIndex.values()) {
       if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
-        emitPendingListeners(node, ops);
+        queuePendingListeners(node, ops, pendingListeners);
       }
     }
     const needsCreateOps = mutationsOnlyAfterSnapshot && !mutationsOnlySynced && ops.length === 0;
@@ -1607,9 +1619,8 @@ var createFlushController = (ctx) => {
           className: n.className,
           text: n.text,
           src: n.src,
-          iconKind: n.iconKind,
-          iconGlyph: n.iconGlyph,
           value: n.value,
+          placeholder: n.placeholder,
           rotation: n.rotation,
           scaleX: n.scaleX,
           scaleY: n.scaleY,
@@ -1656,13 +1667,20 @@ var createFlushController = (ctx) => {
       const payloadObj = { seq: ++seq, ops };
       const payload = treeEncoder.encode(JSON.stringify(payloadObj));
       const ok = native.applyOps(payload);
-      ops.length = 0;
-      if (!ok) {
+      if (ok) {
+        commitPendingListeners(pendingListeners);
+        if (mutationsOnlyAfterSnapshot) {
+          mutationsOnlySynced = true;
+        }
+      } else {
+        const resyncRequested = !needFullSync;
         needFullSync = true;
-      } else if (mutationsOnlyAfterSnapshot) {
-        mutationsOnlySynced = true;
+        if (resyncRequested)
+          scheduleFlush();
       }
+      ops.length = 0;
     }
+    pendingListeners.length = 0;
     const shouldSnapshot = !syncedOnce || snapshotEveryFlush || needFullSync || !mutationsSupported && native.setSolidTree != null;
     let sentSnapshot = false;
     if (native.setSolidTree && shouldSnapshot) {
@@ -1686,21 +1704,27 @@ var createFlushController = (ctx) => {
       }
     }
     if (sentSnapshot && mutationsSupported && native.applyOps) {
+      pendingListeners.length = 0;
       for (const node of nodeIndex.values()) {
         if (node.listenersDirty || node.sentListeners.size < node.listeners.size) {
-          emitPendingListeners(node, ops);
+          queuePendingListeners(node, ops, pendingListeners);
         }
       }
-      const listenOps = ops.filter((op) => op.op === "listen");
-      if (listenOps.length > 0) {
-        const payloadObj = { seq: ++seq, ops: listenOps };
+      if (ops.length > 0) {
+        const payloadObj = { seq: ++seq, ops };
         const payload = treeEncoder.encode(JSON.stringify(payloadObj));
         const ok = native.applyOps(payload);
-        if (!ok) {
+        if (ok) {
+          commitPendingListeners(pendingListeners);
+        } else {
+          const resyncRequested = !needFullSync;
           needFullSync = true;
+          if (resyncRequested)
+            scheduleFlush();
         }
       }
       ops.length = 0;
+      pendingListeners.length = 0;
     }
     if (shouldEncodeCommands) {
       encoder.reset();
@@ -2132,17 +2156,8 @@ var createSolidHost = (native) => {
         createOp.src = String(node.props.src);
       if (node.props.value != null)
         createOp.value = String(node.props.value);
-      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractIcon(node.props), extractAccessibility(node.props));
+      Object.assign(createOp, extractTransform(node.props), extractVisual(node.props), extractScroll(node.props), extractFocus(node.props), extractAnchor(node.props), extractAccessibility(node.props));
       push(createOp);
-      for (const [eventType] of node.listeners) {
-        push({
-          op: "listen",
-          id: node.id,
-          eventType
-        });
-        node.sentListeners.add(eventType);
-      }
-      node.listenersDirty = false;
       return;
     }
     push({
@@ -2223,29 +2238,33 @@ var createSolidHost = (native) => {
       const propName = normalizeAriaName(name);
       node.props[propName] = value;
       if (propName === "class" || propName === "className") {
+        const cls = value == null ? "" : String(value);
         if (node.created) {
-          const cls = value == null ? "" : String(value);
           push({ op: "set_class", id: node.id, className: cls });
+        }
+        const nextClip = clipChildrenFromClass(node.props);
+        if (nextClip || node.props.clipChildren != null) {
+          if (node.props.clipChildren !== nextClip) {
+            node.props.clipChildren = nextClip;
+            if (node.created) {
+              applyVisualMutation(node, "clipChildren", nextClip, ops);
+            }
+          }
         }
       } else if (propName === "src") {
         if (node.created) {
           const src = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "src", src });
         }
-      } else if (propName === "iconKind") {
-        if (node.created) {
-          const nextKind = value == null ? "auto" : String(value);
-          push({ op: "set", id: node.id, name: "iconKind", value: nextKind, iconKind: nextKind });
-        }
-      } else if (propName === "iconGlyph") {
-        if (node.created) {
-          const nextGlyph = value == null ? "" : String(value);
-          push({ op: "set", id: node.id, name: "iconGlyph", value: nextGlyph, iconGlyph: nextGlyph });
-        }
       } else if (propName === "value") {
         if (node.created) {
           const nextValue = value == null ? "" : String(value);
           push({ op: "set", id: node.id, name: "value", value: nextValue });
+        }
+      } else if (propName === "placeholder") {
+        if (node.created) {
+          const nextValue = value == null ? "" : String(value);
+          push({ op: "set", id: node.id, name: "placeholder", value: nextValue, placeholder: nextValue });
         }
       } else if (node.created && isAccessibilityField(propName)) {
         applyAccessibilityMutation(node, propName, value, ops);
@@ -2574,9 +2593,42 @@ var EVENT_KIND_TO_NAME = {
   7: "keyup",
   8: "change",
   9: "submit",
+  10: "pointerdown",
+  11: "pointermove",
+  12: "pointerup",
+  13: "pointercancel",
+  14: "dragstart",
+  15: "drag",
+  16: "dragend",
+  17: "dragenter",
+  18: "dragleave",
+  19: "drop",
   20: "scroll"
 };
 var EVENT_DECODER = new TextDecoder;
+var POINTER_EVENT_NAMES = new Set([
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "pointercancel",
+  "dragstart",
+  "drag",
+  "dragend",
+  "dragenter",
+  "dragleave",
+  "drop"
+]);
+var decodePointerDetail = (payload) => {
+  if (payload.byteLength < 12)
+    return;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  return {
+    x: view.getFloat32(0, true),
+    y: view.getFloat32(4, true),
+    button: view.getUint8(8),
+    modifiers: view.getUint8(9)
+  };
+};
 
 class NativeRenderer {
   lib;
@@ -2589,6 +2641,7 @@ class NativeRenderer {
   closeDeferred = false;
   lastEventOverflow = 0;
   lastDetailOverflow = 0;
+  headerMismatchLogged = false;
   encoder;
   capabilities = { window: true };
   disposed = false;
@@ -2679,18 +2732,27 @@ class NativeRenderer {
   pollEvents(nodeIndex) {
     if (this.disposed)
       return 0;
-    const headerBuffer = new Uint8Array(24);
-    const copied = this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length);
-    if (Number(copied) !== headerBuffer.length)
+    const expectedHeaderSize = 24;
+    const minimumHeaderSize = 16;
+    const headerBuffer = new Uint8Array(expectedHeaderSize);
+    const copied = Number(this.lib.symbols.getEventRingHeader(this.handle, headerBuffer, headerBuffer.length));
+    if (copied === 0)
       return 0;
-    const headerView = new DataView(headerBuffer.buffer);
+    if (copied !== expectedHeaderSize && !this.headerMismatchLogged) {
+      console.warn(`[native] Event ring header size mismatch (expected ${expectedHeaderSize}, got ${copied}).`);
+      this.headerMismatchLogged = true;
+    }
+    if (copied < minimumHeaderSize)
+      return 0;
+    const headerView = new DataView(headerBuffer.buffer, 0, copied);
     const readHead = headerView.getUint32(0, true);
     const writeHead = headerView.getUint32(4, true);
     const capacity = headerView.getUint32(8, true);
     const detailCapacity = headerView.getUint32(12, true);
-    const droppedEvents = headerView.getUint32(16, true);
-    const droppedDetails = headerView.getUint32(20, true);
-    if (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow) {
+    const hasDroppedCounters = copied >= expectedHeaderSize;
+    const droppedEvents = hasDroppedCounters ? headerView.getUint32(16, true) : 0;
+    const droppedDetails = hasDroppedCounters ? headerView.getUint32(20, true) : 0;
+    if (hasDroppedCounters && (droppedEvents !== this.lastEventOverflow || droppedDetails !== this.lastDetailOverflow)) {
       const eventDelta = droppedEvents >= this.lastEventOverflow ? droppedEvents - this.lastEventOverflow : droppedEvents;
       const detailDelta = droppedDetails >= this.lastDetailOverflow ? droppedDetails - this.lastDetailOverflow : droppedDetails;
       if (eventDelta > 0 || detailDelta > 0) {
@@ -2728,17 +2790,27 @@ class NativeRenderer {
         const handlers = node.listeners.get(eventName);
         if (handlers && handlers.size > 0) {
           let detail;
+          let pointerDetail;
           if (detailLen > 0 && detailOffset + detailLen <= detailBuffer.length) {
-            detail = EVENT_DECODER.decode(detailBuffer.subarray(detailOffset, detailOffset + detailLen));
+            const detailBytes = detailBuffer.subarray(detailOffset, detailOffset + detailLen);
+            if (POINTER_EVENT_NAMES.has(eventName)) {
+              pointerDetail = decodePointerDetail(detailBytes);
+            }
+            if (!pointerDetail) {
+              detail = EVENT_DECODER.decode(detailBytes);
+            }
           }
           const isKeyEvent = eventName === "keydown" || eventName === "keyup";
           const keyValue = isKeyEvent ? detail : undefined;
+          const targetValue = typeof detail === "string" ? detail : undefined;
+          const eventDetail = pointerDetail ?? detail;
           const eventObj = {
             type: eventName,
-            target: { id: nodeId, value: detail, tagName: node.tag },
-            currentTarget: { id: nodeId, value: detail, tagName: node.tag },
-            detail,
+            target: { id: nodeId, value: targetValue, tagName: node.tag },
+            currentTarget: { id: nodeId, value: targetValue, tagName: node.tag },
+            detail: eventDetail,
             key: keyValue,
+            pointer: pointerDetail,
             _nativePayload: new Uint8Array([nodeId & 255, nodeId >> 8 & 255, nodeId >> 16 & 255, nodeId >> 24 & 255])
           };
           for (const handler of handlers) {
@@ -4912,10 +4984,57 @@ var App = () => {
   const [activeStep, setActiveStep] = createSignal(1);
   const [activeRadio, setActiveRadio] = createSignal("email");
   const [togglePressed, setTogglePressed] = createSignal(false);
-  const decodePayload = (payload) => {
-    if (!payload || payload.length === 0)
+  const formatPointerDetail = (detail) => {
+    const x = detail.x;
+    const y = detail.y;
+    if (typeof x !== "number" || typeof y !== "number")
       return "";
-    return new TextDecoder().decode(payload);
+    const button2 = typeof detail.button === "number" ? detail.button : 0;
+    const modifiers = typeof detail.modifiers === "number" ? detail.modifiers : 0;
+    return `x=${x.toFixed(1)} y=${y.toFixed(1)} btn=${button2} mod=${modifiers}`;
+  };
+  const decodePayload = (payload) => {
+    if (payload == null)
+      return "";
+    if (typeof payload === "string")
+      return payload;
+    if (typeof payload === "object") {
+      const detailValue = payload;
+      const pointerFormatted = formatPointerDetail(detailValue);
+      if (pointerFormatted)
+        return pointerFormatted;
+    }
+    if (payload instanceof ArrayBuffer) {
+      if (payload.byteLength === 0)
+        return "";
+      return new TextDecoder().decode(new Uint8Array(payload));
+    }
+    if (ArrayBuffer.isView(payload)) {
+      const view = payload;
+      if (view.byteLength === 0)
+        return "";
+      return new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+    }
+    if (typeof payload === "object") {
+      const record = payload;
+      if (typeof record.detail === "string")
+        return record.detail;
+      if (record.detail && typeof record.detail === "object") {
+        const formatted = formatPointerDetail(record.detail);
+        if (formatted)
+          return formatted;
+        return "";
+      }
+      if (record.detail != null)
+        return String(record.detail);
+      if (typeof record.key === "string")
+        return record.key;
+      const target = record.target;
+      if (target?.value != null)
+        return String(target.value);
+      return "";
+    }
+    return String(payload);
   };
   const logEvent = (label2) => (payload) => {
     const detail = decodePayload(payload);
@@ -5419,12 +5538,34 @@ var setTime = (elapsed, dt) => {
 // index.ts
 var screenWidth = 800;
 var screenHeight = 450;
+var parseWindowResize = (payload) => {
+  if (payload.byteLength < 16)
+    return null;
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const width = view.getUint32(0, true);
+  const height = view.getUint32(4, true);
+  const pixelWidth = view.getUint32(8, true);
+  const pixelHeight = view.getUint32(12, true);
+  return { width, height, pixelWidth, pixelHeight };
+};
+var logicalWidth = screenWidth;
+var logicalHeight = screenHeight;
+var pixelWidth = 0;
+var pixelHeight = 0;
+var pendingResize = null;
 var renderer = new NativeRenderer({
   callbacks: {
     onLog(level, message) {},
-    onEvent(name) {
+    onEvent(name, payload) {
       if (name === "window_closed") {
         shutdown();
+        return;
+      }
+      if (name === "window_resize") {
+        const parsed = parseWindowResize(payload);
+        if (!parsed)
+          return;
+        pendingResize = parsed;
       }
     }
   }
@@ -5459,6 +5600,18 @@ var loop = () => {
   setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host2.flush();
   renderer.present();
+  if (pendingResize) {
+    const next = pendingResize;
+    pendingResize = null;
+    const logicalChanged = next.width !== logicalWidth || next.height !== logicalHeight;
+    const pixelChanged = next.pixelWidth !== pixelWidth || next.pixelHeight !== pixelHeight;
+    if (logicalChanged || pixelChanged) {
+      logicalWidth = next.width;
+      logicalHeight = next.height;
+      pixelWidth = next.pixelWidth;
+      pixelHeight = next.pixelHeight;
+    }
+  }
   const nodeIndex = host2.getNodeIndex?.() ?? new Map;
   renderer.pollEvents(nodeIndex);
   frame += 1;
