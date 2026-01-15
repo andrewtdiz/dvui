@@ -36,7 +36,8 @@ const renderer = new NativeRenderer({
     },
     onEvent(name, payload) {
       if (name === "window_closed") {
-        shutdown();
+        renderer.markNativeClosed();
+        requestShutdown(false);
         return;
       }
       if (name === "window_resize") {
@@ -45,6 +46,7 @@ const renderer = new NativeRenderer({
         pendingResize = parsed;
       }
     },
+
   },
 });
 
@@ -57,14 +59,31 @@ let running = true;
 let frame = 0;
 let startTime = performance.now();
 let lastTime = startTime;
+let pendingShutdown: { closeRenderer: boolean } | null = null;
 
-const shutdown = () => {
+const requestShutdown = (closeRenderer: boolean) => {
+  if (!running || pendingShutdown) return;
+  pendingShutdown = { closeRenderer };
+};
+
+const shutdown = ({ closeRenderer = true }: { closeRenderer?: boolean } = {}) => {
   if (!running) return;
   running = false;
   scheduler.stop();
   dispose();
-  renderer.close();
+  if (closeRenderer) {
+    renderer.close();
+  }
 };
+
+const drainPendingShutdown = () => {
+  if (!pendingShutdown) return false;
+  const { closeRenderer } = pendingShutdown;
+  pendingShutdown = null;
+  shutdown({ closeRenderer });
+  return true;
+};
+
 
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
@@ -78,8 +97,10 @@ if (import.meta.hot) {
 
 const loop = () => {
   if (!running) return false;
+  if (drainPendingShutdown()) return false;
 
   const now = performance.now();
+
   const dt = (now - lastTime) / 1000;
   const elapsed = (now - startTime) / 1000;
   lastTime = now;
@@ -89,8 +110,10 @@ const loop = () => {
 
   host.flush();
   renderer.present();
+  if (drainPendingShutdown()) return false;
 
   if (pendingResize) {
+
     const next = pendingResize;
     pendingResize = null;
     const logicalChanged = next.width !== logicalWidth || next.height !== logicalHeight;

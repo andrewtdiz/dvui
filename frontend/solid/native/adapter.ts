@@ -92,12 +92,15 @@ export class NativeRenderer implements RendererAdapter {
   private readonly textEncoder = new TextEncoder();
   private callbackDepth = 0;
   private closeDeferred = false;
+  private destroyDeferred = false;
+  private nativeClosed = false;
   private lastEventOverflow = 0;
   private lastDetailOverflow = 0;
   private headerMismatchLogged = false;
   readonly encoder: CommandEncoder;
   readonly capabilities: RendererCapabilities = { window: true };
   disposed = false;
+
 
   constructor(
     options: {
@@ -198,11 +201,29 @@ export class NativeRenderer implements RendererAdapter {
 
   close() {
     if (this.disposed) return;
-    this.lib.symbols.destroyRenderer(this.handle);
+    this.disposed = true;
+    this.closeDeferred = true;
+    if (this.callbackDepth > 0) {
+      if (!this.nativeClosed) {
+        this.destroyDeferred = true;
+      }
+      this.flushDeferredClose();
+      return;
+    }
+    if (!this.nativeClosed) {
+      this.lib.symbols.destroyRenderer(this.handle);
+    }
+    this.flushDeferredClose();
+  }
+
+  markNativeClosed() {
+    if (this.disposed) return;
+    this.nativeClosed = true;
     this.disposed = true;
     this.closeDeferred = true;
     this.flushDeferredClose();
   }
+
 
   pollEvents(nodeIndex: Map<number, import("../host/node").HostNode>): number {
     if (this.disposed) return 0;
@@ -339,9 +360,17 @@ export class NativeRenderer implements RendererAdapter {
   }
 
   private flushDeferredClose() {
-    if (!this.closeDeferred || this.callbackDepth > 0) return;
+    if (this.callbackDepth > 0) return;
+    if (this.destroyDeferred) {
+      this.destroyDeferred = false;
+      if (!this.nativeClosed) {
+        this.lib.symbols.destroyRenderer(this.handle);
+      }
+    }
+    if (!this.closeDeferred) return;
     this.closeDeferred = false;
     this.callbacks.log.close();
     this.callbacks.event.close();
   }
+
 }
