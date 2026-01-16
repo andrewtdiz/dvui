@@ -1117,7 +1117,9 @@ fn ensureRetainedStore() ?*types.NodeStore {
 fn ensureRetainedEventRing() ?*EventRing {
     if (retained_event_ring_initialized) return &retained_event_ring;
     const allocator = retainedAllocator();
-    retained_event_ring = EventRing.init(allocator) catch return null;
+    const event_capacity: u32 = 4096;
+    const detail_capacity: u32 = 65536;
+    retained_event_ring = EventRing.initWithCapacity(allocator, event_capacity, detail_capacity) catch return null;
     retained_event_ring_initialized = true;
     return &retained_event_ring;
 }

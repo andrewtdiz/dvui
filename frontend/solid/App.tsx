@@ -224,7 +224,7 @@ export const App = () => {
               <p class="text-xs text-muted-foreground">{scrollDetail()}</p>
             </div>
             <List
-              class="h-40 w-full rounded-md border border-border"
+              class="h-40 w-full rounded-md border border-border scrollbar-thumb-border"
               items={scrollItems}
               itemSize={listItemHeight}
               viewportHeight={listViewportHeight}
