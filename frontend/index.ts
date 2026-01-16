@@ -23,17 +23,35 @@ const parseWindowResize = (payload: Uint8Array): WindowResizePayload | null => {
   return { width, height, pixelWidth, pixelHeight };
 };
 
-let logicalWidth = screenWidth;
-let logicalHeight = screenHeight;
-let pixelWidth = 0;
-let pixelHeight = 0;
+let logicalSize = { width: screenWidth, height: screenHeight };
+let pixelSize = { width: 0, height: 0 };
+let deviceScale = 1;
 let pendingResize: WindowResizePayload | null = null;
+let resizeRequested: { width: number; height: number } | null = null;
+
+const computeDeviceScale = (payload: WindowResizePayload) => {
+  if (payload.width <= 0 || payload.height <= 0) return deviceScale;
+  const scaleX = payload.pixelWidth / payload.width;
+  const scaleY = payload.pixelHeight / payload.height;
+  const scale = Math.max(scaleX, scaleY);
+  return Number.isFinite(scale) && scale > 0 ? scale : deviceScale;
+};
+
+
+const requestResize = (width: number, height: number) => {
+  resizeRequested = { width, height };
+  logicalSize = { width, height };
+  renderer.resize(width, height);
+};
+
+
 
 const renderer = new NativeRenderer({
   callbacks: {
     onLog(level, message) {
-      // console.log(`[native:${level}] ${message}`);
+      console.log(`[native:${level}] ${message}`);
     },
+
     onEvent(name, payload) {
       if (name === "window_closed") {
         renderer.markNativeClosed();
@@ -50,7 +68,8 @@ const renderer = new NativeRenderer({
   },
 });
 
-renderer.resize(screenWidth, screenHeight);
+requestResize(screenWidth, screenHeight);
+
 
 const { host, setMessage, dispose } = createSolidTextApp(renderer);
 const scheduler = createFrameScheduler();
@@ -113,16 +132,25 @@ const loop = () => {
   if (drainPendingShutdown()) return false;
 
   if (pendingResize) {
-
     const next = pendingResize;
     pendingResize = null;
-    const logicalChanged = next.width !== logicalWidth || next.height !== logicalHeight;
-    const pixelChanged = next.pixelWidth !== pixelWidth || next.pixelHeight !== pixelHeight;
+
+    if (
+      resizeRequested &&
+      resizeRequested.width === next.width &&
+      resizeRequested.height === next.height
+    ) {
+      resizeRequested = null;
+    }
+
+    const logicalChanged =
+      next.width !== logicalSize.width || next.height !== logicalSize.height;
+    const pixelChanged =
+      next.pixelWidth !== pixelSize.width || next.pixelHeight !== pixelSize.height;
     if (logicalChanged || pixelChanged) {
-      logicalWidth = next.width;
-      logicalHeight = next.height;
-      pixelWidth = next.pixelWidth;
-      pixelHeight = next.pixelHeight;
+      logicalSize = { width: next.width, height: next.height };
+      pixelSize = { width: next.pixelWidth, height: next.pixelHeight };
+      deviceScale = computeDeviceScale(next);
       // Native window already resized; avoid feedback that can reset HiDPI scaling.
     }
   }

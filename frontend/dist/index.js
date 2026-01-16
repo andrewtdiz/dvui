@@ -2639,6 +2639,8 @@ class NativeRenderer {
   textEncoder = new TextEncoder;
   callbackDepth = 0;
   closeDeferred = false;
+  destroyDeferred = false;
+  nativeClosed = false;
   lastEventOverflow = 0;
   lastDetailOverflow = 0;
   headerMismatchLogged = false;
@@ -2724,7 +2726,24 @@ class NativeRenderer {
   close() {
     if (this.disposed)
       return;
-    this.lib.symbols.destroyRenderer(this.handle);
+    this.disposed = true;
+    this.closeDeferred = true;
+    if (this.callbackDepth > 0) {
+      if (!this.nativeClosed) {
+        this.destroyDeferred = true;
+      }
+      this.flushDeferredClose();
+      return;
+    }
+    if (!this.nativeClosed) {
+      this.lib.symbols.destroyRenderer(this.handle);
+    }
+    this.flushDeferredClose();
+  }
+  markNativeClosed() {
+    if (this.disposed)
+      return;
+    this.nativeClosed = true;
     this.disposed = true;
     this.closeDeferred = true;
     this.flushDeferredClose();
@@ -2840,7 +2859,15 @@ class NativeRenderer {
     }
   }
   flushDeferredClose() {
-    if (!this.closeDeferred || this.callbackDepth > 0)
+    if (this.callbackDepth > 0)
+      return;
+    if (this.destroyDeferred) {
+      this.destroyDeferred = false;
+      if (!this.nativeClosed) {
+        this.lib.symbols.destroyRenderer(this.handle);
+      }
+    }
+    if (!this.closeDeferred)
       return;
     this.closeDeferred = false;
     this.callbacks.log.close();
@@ -5548,17 +5575,33 @@ var parseWindowResize = (payload) => {
   const pixelHeight = view.getUint32(12, true);
   return { width, height, pixelWidth, pixelHeight };
 };
-var logicalWidth = screenWidth;
-var logicalHeight = screenHeight;
-var pixelWidth = 0;
-var pixelHeight = 0;
+var logicalSize = { width: screenWidth, height: screenHeight };
+var pixelSize = { width: 0, height: 0 };
+var deviceScale = 1;
 var pendingResize = null;
+var resizeRequested = null;
+var computeDeviceScale = (payload) => {
+  if (payload.width <= 0 || payload.height <= 0)
+    return deviceScale;
+  const scaleX = payload.pixelWidth / payload.width;
+  const scaleY = payload.pixelHeight / payload.height;
+  const scale = Math.max(scaleX, scaleY);
+  return Number.isFinite(scale) && scale > 0 ? scale : deviceScale;
+};
+var requestResize = (width, height) => {
+  resizeRequested = { width, height };
+  logicalSize = { width, height };
+  renderer.resize(width, height);
+};
 var renderer = new NativeRenderer({
   callbacks: {
-    onLog(level, message) {},
+    onLog(level, message) {
+      console.log(`[native:${level}] ${message}`);
+    },
     onEvent(name, payload) {
       if (name === "window_closed") {
-        shutdown();
+        renderer.markNativeClosed();
+        requestShutdown(false);
         return;
       }
       if (name === "window_resize") {
@@ -5570,20 +5613,36 @@ var renderer = new NativeRenderer({
     }
   }
 });
-renderer.resize(screenWidth, screenHeight);
+requestResize(screenWidth, screenHeight);
 var { host: host2, setMessage, dispose } = createSolidTextApp(renderer);
 var scheduler = createFrameScheduler();
 var running = true;
 var frame = 0;
 var startTime = performance.now();
 var lastTime = startTime;
-var shutdown = () => {
+var pendingShutdown = null;
+var requestShutdown = (closeRenderer) => {
+  if (!running || pendingShutdown)
+    return;
+  pendingShutdown = { closeRenderer };
+};
+var shutdown = ({ closeRenderer = true } = {}) => {
   if (!running)
     return;
   running = false;
   scheduler.stop();
   dispose();
-  renderer.close();
+  if (closeRenderer) {
+    renderer.close();
+  }
+};
+var drainPendingShutdown = () => {
+  if (!pendingShutdown)
+    return false;
+  const { closeRenderer } = pendingShutdown;
+  pendingShutdown = null;
+  shutdown({ closeRenderer });
+  return true;
 };
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
@@ -5591,6 +5650,8 @@ process.once("exit", shutdown);
 if (undefined) {}
 var loop = () => {
   if (!running)
+    return false;
+  if (drainPendingShutdown())
     return false;
   const now = performance.now();
   const dt = (now - lastTime) / 1000;
@@ -5600,16 +5661,20 @@ var loop = () => {
   setMessage(`dvui text @ ${elapsed.toFixed(2)}s (frame ${frame})`);
   host2.flush();
   renderer.present();
+  if (drainPendingShutdown())
+    return false;
   if (pendingResize) {
     const next = pendingResize;
     pendingResize = null;
-    const logicalChanged = next.width !== logicalWidth || next.height !== logicalHeight;
-    const pixelChanged = next.pixelWidth !== pixelWidth || next.pixelHeight !== pixelHeight;
+    if (resizeRequested && resizeRequested.width === next.width && resizeRequested.height === next.height) {
+      resizeRequested = null;
+    }
+    const logicalChanged = next.width !== logicalSize.width || next.height !== logicalSize.height;
+    const pixelChanged = next.pixelWidth !== pixelSize.width || next.pixelHeight !== pixelSize.height;
     if (logicalChanged || pixelChanged) {
-      logicalWidth = next.width;
-      logicalHeight = next.height;
-      pixelWidth = next.pixelWidth;
-      pixelHeight = next.pixelHeight;
+      logicalSize = { width: next.width, height: next.height };
+      pixelSize = { width: next.pixelWidth, height: next.pixelHeight };
+      deviceScale = computeDeviceScale(next);
     }
   }
   const nodeIndex = host2.getNodeIndex?.() ?? new Map;
