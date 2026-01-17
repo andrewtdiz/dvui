@@ -4,3 +4,7 @@
 [submodule "deps/wgpu_native_zig"]
 	path = deps/wgpu_native_zig
 	url = https://github.com/andrewtdiz/wgpu_native_zig
+[submodule "deps/luaz"]
+	path = deps/luaz
+	url = https://github.com/andrewtdiz/luaz
+	branch = mainline
