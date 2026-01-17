@@ -24,7 +24,7 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 9 });
+        const ui_table = self.lua.createTable(.{ .rec = 11 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
@@ -36,6 +36,8 @@ pub const LuaUi = struct {
         try ui_table.set("set_class", luaz.Lua.Capture(self, luaSetClass));
         try ui_table.set("set_visual", luaz.Lua.Capture(self, luaSetVisual));
         try ui_table.set("set_transform", luaz.Lua.Capture(self, luaSetTransform));
+        try ui_table.set("set_scroll", luaz.Lua.Capture(self, luaSetScroll));
+        try ui_table.set("set_anchor", luaz.Lua.Capture(self, luaSetAnchor));
 
         const globals = self.lua.globals();
         try globals.set("ui", ui_table);
@@ -55,6 +57,21 @@ pub const LuaUi = struct {
             error.KeyNotFound => null,
             else => return err,
         };
+    }
+
+    fn parseAnchorSide(value: []const u8) ?solid.AnchorSide {
+        if (std.mem.eql(u8, value, "top")) return .top;
+        if (std.mem.eql(u8, value, "bottom")) return .bottom;
+        if (std.mem.eql(u8, value, "left")) return .left;
+        if (std.mem.eql(u8, value, "right")) return .right;
+        return null;
+    }
+
+    fn parseAnchorAlign(value: []const u8) ?solid.AnchorAlign {
+        if (std.mem.eql(u8, value, "start")) return .start;
+        if (std.mem.eql(u8, value, "center")) return .center;
+        if (std.mem.eql(u8, value, "end")) return .end;
+        return null;
     }
 
     fn luaCreate(upv: luaz.Lua.Upvalues(*LuaUi), tag: []const u8, id: u32, parent: ?u32, before: ?u32) !void {
@@ -85,6 +102,16 @@ pub const LuaUi = struct {
     fn luaSetTransform(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
         defer props.deinit();
         try upv.value.setTransform(id, props);
+    }
+
+    fn luaSetScroll(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
+        defer props.deinit();
+        try upv.value.setScroll(id, props);
+    }
+
+    fn luaSetAnchor(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
+        defer props.deinit();
+        try upv.value.setAnchor(id, props);
     }
 
     fn luaLog(upv: luaz.Lua.Upvalues(*LuaUi), msg: []const u8) void {
@@ -198,6 +225,68 @@ pub const LuaUi = struct {
         }
         if (try readOptionalField(f32, props, "translateY")) |value| {
             target.transform.translation[1] = value;
+            changed = true;
+        }
+        if (changed) {
+            self.store.markNodeChanged(id);
+        }
+    }
+
+    fn setScroll(self: *LuaUi, id: u32, props: luaz.Lua.Table) !void {
+        if (id == 0) return error.MissingId;
+        const target = self.store.node(id) orelse return error.MissingId;
+        var changed = false;
+        if (try readOptionalField(bool, props, "enabled")) |value| {
+            target.scroll.enabled = value;
+            changed = true;
+        }
+        if (try readOptionalField(f32, props, "scrollX")) |value| {
+            target.scroll.offset_x = value;
+            changed = true;
+        }
+        if (try readOptionalField(f32, props, "scrollY")) |value| {
+            target.scroll.offset_y = value;
+            changed = true;
+        }
+        if (try readOptionalField(f32, props, "canvasWidth")) |value| {
+            target.scroll.canvas_width = value;
+            changed = true;
+        }
+        if (try readOptionalField(f32, props, "canvasHeight")) |value| {
+            target.scroll.canvas_height = value;
+            changed = true;
+        }
+        if (try readOptionalField(bool, props, "autoCanvas")) |value| {
+            target.scroll.auto_canvas = value;
+            changed = true;
+        }
+        if (changed) {
+            self.store.markNodeChanged(id);
+        }
+    }
+
+    fn setAnchor(self: *LuaUi, id: u32, props: luaz.Lua.Table) !void {
+        if (id == 0) return error.MissingId;
+        const target = self.store.node(id) orelse return error.MissingId;
+        var changed = false;
+        if (try readOptionalField(u32, props, "anchorId")) |value| {
+            target.anchor_id = value;
+            changed = true;
+        }
+        if (try readOptionalField([]const u8, props, "side")) |value| {
+            if (parseAnchorSide(value)) |side| {
+                target.anchor_side = side;
+                changed = true;
+            }
+        }
+        if (try readOptionalField([]const u8, props, "align")) |value| {
+            if (parseAnchorAlign(value)) |alignment| {
+                target.anchor_align = alignment;
+                changed = true;
+            }
+        }
+        if (try readOptionalField(f32, props, "offset")) |value| {
+            target.anchor_offset = value;
             changed = true;
         }
         if (changed) {
