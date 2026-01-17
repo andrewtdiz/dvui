@@ -24,7 +24,7 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 11 });
+        const ui_table = self.lua.createTable(.{ .rec = 12 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
@@ -38,6 +38,7 @@ pub const LuaUi = struct {
         try ui_table.set("set_transform", luaz.Lua.Capture(self, luaSetTransform));
         try ui_table.set("set_scroll", luaz.Lua.Capture(self, luaSetScroll));
         try ui_table.set("set_anchor", luaz.Lua.Capture(self, luaSetAnchor));
+        try ui_table.set("listen", luaz.Lua.Capture(self, luaListen));
 
         const globals = self.lua.globals();
         try globals.set("ui", ui_table);
@@ -112,6 +113,10 @@ pub const LuaUi = struct {
     fn luaSetAnchor(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
         defer props.deinit();
         try upv.value.setAnchor(id, props);
+    }
+
+    fn luaListen(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, event_name: []const u8) !void {
+        try upv.value.addListener(id, event_name);
     }
 
     fn luaLog(upv: luaz.Lua.Upvalues(*LuaUi), msg: []const u8) void {
@@ -292,5 +297,11 @@ pub const LuaUi = struct {
         if (changed) {
             self.store.markNodeChanged(id);
         }
+    }
+
+    fn addListener(self: *LuaUi, id: u32, event_name: []const u8) !void {
+        if (id == 0) return error.MissingId;
+        _ = solid.events.eventKindFromName(event_name) orelse return error.InvalidEvent;
+        try self.store.addListener(id, event_name);
     }
 };

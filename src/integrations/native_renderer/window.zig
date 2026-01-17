@@ -6,6 +6,7 @@ const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
 const solid = @import("solid");
+const luaz = @import("luaz");
 
 const commands = @import("commands.zig");
 const lifecycle = @import("lifecycle.zig");
@@ -97,6 +98,53 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     renderer.size = .{ screen_w, screen_h };
     renderer.pixel_size = .{ pixel_w, pixel_h };
     lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
+}
+
+fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *solid.EventRing) void {
+    const has_handler = lifecycle.isLuaFuncPresent(lua_state, "on_event");
+
+    const header = ring.getHeader();
+    if (header.read_head == header.write_head or header.capacity == 0) {
+        ring.setReadHead(header.write_head);
+        return;
+    }
+
+    if (!has_handler) {
+        ring.setReadHead(header.write_head);
+        return;
+    }
+
+    var cursor = header.read_head;
+    while (cursor < header.write_head) : (cursor += 1) {
+        const buffer_index: usize = @intCast(cursor % header.capacity);
+        const entry = ring.buffer[buffer_index];
+        var detail: []const u8 = "";
+        if (entry.detail_len > 0) {
+            const detail_offset: usize = @intCast(entry.detail_offset);
+            const detail_length: usize = @intCast(entry.detail_len);
+            const detail_end = detail_offset + detail_length;
+            if (detail_end <= ring.detail_buffer.len) {
+                detail = ring.detail_buffer[detail_offset..detail_end];
+            }
+        }
+
+        const globals = lua_state.globals();
+        const call_result = globals.call("on_event", .{ @tagName(entry.kind), entry.node_id, detail }, void) catch |err| {
+            lifecycle.logLuaError(renderer, "on_event", err);
+            lifecycle.teardownLua(renderer);
+            return;
+        };
+        switch (call_result) {
+            .ok => {},
+            else => {
+                logMessage(renderer, 3, "lua on_event did not complete", .{});
+                lifecycle.teardownLua(renderer);
+                return;
+            },
+        }
+    }
+
+    ring.setReadHead(header.write_head);
 }
 
 pub fn renderFrame(renderer: *Renderer) void {
@@ -220,6 +268,14 @@ pub fn renderFrame(renderer: *Renderer) void {
         const drew_solid = renderer.solid_store_ready and store != null and solid.render(event_ring_ptr, store.?);
         if (!drew_solid) {
             commands.renderCommandsDvui(renderer, win);
+        }
+
+        if (renderer.lua_ready) {
+            if (renderer.lua_state) |lua_state| {
+                if (event_ring_ptr) |ring| {
+                    drainLuaEvents(renderer, lua_state, ring);
+                }
+            }
         }
 
         if (renderer.backend) |*backend| {
