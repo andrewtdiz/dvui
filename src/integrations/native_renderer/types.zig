@@ -4,6 +4,8 @@ const builtin = @import("builtin");
 const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
 const solid = @import("solid");
+const luaz = @import("luaz");
+const luau_ui = @import("luau_ui");
 
 // ============================================================
 // FFI Callback Types
@@ -59,6 +61,10 @@ pub const Renderer = struct {
     // Event ring buffer for Zig→JS event dispatch
     event_ring_ptr: ?*anyopaque = null,
     event_ring_ready: bool = false,
+    // Luau VM state for retained UI
+    lua_state: ?*luaz.Lua = null,
+    lua_ui: ?*luau_ui.LuaUi = null,
+    lua_ready: bool = false,
 };
 
 // ============================================================

@@ -109,6 +109,7 @@ pub fn build(b: *Build) !void {
     luau_ui_mod.addImport("luaz", luaz_dep.module("luaz"));
 
     native_module.addImport("solid", solid_mod);
+    native_module.addImport("luaz", luaz_dep.module("luaz"));
     native_module.addImport("luau_ui", luau_ui_mod);
 
     if (target.result.os.tag == .windows) {
