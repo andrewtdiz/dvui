@@ -24,11 +24,14 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 2 });
+        const ui_table = self.lua.createTable(.{ .rec = 5 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
         try ui_table.set("reset", luaz.Lua.Capture(self, luaReset));
+        try ui_table.set("create", luaz.Lua.Capture(self, luaCreate));
+        try ui_table.set("remove", luaz.Lua.Capture(self, luaRemove));
+        try ui_table.set("insert", luaz.Lua.Capture(self, luaInsert));
 
         const globals = self.lua.globals();
         try globals.set("ui", ui_table);
@@ -41,6 +44,18 @@ pub const LuaUi = struct {
             const msg_ptr: [*]const u8 = @ptrCast(msg.ptr);
             log_fn(level, msg_ptr, msg.len);
         }
+    }
+
+    fn luaCreate(upv: luaz.Lua.Upvalues(*LuaUi), tag: []const u8, id: u32, parent: ?u32, before: ?u32) !void {
+        try upv.value.createNode(tag, id, parent, before);
+    }
+
+    fn luaRemove(upv: luaz.Lua.Upvalues(*LuaUi), id: u32) !void {
+        try upv.value.removeNode(id);
+    }
+
+    fn luaInsert(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, parent: ?u32, before: ?u32) !void {
+        try upv.value.insertNode(id, parent, before);
     }
 
     fn luaLog(upv: luaz.Lua.Upvalues(*LuaUi), msg: []const u8) void {
@@ -57,5 +72,31 @@ pub const LuaUi = struct {
         const allocator = self.store.allocator;
         self.store.deinit();
         try self.store.init(allocator);
+    }
+
+    fn createNode(self: *LuaUi, tag: []const u8, id: u32, parent: ?u32, before: ?u32) !void {
+        if (std.mem.eql(u8, tag, "text")) {
+            try self.store.setTextNode(id, "");
+        } else if (std.mem.eql(u8, tag, "slot")) {
+            try self.store.upsertSlot(id);
+        } else {
+            try self.store.upsertElement(id, tag);
+        }
+
+        const parent_id: u32 = parent orelse 0;
+        try self.store.insert(parent_id, id, before);
+    }
+
+    fn removeNode(self: *LuaUi, id: u32) !void {
+        if (id == 0) return error.MissingId;
+        self.store.remove(id);
+    }
+
+    fn insertNode(self: *LuaUi, id: u32, parent: ?u32, before: ?u32) !void {
+        if (id == 0) return error.MissingId;
+        const parent_id = parent orelse return error.MissingParent;
+        if (self.store.node(id) == null) return error.MissingChild;
+        if (self.store.node(parent_id) == null) return error.MissingParent;
+        try self.store.insert(parent_id, id, before);
     }
 };
