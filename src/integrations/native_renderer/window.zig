@@ -141,6 +141,80 @@ pub fn renderFrame(renderer: *Renderer) void {
             }
         }
 
+        if (renderer.lua_ready) {
+            if (renderer.lua_state) |lua_state| {
+                if (lifecycle.isLuaFuncPresent(lua_state, "update")) {
+                    const globals = lua_state.globals();
+                    const dt = dvui.secondsSinceLastFrame();
+                    const window_rect = dvui.windowRect();
+                    const mouse_nat = win.mouse_pt.toNatural();
+                    const input_table = lua_state.createTable(.{ .rec = 12 });
+                    defer input_table.deinit();
+                    input_table.set("width", window_rect.w) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("height", window_rect.h) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("mouseX", mouse_nat.x) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("mouseY", mouse_nat.y) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    const left_down = ray.isMouseButtonDown(ray.MouseButton.left);
+                    input_table.set("mouseDown", left_down) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    const mods = win.modifiers;
+                    input_table.set("shift", mods.shift()) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("ctrl", mods.control()) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("alt", mods.alt()) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    input_table.set("cmd", mods.command()) catch |err| {
+                        lifecycle.logLuaError(renderer, "update input", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+
+                    const call_result = globals.call("update", .{ dt, input_table }, void) catch |err| {
+                        lifecycle.logLuaError(renderer, "update", err);
+                        lifecycle.teardownLua(renderer);
+                        return;
+                    };
+                    switch (call_result) {
+                        .ok => {},
+                        else => {
+                            logMessage(renderer, 3, "lua update did not complete", .{});
+                            lifecycle.teardownLua(renderer);
+                            return;
+                        },
+                    }
+                }
+            }
+        }
+
         const event_ring_ptr = types.eventRing(renderer);
         const store = types.solidStore(renderer);
         const drew_solid = renderer.solid_store_ready and store != null and solid.render(event_ring_ptr, store.?);

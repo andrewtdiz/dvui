@@ -54,14 +54,14 @@ pub fn sendFrameEvent(renderer: *Renderer) void {
 // Luau Lifecycle
 // ============================================================
 
-fn isLuaFuncPresent(lua: *luaz.Lua, name: []const u8) bool {
+pub fn isLuaFuncPresent(lua: *luaz.Lua, name: []const u8) bool {
     const globals = lua.globals();
     const lua_func = globals.get(name, luaz.Lua.Function) catch return false;
     lua_func.deinit();
     return true;
 }
 
-fn logLuaError(renderer: *Renderer, label: []const u8, err: anyerror) void {
+pub fn logLuaError(renderer: *Renderer, label: []const u8, err: anyerror) void {
     const err_name = @errorName(err);
     const err_msg = if (err_name.len > max_lua_error_len) err_name[0..max_lua_error_len] else err_name;
     logMessage(renderer, 3, "lua {s} failed: {s}", .{ label, err_msg });
@@ -130,7 +130,7 @@ fn callLuaInit(renderer: *Renderer) bool {
     return false;
 }
 
-fn teardownLua(renderer: *Renderer) void {
+pub fn teardownLua(renderer: *Renderer) void {
     if (renderer.lua_ready) {
         if (renderer.lua_ui) |lua_ui| {
             lua_ui.deinit();
