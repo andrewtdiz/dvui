@@ -24,7 +24,7 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 5 });
+        const ui_table = self.lua.createTable(.{ .rec = 7 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
@@ -32,6 +32,8 @@ pub const LuaUi = struct {
         try ui_table.set("create", luaz.Lua.Capture(self, luaCreate));
         try ui_table.set("remove", luaz.Lua.Capture(self, luaRemove));
         try ui_table.set("insert", luaz.Lua.Capture(self, luaInsert));
+        try ui_table.set("set_text", luaz.Lua.Capture(self, luaSetText));
+        try ui_table.set("set_class", luaz.Lua.Capture(self, luaSetClass));
 
         const globals = self.lua.globals();
         try globals.set("ui", ui_table);
@@ -56,6 +58,14 @@ pub const LuaUi = struct {
 
     fn luaInsert(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, parent: ?u32, before: ?u32) !void {
         try upv.value.insertNode(id, parent, before);
+    }
+
+    fn luaSetText(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, text: []const u8) !void {
+        try upv.value.setText(id, text);
+    }
+
+    fn luaSetClass(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, class_name: []const u8) !void {
+        try upv.value.setClass(id, class_name);
     }
 
     fn luaLog(upv: luaz.Lua.Upvalues(*LuaUi), msg: []const u8) void {
@@ -98,5 +108,15 @@ pub const LuaUi = struct {
         if (self.store.node(id) == null) return error.MissingChild;
         if (self.store.node(parent_id) == null) return error.MissingParent;
         try self.store.insert(parent_id, id, before);
+    }
+
+    fn setText(self: *LuaUi, id: u32, text: []const u8) !void {
+        if (id == 0) return error.MissingId;
+        try self.store.setTextNode(id, text);
+    }
+
+    fn setClass(self: *LuaUi, id: u32, class_name: []const u8) !void {
+        if (id == 0) return error.MissingId;
+        try self.store.setClassName(id, class_name);
     }
 };
