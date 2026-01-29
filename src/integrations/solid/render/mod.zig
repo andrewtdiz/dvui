@@ -22,6 +22,10 @@ const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 const renderCachedOrDirectBackground = paint_cache.renderCachedOrDirectBackground;
 const updatePaintCache = paint_cache.updatePaintCache;
 
+fn applyLayoutScaleToOptions(options: *dvui.Options) void {
+    _ = options;
+}
+
 const log = std.log.scoped(.solid_bridge);
 
 var gizmo_override_rect: ?types.GizmoRect = null;
@@ -549,6 +553,11 @@ fn renderParagraph(
                 .id_extra = nodeIdExtra(node_id),
             };
             style_apply.applyToOptions(&class_spec, &options);
+            if (options.padding == null) {
+                // Avoid LabelWidget default padding unless class-specified.
+                options.padding = dvui.Rect{};
+            }
+            applyLayoutScaleToOptions(&options);
             applyVisualToOptions(node, &options);
             applyTransformToOptions(node, &options);
             if (font_override) |style_name| {
@@ -556,7 +565,25 @@ fn renderParagraph(
                     options.font_style = style_name;
                 }
             }
-            dvui.labelNoFmt(@src(), trimmed, .{}, options);
+            var align_x: f32 = 0.0;
+            if (class_spec.text_align) |text_alignment| {
+                align_x = switch (text_alignment) {
+                    .left => 0.0,
+                    .center => 0.5,
+                    .right => 1.0,
+                };
+            }
+            var lw = dvui.LabelWidget.initNoFmt(@src(), trimmed, .{ .align_x = align_x }, options);
+            lw.install();
+            var content_rect = lw.data().contentRect();
+            const font = options.fontGet();
+            const pad = font.textHeight() * (font.line_height_factor - 1.0);
+            if (pad > 0) {
+                content_rect = content_rect.outset(.{ .y = pad * 0.5, .h = pad * 0.5 });
+                lw.data().rect = lw.data().rect.outset(.{ .y = pad * 0.5, .h = pad * 0.5 });
+            }
+            lw.draw();
+            lw.deinit();
         }
     }
 
@@ -584,16 +611,64 @@ fn applyGizmoProp(node: *types.SolidNode) void {
 fn renderText(store: *types.NodeStore, node: *types.SolidNode) void {
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
-        var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
+        var options = dvui.Options{
+            .id_extra = nodeIdExtra(node.id),
+            // Avoid LabelWidget's default padding for raw text nodes.
+            .padding = dvui.Rect{},
+        };
+        var align_x: f32 = 0.0;
         if (node.parent) |pid| {
             if (store.node(pid)) |parent| {
                 const parent_spec = parent.prepareClassSpec();
-                style_apply.applyToOptions(&parent_spec, &options);
+                if (parent_spec.text) |text_color| {
+                    options.color_text = text_color;
+                }
+                if (parent_spec.text_hover) |text_color| {
+                    options.color_text_hover = text_color;
+                }
+                if (parent_spec.font_style) |style| {
+                    options.font_style = style;
+                }
+                if (parent_spec.text_align) |text_alignment| {
+                    align_x = switch (text_alignment) {
+                        .left => 0.0,
+                        .center => 0.5,
+                        .right => 1.0,
+                    };
+                }
             }
         }
+        const node_spec = node.prepareClassSpec();
+        if (node_spec.text) |text_color| {
+            options.color_text = text_color;
+        }
+        if (node_spec.text_hover) |text_color| {
+            options.color_text_hover = text_color;
+        }
+        if (node_spec.font_style) |style| {
+            options.font_style = style;
+        }
+        if (node_spec.text_align) |text_alignment| {
+            align_x = switch (text_alignment) {
+                .left => 0.0,
+                .center => 0.5,
+                .right => 1.0,
+            };
+        }
+        applyLayoutScaleToOptions(&options);
         applyVisualToOptions(node, &options);
         applyTransformToOptions(node, &options);
-        dvui.labelNoFmt(@src(), trimmed, .{}, options);
+        var lw = dvui.LabelWidget.initNoFmt(@src(), trimmed, .{ .align_x = align_x }, options);
+        lw.install();
+        var content_rect = lw.data().contentRect();
+        const font = options.fontGet();
+        const pad = font.textHeight() * (font.line_height_factor - 1.0);
+        if (pad > 0) {
+            content_rect = content_rect.outset(.{ .y = pad * 0.5, .h = pad * 0.5 });
+            lw.data().rect = lw.data().rect.outset(.{ .y = pad * 0.5, .h = pad * 0.5 });
+        }
+        lw.draw();
+        lw.deinit();
     }
     node.markRendered();
 }
@@ -825,7 +900,7 @@ fn renderInput(
                 switch (ke.code) {
                     .backspace => {
                         if (state.text_len == 0) break;
-                        const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len);
+                        const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len - 1);
                         if (state.buffer.len > new_len) {
                             state.buffer[new_len] = 0;
                         }
@@ -847,23 +922,59 @@ fn renderInput(
 
     box.drawBackground();
     const rs = wd.contentRectScale();
-    const text_rect_nat = rs.rectFromPhysical(rs.r);
     const text_rect = types.Rect{
-        .x = text_rect_nat.x,
-        .y = text_rect_nat.y,
-        .w = text_rect_nat.w,
-        .h = text_rect_nat.h,
+        .x = rs.r.x,
+        .y = rs.r.y,
+        .w = rs.r.w,
+        .h = rs.r.h,
     };
     const text_slice = state.currentText();
+    const font = wd.options.fontGet();
+    const scale = dvui.windowNaturalScale();
+    const text_size_nat = if (text_slice.len > 0) font.textSize(text_slice) else font.textSize("");
+    const text_h = text_size_nat.h * scale;
+    var text_draw_rect = text_rect;
+    if (text_draw_rect.h > text_h and text_h > 0) {
+        text_draw_rect.y += (text_draw_rect.h - text_h) * 0.5;
+        text_draw_rect.h = text_h;
+    }
+
     if (text_slice.len > 0) {
-        direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.font_style);
+        dvui.renderText(.{
+            .font = font,
+            .text = text_slice,
+            .rs = .{
+                .r = .{ .x = text_draw_rect.x, .y = text_draw_rect.y, .w = text_draw_rect.w, .h = text_draw_rect.h },
+                .s = scale,
+            },
+            .color = wd.options.color(.text),
+        }) catch {};
     } else {
         const placeholder = std.mem.trim(u8, node.placeholder, " \n\r\t");
         if (placeholder.len > 0) {
             var placeholder_visual = node.visual;
             const placeholder_color = wd.options.color(.text).opacity(0.5);
             placeholder_visual.text_color = dvuiColorToPacked(placeholder_color);
-            direct.drawTextDirect(text_rect, placeholder, placeholder_visual, wd.options.font_style);
+            direct.drawTextDirect(text_draw_rect, placeholder, placeholder_visual, wd.options.font_style);
+        }
+    }
+
+    if (focused_now) {
+        const blink_half_ns: i128 = 500_000_000;
+        const phase: u64 = @intCast(@divTrunc(dvui.frameTimeNS(), blink_half_ns));
+        if (phase % 2 == 0) {
+            const size_nat = if (text_slice.len > 0) text_size_nat else font.textSize("");
+            const text_w = @min(text_draw_rect.w, size_nat.w * scale);
+            const caret_w: f32 = 1.0;
+            const caret_h = text_draw_rect.h;
+            const caret_x = text_draw_rect.x + text_w;
+            const caret_y = text_draw_rect.y;
+            (dvui.Rect.Physical{
+                .x = caret_x,
+                .y = caret_y,
+                .w = caret_w,
+                .h = caret_h,
+            }).fill(.{}, .{ .color = wd.options.color(.text), .fade = 1.0 });
         }
     }
 

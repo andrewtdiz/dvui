@@ -244,6 +244,8 @@ pub const SolidNode = struct {
     text: []u8 = &.{},
     class_name: []u8 = &.{},
     image_src: []u8 = &.{},
+    image_tint: ?PackedColor = null,
+    image_opacity: f32 = 1.0,
     icon_kind: IconKind = .auto,
     icon_glyph: []u8 = &.{},
     resolved_image_path: []u8 = &.{},
@@ -402,6 +404,21 @@ pub const SolidNode = struct {
         self.image_src = copy;
         self.clearImageCache(allocator);
         self.clearIconCache(allocator);
+    }
+
+    pub fn setImageTint(self: *SolidNode, value: u32) void {
+        if (self.image_tint) |current| {
+            if (current.value == value) return;
+        }
+        self.image_tint = .{ .value = value };
+        self.invalidatePaint();
+    }
+
+    pub fn setImageOpacity(self: *SolidNode, value: f32) void {
+        const clamped: f32 = if (value < 0.0) 0.0 else if (value > 1.0) 1.0 else value;
+        if (self.image_opacity == clamped) return;
+        self.image_opacity = clamped;
+        self.invalidatePaint();
     }
 
     fn clearImageCache(self: *SolidNode, allocator: std.mem.Allocator) void {
@@ -673,6 +690,18 @@ pub const NodeStore = struct {
     pub fn setImageSource(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
         try target.setImageSource(self.allocator, value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setImageTint(self: *NodeStore, id: u32, value: u32) !void {
+        const target = self.nodes.getPtr(id) orelse return;
+        target.setImageTint(value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setImageOpacity(self: *NodeStore, id: u32, value: f32) !void {
+        const target = self.nodes.getPtr(id) orelse return;
+        target.setImageOpacity(value);
         self.markNodeChanged(id);
     }
 

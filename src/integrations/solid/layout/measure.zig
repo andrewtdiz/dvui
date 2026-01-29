@@ -3,24 +3,40 @@ const dvui = @import("dvui");
 
 const types = @import("../core/types.zig");
 
-pub fn measureTextCached(node: *types.SolidNode) types.Size {
+pub fn measureTextCached(store: *types.NodeStore, node: *types.SolidNode) types.Size {
     const text = node.text;
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
     if (trimmed.len == 0) return .{};
 
     const scale = dvui.windowNaturalScale();
     const scale_key: u64 = @intFromFloat(scale * 100.0);
-    const hash = node.textContentHash() ^ scale_key;
+    var options = dvui.Options{};
+    if (node.parent) |pid| {
+        if (store.node(pid)) |parent| {
+            const parent_spec = parent.prepareClassSpec();
+            if (parent_spec.font_style) |style| {
+                options.font_style = style;
+            }
+        }
+    }
+    const node_spec = node.prepareClassSpec();
+    if (node_spec.font_style) |style| {
+        options.font_style = style;
+    }
+    const font = options.fontGet();
+    const font_hash = font.hash();
+    const hash = node.textContentHash() ^ scale_key ^ font_hash;
 
     if (node.layout.text_hash == hash and node.layout.intrinsic_size != null) {
         return node.layout.intrinsic_size.?;
     }
 
-    const font = (dvui.Options{}).fontGet();
-    const size = font.textSize(trimmed);
+    const scaled_font = font.resize(font.size * scale);
+    const cache_entry = dvui.fontCacheGet(scaled_font) catch return .{};
+    const size = cache_entry.textSizeRaw(dvui.currentWindow().gpa, trimmed, .{}) catch return .{};
     const result = types.Size{
-        .w = size.w * scale,
-        .h = size.h * scale,
+        .w = size.w,
+        .h = size.h,
     };
 
     node.layout.text_hash = hash;
@@ -46,7 +62,7 @@ pub fn measureNodeSize(store: *types.NodeStore, node: *types.SolidNode, parent_a
         };
     }
     if (node.kind == .text) {
-        const measured = measureTextCached(node);
+        const measured = measureTextCached(store, node);
         if (size.w == 0) size.w = measured.w;
         if (size.h == 0) size.h = measured.h;
     }
@@ -145,11 +161,13 @@ fn measureCombinedElementText(
         }
     }
     const font = options.fontGet();
-    const nat = font.textSize(trimmed);
+    const scaled_font = font.resize(font.size * scale);
+    const cache_entry = dvui.fontCacheGet(scaled_font) catch return null;
+    const nat = cache_entry.textSizeRaw(dvui.currentWindow().gpa, trimmed, .{}) catch return null;
 
     return types.Size{
-        .w = nat.w * scale,
-        .h = nat.h * scale,
+        .w = nat.w,
+        .h = nat.h,
     };
 }
 

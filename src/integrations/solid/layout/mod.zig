@@ -167,7 +167,7 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         }
 
         if (node.kind == .text) {
-            const measured = measure.measureTextCached(node);
+            const measured = measure.measureTextCached(store, node);
             if (rect.w == 0) rect.w = measured.w;
             if (rect.h == 0) rect.h = measured.h;
         }
@@ -225,7 +225,7 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         }
 
         if (node.kind == .text) {
-            const measured = measure.measureTextCached(node);
+            const measured = measure.measureTextCached(store, node);
             if (rect.w == 0) rect.w = measured.w;
             if (rect.h == 0) rect.h = measured.h;
         }

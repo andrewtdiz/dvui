@@ -1802,6 +1802,7 @@ fn renderImage(
     var options = dvui.Options{
         .name = "solid-image",
         .id_extra = nodeIdExtra(node_id),
+        .role = .image,
     };
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
@@ -1811,8 +1812,70 @@ fn renderImage(
     applyAccessibilityOptions(node, &options, null);
 
     const image_source = image_loader.imageSource(resource);
-    var wd = dvui.image(@src(), .{ .source = image_source }, options);
+    const tint_base = node.image_tint orelse types.PackedColor{ .value = 0xffffffff };
+    const combined_opacity = node.visual.opacity * node.image_opacity;
+    const tint_color = packedColorToDvui(tint_base, combined_opacity);
+
+    var size = dvui.Size{};
+    if (options.min_size_content) |msc| {
+        size = msc;
+    } else {
+        size = dvui.imageSize(image_source) catch .{ .w = 10, .h = 10 };
+    }
+
+    var wd = dvui.WidgetData.init(@src(), .{}, options.override(.{ .min_size_content = size }));
+    wd.register();
     applyAccessibilityState(node, &wd);
+
+    const cr = wd.contentRect();
+    const ms = wd.options.min_size_contentGet();
+
+    var too_big = false;
+    if (ms.w > cr.w or ms.h > cr.h) {
+        too_big = true;
+    }
+
+    const expand = wd.options.expandGet();
+    const gravity = wd.options.gravityGet();
+    var rect = dvui.placeIn(cr, ms, expand, gravity);
+
+    if (too_big and expand != .ratio) {
+        if (ms.w > cr.w and !expand.isHorizontal()) {
+            rect.w = ms.w;
+            rect.x -= gravity.x * (ms.w - cr.w);
+        }
+
+        if (ms.h > cr.h and !expand.isVertical()) {
+            rect.h = ms.h;
+            rect.y -= gravity.y * (ms.h - cr.h);
+        }
+    }
+
+    wd.rect = rect.outset(wd.options.paddingGet()).outset(wd.options.borderGet()).outset(wd.options.marginGet());
+
+    var render_background: ?dvui.Color = if (wd.options.backgroundGet()) wd.options.color(.fill) else null;
+    if (wd.options.rotationGet() == 0.0) {
+        wd.borderAndBackground(.{});
+        render_background = null;
+    } else {
+        if (wd.options.borderGet().nonZero()) {
+            log.debug("solid image {x} can't render border while rotated", .{wd.id});
+        }
+    }
+
+    const render_tex_opts = dvui.RenderTextureOptions{
+        .rotation = wd.options.rotationGet(),
+        .colormod = tint_color,
+        .corner_radius = wd.options.corner_radiusGet(),
+        .uv = .{ .w = 1, .h = 1 },
+        .background_color = render_background,
+    };
+    const content_rs = wd.contentRectScale();
+    dvui.renderImage(image_source, content_rs, render_tex_opts) catch |err| {
+        log.err("Solid image render failed for node {d}: {s}", .{ node_id, @errorName(err) });
+    };
+    wd.minSizeSetAndRefresh();
+    wd.minSizeReportToParent();
 
     renderChildElements(event_ring, store, node, allocator, tracker);
 }
@@ -2175,7 +2238,7 @@ fn renderInput(
                     switch (ke.code) {
                         .backspace => {
                             if (state.text_len == 0) break;
-                            const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len);
+                            const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len - 1);
                             if (state.buffer.len > new_len) {
                                 state.buffer[new_len] = 0;
                             }

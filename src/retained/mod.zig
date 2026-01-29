@@ -14,6 +14,12 @@ pub const EventEntry = events_mod.EventEntry;
 const layout = @import("layout/mod.zig");
 const render_mod = @import("render/mod.zig");
 
+const SolidImageFields = struct {
+    src: ?[]const u8 = null,
+    tint: ?u32 = null,
+    opacity: ?f32 = null,
+};
+
 const SolidSnapshotNode = struct {
     id: u32,
     tag: []const u8,
@@ -21,6 +27,7 @@ const SolidSnapshotNode = struct {
     text: ?[]const u8 = null,
     value: ?[]const u8 = null,
     src: ?[]const u8 = null,
+    image: ?SolidImageFields = null,
     iconKind: ?[]const u8 = null,
     iconGlyph: ?[]const u8 = null,
     className: ?[]const u8 = null,
@@ -188,6 +195,7 @@ const SolidOp = struct {
     name: ?[]const u8 = null,
     value: ?[]const u8 = null,
     src: ?[]const u8 = null,
+    image: ?SolidImageFields = null,
     iconKind: ?[]const u8 = null,
     iconGlyph: ?[]const u8 = null,
     rotation: ?f32 = null,
@@ -315,7 +323,13 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
         if (node.className) |cls| {
             store.setClassName(node.id, cls) catch {};
         }
-        if (node.src) |src| {
+        var image_src = node.src;
+        if (node.image) |image| {
+            if (image.src) |src| {
+                image_src = src;
+            }
+        }
+        if (image_src) |src| {
             store.setImageSource(node.id, src) catch {};
         }
         if (node.value) |value| {
@@ -370,6 +384,16 @@ pub fn setSnapshot(store: *types.NodeStore, event_ring: ?*EventRing, json_bytes:
             if (node.clipChildren) |flag| {
                 target.visual_props.clip_children = flag;
                 touched = true;
+            }
+            if (node.image) |image| {
+                if (image.tint) |value| {
+                    target.setImageTint(value);
+                    touched = true;
+                }
+                if (image.opacity) |value| {
+                    target.setImageOpacity(value);
+                    touched = true;
+                }
             }
             if (node.scroll) |flag| {
                 target.scroll.enabled = flag;
@@ -600,6 +624,18 @@ fn applyVisualFields(store: *types.NodeStore, id: u32, op: SolidOp) OpError!void
     }
     if (changed) {
         store.markNodeChanged(id);
+    }
+}
+
+fn applyImageFields(store: *types.NodeStore, id: u32, image: SolidImageFields) OpError!void {
+    if (image.src) |value| {
+        try store.setImageSource(id, value);
+    }
+    if (image.tint) |value| {
+        try store.setImageTint(id, value);
+    }
+    if (image.opacity) |value| {
+        try store.setImageOpacity(id, value);
     }
 }
 
@@ -862,8 +898,24 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
         if (op.className) |cls| {
             try store.setClassName(op.id, cls);
         }
-        if (op.src) |src| {
+        var image_src = op.src;
+        var image_tint: ?u32 = null;
+        var image_opacity: ?f32 = null;
+        if (op.image) |image| {
+            if (image.src) |src| {
+                image_src = src;
+            }
+            image_tint = image.tint;
+            image_opacity = image.opacity;
+        }
+        if (image_src) |src| {
             try store.setImageSource(op.id, src);
+        }
+        if (image_tint) |value| {
+            try store.setImageTint(op.id, value);
+        }
+        if (image_opacity) |value| {
+            try store.setImageOpacity(op.id, value);
         }
         if (op.value) |value| {
             try store.setInputValue(op.id, value);
@@ -917,6 +969,13 @@ fn applySolidOp(store: *types.NodeStore, op: SolidOp) OpError!void {
     if (std.mem.eql(u8, op.op, "set_visual")) {
         if (op.id == 0) return error.MissingId;
         try applyVisualFields(store, op.id, op);
+        return;
+    }
+
+    if (std.mem.eql(u8, op.op, "set_image")) {
+        if (op.id == 0) return error.MissingId;
+        const image = op.image orelse return error.MissingTag;
+        try applyImageFields(store, op.id, image);
         return;
     }
 

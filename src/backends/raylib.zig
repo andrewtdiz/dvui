@@ -547,6 +547,8 @@ pub fn addAllEvents(self: *RaylibBackend, win: *dvui.Window) !bool {
         }
     }
 
+    var pressed_this_frame = std.bit_set.ArrayBitSet(u32, 512).initEmpty();
+
     //get key presses
     while (true) {
         const event = c.GetKeyPressed();
@@ -554,6 +556,7 @@ pub fn addAllEvents(self: *RaylibBackend, win: *dvui.Window) !bool {
 
         //update list of set keys
         self.pressed_keys.set(@intCast(event));
+        if (event < 512) pressed_this_frame.set(@intCast(event));
 
         //calculate code
         const code = raylibKeyToDvui(event);
@@ -591,8 +594,9 @@ pub fn addAllEvents(self: *RaylibBackend, win: *dvui.Window) !bool {
     //account for key repeat
     iter = self.pressed_keys.iterator(.{});
     while (iter.next()) |keycode| {
+        if (pressed_this_frame.isSet(keycode)) continue;
         if (c.IsKeyPressedRepeat(@intCast(keycode)) and
-            (self.pressed_modifier.shiftOnly() or self.pressed_modifier.has(.none)) and
+            (self.pressed_modifier.shiftOnly() or self.pressed_modifier == .none) and
             keycode < std.math.maxInt(u8) and std.ascii.isPrint(@intCast(keycode)))
         {
             const char: u8 = @intCast(keycode);
