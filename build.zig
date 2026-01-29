@@ -112,6 +112,16 @@ pub fn build(b: *Build) !void {
     native_module.addImport("luaz", luaz_dep.module("luaz"));
     native_module.addImport("luau_ui", luau_ui_mod);
 
+    const luau_runner_mod = b.createModule(.{
+        .root_source_file = b.path("src/luau-native-runner.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    luau_runner_mod.addImport("native_renderer", native_module);
+    luau_runner_mod.addImport("luaz", luaz_dep.module("luaz"));
+    luau_runner_mod.addImport("solid", solid_mod);
+
     if (target.result.os.tag == .windows) {
         if (b.lazyDependency("win32", .{})) |zigwin32| {
             native_module.addImport("win32", zigwin32.module("win32"));
@@ -153,6 +163,15 @@ pub fn build(b: *Build) !void {
         retained_exe.linkLibrary(dep.artifact("raylib"));
     }
 
+    const luau_runner_exe = b.addExecutable(.{
+        .name = "luau-native-runner",
+        .root_module = luau_runner_mod,
+        .use_lld = use_lld,
+    });
+    if (raylib_dep) |dep| {
+        luau_runner_exe.linkLibrary(dep.artifact("raylib"));
+    }
+
     if (target.result.os.tag == .windows) {
         retained_exe.win32_manifest = b.path("src/main.manifest");
         retained_exe.subsystem = .Console;
@@ -160,6 +179,7 @@ pub fn build(b: *Build) !void {
 
     b.installArtifact(exe);
     b.installArtifact(retained_exe);
+    b.installArtifact(luau_runner_exe);
     b.installArtifact(dvui_lib);
 
     const dvui_lib_step = b.step("dvui-lib", "Build the dvui static library");
@@ -180,6 +200,14 @@ pub fn build(b: *Build) !void {
 
     const retained_run_step = b.step("run-retained", "Run the retained harness");
     retained_run_step.dependOn(&retained_run_cmd.step);
+
+    const luau_run_cmd = b.addRunArtifact(luau_runner_exe);
+    if (b.args) |args| {
+        luau_run_cmd.addArgs(args);
+    }
+
+    const luau_run_step = b.step("luau", "Run the Luau native renderer demo");
+    luau_run_step.dependOn(&luau_run_cmd.step);
 }
 
 fn detectLinuxDisplayBackend(b: *Build, target: Build.ResolvedTarget) LinuxDisplayBackend {
