@@ -204,6 +204,40 @@ pub const ScrollState = struct {
     scrollbar_thickness: f32 = 10,
 };
 
+pub const TransitionState = struct {
+    enabled: bool = false,
+    active_props: tailwind.TransitionProps = .{},
+
+    prev_layout_rect: ?Rect = null,
+    prev_translation: [2]f32 = .{ 0, 0 },
+    prev_scale: [2]f32 = .{ 1, 1 },
+    prev_rotation: f32 = 0,
+    prev_opacity: f32 = 1,
+    prev_image_opacity: f32 = 1,
+    prev_bg: ?PackedColor = null,
+    prev_text: ?PackedColor = null,
+    prev_tint: ?PackedColor = null,
+
+    bg_from: ?PackedColor = null,
+    bg_to: ?PackedColor = null,
+    text_from: ?PackedColor = null,
+    text_to: ?PackedColor = null,
+    tint_from: ?PackedColor = null,
+    tint_to: ?PackedColor = null,
+
+    flip_translation: [2]f32 = .{ 0, 0 },
+    flip_scale: [2]f32 = .{ 1, 1 },
+
+    anim_translation: ?[2]f32 = null,
+    anim_scale: ?[2]f32 = null,
+    anim_rotation: ?f32 = null,
+    anim_opacity: ?f32 = null,
+    anim_image_opacity: ?f32 = null,
+    anim_bg: ?PackedColor = null,
+    anim_text: ?PackedColor = null,
+    anim_tint: ?PackedColor = null,
+};
+
 const ListenerSet = struct {
     allocator: std.mem.Allocator,
     names: std.ArrayList([]u8),
@@ -263,6 +297,7 @@ pub const SolidNode = struct {
     transform: Transform = .{},
     visual: VisualProps = .{},
     visual_props: VisualProps = .{},
+    transition_state: TransitionState = .{},
     scroll: ScrollState = .{},
     hovered: bool = false,
     interactive_self: bool = false,

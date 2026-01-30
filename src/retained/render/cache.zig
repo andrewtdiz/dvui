@@ -5,6 +5,7 @@ const dvui = @import("dvui");
 const types = @import("../core/types.zig");
 const tailwind = @import("../style/tailwind.zig");
 const draw = @import("direct.zig");
+const transitions = @import("transitions.zig");
 
 const log = std.log.scoped(.solid_bridge);
 
@@ -111,10 +112,13 @@ pub fn renderCachedOrDirectBackground(
     const border_bottom = (spec.border.bottom orelse 0) * scale;
     const has_border = border_left > 0 or border_right > 0 or border_top > 0 or border_bottom > 0;
 
-    const corner_radius = spec.corner_radius orelse node.visual.corner_radius;
+    const visual_eff = transitions.effectiveVisual(node);
+    const transform_eff = transitions.effectiveTransform(node);
+
+    const corner_radius = spec.corner_radius orelse visual_eff.corner_radius;
     const has_rounding = corner_radius != 0;
 
-    if (!has_border and !has_rounding and node.visual.background == null and fallback_bg == null) return;
+    if (!has_border and !has_rounding and visual_eff.background == null and fallback_bg == null) return;
 
     if (has_rounding) {
         const radius_phys_val = corner_radius * scale;
@@ -122,9 +126,9 @@ pub fn renderCachedOrDirectBackground(
         const outer_radius = dvui.Rect.Physical.all(radius_phys_val);
         const fade: f32 = 2.0;
 
-        const opacity = node.visual.opacity;
+        const opacity = visual_eff.opacity;
         var bg_color_opt: ?dvui.Color = null;
-        if (node.visual.background) |bg_packed| {
+        if (visual_eff.background) |bg_packed| {
             bg_color_opt = draw.packedColorToDvui(bg_packed, opacity);
         } else if (fallback_bg) |bg_color| {
             bg_color_opt = bg_color.opacity(opacity);
@@ -170,8 +174,8 @@ pub fn renderCachedOrDirectBackground(
     }
 
     if (has_border) {
-        const geom = buildRectGeometry(rect, scale, node.visual, node.transform, allocator, spec, fallback_bg) catch {
-            draw.drawRectDirect(rect, node.visual, node.transform, allocator, fallback_bg);
+        const geom = buildRectGeometry(rect, scale, visual_eff, transform_eff, allocator, spec, fallback_bg) catch {
+            draw.drawRectDirect(rect, visual_eff, transform_eff, allocator, fallback_bg);
             return;
         };
         defer allocator.free(geom.vertices);
@@ -186,7 +190,7 @@ pub fn renderCachedOrDirectBackground(
         return;
     }
 
-    draw.drawRectDirect(rect, node.visual, node.transform, allocator, fallback_bg);
+    draw.drawRectDirect(rect, visual_eff, transform_eff, allocator, fallback_bg);
 }
 
 pub fn updatePaintCache(store: *types.NodeStore, tracker: *DirtyRegionTracker) void {
@@ -238,6 +242,9 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
         }
     }
 
+    const visual_eff = transitions.effectiveVisual(node);
+    const transform_eff = transitions.effectiveTransform(node);
+
     if (!shouldCachePaint(node) or rect == null) {
         const bounds = if (rect) |r| draw.transformedRect(node, r) orelse r else null;
         node.paint.painted_rect = bounds;
@@ -248,7 +255,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
         return;
     }
 
-    const geom = buildRectGeometry(rect.?, scale, visual, node.transform, allocator, spec, null) catch {
+    const geom = buildRectGeometry(rect.?, scale, visual_eff, transform_eff, allocator, spec, null) catch {
         const bounds = draw.transformedRect(node, rect.?) orelse rect.?;
         node.paint.painted_rect = bounds;
         tracker.add(bounds);

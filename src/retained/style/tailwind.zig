@@ -15,6 +15,7 @@
 //!   `hidden`, `overflow-hidden`, `text-left`, `text-center`, `text-right`, `text-nowrap`, `break-words`.
 //! - Extras: `opacity-*`, `cursor-*`, `scale-*`, `font-*`, `italic`, `not-italic`, plus `hover:` variants
 //!   for `bg-`, `text-`, `border-`, `opacity-`.
+//! - Transitions: `transition*`, `duration-*`, `ease-*`.
 const std = @import("std");
 
 const dvui = @import("dvui");
@@ -105,10 +106,106 @@ pub const Spec = struct {
     hover_border: SideValues = .{},
     hover_border_color: ?dvui.Color = null,
     hover_opacity: ?f32 = null,
+    transition: TransitionConfig = .{},
 };
 
 // Compatibility alias for callers expecting ClassSpec.
 pub const ClassSpec = Spec;
+
+pub const EasingStyle = enum {
+    linear,
+    sine,
+    quad,
+    cubic,
+    quart,
+    quint,
+    expo,
+    circ,
+    back,
+    elastic,
+    bounce,
+};
+
+pub const EasingDirection = enum {
+    @"in",
+    out,
+    in_out,
+};
+
+pub const TransitionProps = packed struct(u8) {
+    layout: bool = false,
+    transform: bool = false,
+    colors: bool = false,
+    opacity: bool = false,
+    _pad: u4 = 0,
+};
+
+pub const TransitionConfig = struct {
+    enabled: bool = false,
+    props: TransitionProps = .{},
+    duration_us: i32 = 150_000,
+    easing_style: EasingStyle = .quad,
+    easing_dir: EasingDirection = .in_out,
+
+    pub fn easingFn(self: *const TransitionConfig) *const dvui.easing.EasingFn {
+        if (!self.enabled) return dvui.easing.linear;
+        if (self.easing_style == .linear) return dvui.easing.linear;
+
+        return switch (self.easing_style) {
+            .sine => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inSine,
+                .out => dvui.easing.outSine,
+                .in_out => dvui.easing.inOutSine,
+            },
+            .quad => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inQuad,
+                .out => dvui.easing.outQuad,
+                .in_out => dvui.easing.inOutQuad,
+            },
+            .cubic => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inCubic,
+                .out => dvui.easing.outCubic,
+                .in_out => dvui.easing.inOutCubic,
+            },
+            .quart => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inQuart,
+                .out => dvui.easing.outQuart,
+                .in_out => dvui.easing.inOutQuart,
+            },
+            .quint => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inQuint,
+                .out => dvui.easing.outQuint,
+                .in_out => dvui.easing.inOutQuint,
+            },
+            .expo => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inExpo,
+                .out => dvui.easing.outExpo,
+                .in_out => dvui.easing.inOutExpo,
+            },
+            .circ => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inCirc,
+                .out => dvui.easing.outCirc,
+                .in_out => dvui.easing.inOutCirc,
+            },
+            .back => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inBack,
+                .out => dvui.easing.outBack,
+                .in_out => dvui.easing.inOutBack,
+            },
+            .elastic => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inElastic,
+                .out => dvui.easing.outElastic,
+                .in_out => dvui.easing.inOutElastic,
+            },
+            .bounce => switch (self.easing_dir) {
+                .@"in" => dvui.easing.inBounce,
+                .out => dvui.easing.outBounce,
+                .in_out => dvui.easing.inOutBounce,
+            },
+            .linear => dvui.easing.linear,
+        };
+    }
+};
 
 pub const Width = union(enum) {
     full,
@@ -270,6 +367,9 @@ pub fn parse(classes: []const u8) Spec {
         if (handleOpacity(&spec, token)) continue;
         if (handleZIndex(&spec, token)) continue;
         if (handleCursor(&spec, token)) continue;
+        if (handleTransition(&spec, token)) continue;
+        if (handleDuration(&spec, token)) continue;
+        if (handleEase(&spec, token)) continue;
         _ = handlePrefixed(&spec, token);
     }
 
@@ -810,6 +910,114 @@ fn handleCursor(spec: *Spec, token: []const u8) bool {
     return true;
 }
 
+fn handleTransition(spec: *Spec, token: []const u8) bool {
+    if (std.mem.eql(u8, token, "transition")) {
+        spec.transition.enabled = true;
+        spec.transition.props = .{ .layout = true, .transform = true, .colors = true, .opacity = true };
+        return true;
+    }
+    if (std.mem.eql(u8, token, "transition-none")) {
+        spec.transition = .{};
+        return true;
+    }
+    if (std.mem.eql(u8, token, "transition-layout")) {
+        spec.transition.enabled = true;
+        spec.transition.props = .{ .layout = true };
+        return true;
+    }
+    if (std.mem.eql(u8, token, "transition-transform")) {
+        spec.transition.enabled = true;
+        spec.transition.props = .{ .transform = true };
+        return true;
+    }
+    if (std.mem.eql(u8, token, "transition-colors")) {
+        spec.transition.enabled = true;
+        spec.transition.props = .{ .colors = true };
+        return true;
+    }
+    if (std.mem.eql(u8, token, "transition-opacity")) {
+        spec.transition.enabled = true;
+        spec.transition.props = .{ .opacity = true };
+        return true;
+    }
+    return false;
+}
+
+fn handleDuration(spec: *Spec, token: []const u8) bool {
+    const prefix = "duration-";
+    if (!std.mem.startsWith(u8, token, prefix)) return false;
+    const suffix = token[prefix.len..];
+    if (suffix.len == 0) return false;
+
+    const ms = std.fmt.parseInt(i32, suffix, 10) catch return false;
+    const clamped_ms = std.math.clamp(ms, 0, 10_000);
+    spec.transition.duration_us = clamped_ms * 1000;
+    return true;
+}
+
+fn handleEase(spec: *Spec, token: []const u8) bool {
+    if (std.mem.eql(u8, token, "ease-linear")) {
+        spec.transition.easing_style = .linear;
+        return true;
+    }
+
+    if (std.mem.eql(u8, token, "ease-in")) {
+        spec.transition.easing_dir = .@"in";
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-out")) {
+        spec.transition.easing_dir = .out;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-in-out")) {
+        spec.transition.easing_dir = .in_out;
+        return true;
+    }
+
+    if (std.mem.eql(u8, token, "ease-sine")) {
+        spec.transition.easing_style = .sine;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-quad")) {
+        spec.transition.easing_style = .quad;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-cubic")) {
+        spec.transition.easing_style = .cubic;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-quart")) {
+        spec.transition.easing_style = .quart;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-quint")) {
+        spec.transition.easing_style = .quint;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-expo")) {
+        spec.transition.easing_style = .expo;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-circ")) {
+        spec.transition.easing_style = .circ;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-back")) {
+        spec.transition.easing_style = .back;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-elastic")) {
+        spec.transition.easing_style = .elastic;
+        return true;
+    }
+    if (std.mem.eql(u8, token, "ease-bounce")) {
+        spec.transition.easing_style = .bounce;
+        return true;
+    }
+
+    return false;
+}
+
 fn handleInset(spec: *Spec, token: []const u8) bool {
     const top_prefix = "top-";
     const right_prefix = "right-";
@@ -1202,4 +1410,30 @@ fn colorFromPacked(value: u32) dvui.Color {
     const b: u8 = @intCast((value >> 8) & 0xff);
     const a: u8 = @intCast(value & 0xff);
     return dvui.Color{ .r = r, .g = g, .b = b, .a = a };
+}
+
+test "tailwind transition parsing" {
+    const a = parse("transition duration-200 ease-sine ease-in");
+    try std.testing.expect(a.transition.enabled);
+    try std.testing.expect(a.transition.props.layout);
+    try std.testing.expect(a.transition.props.transform);
+    try std.testing.expect(a.transition.props.colors);
+    try std.testing.expect(a.transition.props.opacity);
+    try std.testing.expectEqual(@as(i32, 200_000), a.transition.duration_us);
+    try std.testing.expectEqual(EasingStyle.sine, a.transition.easing_style);
+    try std.testing.expectEqual(EasingDirection.@"in", a.transition.easing_dir);
+
+    const b = parse("transition-opacity duration-75 ease-linear ease-in-out");
+    try std.testing.expect(b.transition.enabled);
+    try std.testing.expect(b.transition.props.opacity);
+    try std.testing.expect(!b.transition.props.layout);
+    try std.testing.expect(!b.transition.props.transform);
+    try std.testing.expect(!b.transition.props.colors);
+    try std.testing.expectEqual(@as(i32, 75_000), b.transition.duration_us);
+    try std.testing.expectEqual(EasingStyle.linear, b.transition.easing_style);
+
+    const c1 = parse("transition ease-in-out ease-quad");
+    const c2 = parse("transition ease-quad ease-in-out");
+    try std.testing.expectEqual(c1.transition.easing_style, c2.transition.easing_style);
+    try std.testing.expectEqual(c1.transition.easing_dir, c2.transition.easing_dir);
 }

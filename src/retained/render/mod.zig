@@ -8,9 +8,11 @@ const layout = @import("../layout/mod.zig");
 const text_wrap = @import("../layout/text_wrap.zig");
 const style_apply = @import("../style/apply.zig");
 const applyVisualToOptions = style_apply.applyVisualToOptions;
+const applyVisualPropsToOptions = style_apply.applyVisualPropsToOptions;
 const applyClassSpecToVisual = style_apply.applyClassSpecToVisual;
 const tailwind = @import("../style/tailwind.zig");
 const direct = @import("direct.zig");
+const transitions = @import("transitions.zig");
 const dvuiColorToPacked = direct.dvuiColorToPacked;
 const applyTransformToOptions = direct.applyTransformToOptions;
 const transformedRect = direct.transformedRect;
@@ -686,6 +688,8 @@ fn syncVisualsFromClasses(
     const prev_bg = node.visual.background;
     const prev_hovered = node.hovered;
 
+    transitions.beginFrameForNode(node, &class_spec_base.transition);
+
     var rect_opt: ?types.Rect = null;
     if (node.layout.rect) |rect_base| {
         rect_opt = transformedRect(node, rect_base) orelse rect_base;
@@ -746,6 +750,7 @@ fn syncVisualsFromClasses(
             node.visual.background = .{ .value = 0x00000000 };
         }
     }
+    transitions.updateNode(node, &class_spec);
     const bg_changed = blk: {
         if (node.visual.background) |bg| {
             if (prev_bg) |prev| break :blk bg.value != prev.value;
@@ -760,7 +765,13 @@ fn syncVisualsFromClasses(
 
     var next_clip = clip;
     if (node.visual.clip_children) {
-        if (rect_opt) |rect| {
+        const rect_for_clip = blk: {
+            if (node.layout.rect) |rect_base| {
+                break :blk transformedRect(node, rect_base) orelse rect_base;
+            }
+            break :blk rect_opt;
+        };
+        if (rect_for_clip) |rect| {
             next_clip.active = true;
             next_clip.rect = if (clip.active) intersectRect(clip.rect, rect) else rect;
         }
@@ -1215,7 +1226,7 @@ fn renderParagraphDirect(
                     .w = line.width,
                     .h = text_layout.line_height,
                 };
-                drawTextDirect(line_rect, line_text, node.visual, draw_font);
+                drawTextDirect(line_rect, line_text, transitions.effectiveVisual(node), draw_font);
             }
         }
     }
@@ -1284,7 +1295,7 @@ fn renderContainer(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, .generic_container);
     if (node.layout.rect) |rect| {
@@ -1461,7 +1472,7 @@ fn renderTriangle(
         rect_opt = node.layout.rect;
     }
     const rect = rect_opt orelse return;
-    drawTriangleDirect(rect, node.visual, node.transform, allocator, class_spec.background);
+    drawTriangleDirect(rect, transitions.effectiveVisual(node), transitions.effectiveTransform(node), allocator, class_spec.background);
     renderChildElements(event_ring, store, node, allocator, tracker);
 }
 
@@ -1490,7 +1501,7 @@ fn renderParagraph(
                 .id_extra = nodeIdExtra(node_id),
             };
             style_apply.applyToOptions(&class_spec, &options);
-            applyVisualToOptions(node, &options);
+            applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
             applyTransformToOptions(node, &options);
             if (font_override) |style_name| {
                 if (options.font_style == null) {
@@ -1536,7 +1547,7 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode) void {
             }
         }
         applyLayoutScaleToOptions(node, &options);
-        applyVisualToOptions(node, &options);
+        applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
         applyTransformToOptions(node, &options);
         applyAccessibilityOptions(node, &options, null);
         var lw = dvui.LabelWidget.initNoFmt(@src(), trimmed, .{}, options);
@@ -1599,7 +1610,7 @@ fn renderButton(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, null);
     if (rect_opt) |rect| {
@@ -1729,7 +1740,7 @@ fn renderIcon(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, null);
 
@@ -1807,13 +1818,13 @@ fn renderImage(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, null);
 
     const image_source = image_loader.imageSource(resource);
-    const tint_base = node.image_tint orelse types.PackedColor{ .value = 0xffffffff };
-    const combined_opacity = node.visual.opacity * node.image_opacity;
+    const tint_base = transitions.effectiveImageTint(node) orelse types.PackedColor{ .value = 0xffffffff };
+    const combined_opacity = transitions.effectiveVisual(node).opacity * transitions.effectiveImageOpacity(node);
     const tint_color = packedColorToDvui(tint_base, combined_opacity);
 
     var size = dvui.Size{};
@@ -1894,7 +1905,7 @@ fn renderSlider(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, .slider);
 
@@ -2155,7 +2166,7 @@ fn renderInput(
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
-    applyVisualToOptions(node, &options);
+    applyVisualPropsToOptions(transitions.effectiveVisual(node), &options);
     applyTransformToOptions(node, &options);
     applyAccessibilityOptions(node, &options, .text_input);
 
@@ -2272,7 +2283,7 @@ fn renderInput(
         .h = text_rect_nat.h,
     };
     const text_slice = state.currentText();
-    direct.drawTextDirect(text_rect, text_slice, node.visual, wd.options.fontGet());
+    direct.drawTextDirect(text_rect, text_slice, transitions.effectiveVisual(node), wd.options.fontGet());
 
     if (input_enabled_state) {
         if (event_ring) |ring| {

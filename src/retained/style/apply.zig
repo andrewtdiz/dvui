@@ -44,22 +44,26 @@ pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec
 }
 
 pub fn applyVisualToOptions(node: *const types.SolidNode, options: *dvui.Options) void {
-    const opacity = node.visual.opacity;
-    if (node.visual.background) |bg| {
+    applyVisualPropsToOptions(node.visual, options);
+}
+
+pub fn applyVisualPropsToOptions(visual: types.VisualProps, options: *dvui.Options) void {
+    const opacity = visual.opacity;
+    if (visual.background) |bg| {
         const color = packedColorToDvui(bg, opacity);
         options.background = true;
         options.color_fill = color;
         options.color_fill_hover = color;
         options.color_fill_press = color;
     }
-    if (node.visual.text_color) |tc| {
+    if (visual.text_color) |tc| {
         const color = packedColorToDvui(tc, opacity);
         options.color_text = color;
         options.color_text_hover = color;
         options.color_text_press = color;
     }
-    if (node.visual.corner_radius != 0) {
-        options.corner_radius = dvui.Rect.all(node.visual.corner_radius);
+    if (visual.corner_radius != 0) {
+        options.corner_radius = dvui.Rect.all(visual.corner_radius);
     }
 }
 

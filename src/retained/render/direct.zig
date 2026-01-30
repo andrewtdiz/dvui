@@ -3,6 +3,7 @@ const dvui = @import("dvui");
 
 const apply = @import("../style/apply.zig");
 const types = @import("../core/types.zig");
+const transitions = @import("transitions.zig");
 
 pub const dvuiColorToPacked = apply.dvuiColorToPacked;
 pub const packedColorToDvui = apply.packedColorToDvui;
@@ -20,7 +21,7 @@ pub fn rectToPhysical(rect: types.Rect) dvui.Rect.Physical {
 
 pub fn transformedRect(node: *const types.SolidNode, base: ?types.Rect) ?types.Rect {
     const rect = base orelse return null;
-    const t = node.transform;
+    const t = transitions.effectiveTransform(node);
     const ax = rect.x + rect.w * t.anchor[0];
     const ay = rect.y + rect.h * t.anchor[1];
     const cos_r = std.math.cos(t.rotation);
@@ -65,6 +66,7 @@ pub fn transformedRect(node: *const types.SolidNode, base: ?types.Rect) ?types.R
 
 pub fn applyTransformToOptions(node: *const types.SolidNode, options: *dvui.Options) void {
     if (node.layout.rect) |rect| {
+        const t = transitions.effectiveTransform(node);
         const bounds = transformedRect(node, rect) orelse rect;
         const scale = dvui.windowNaturalScale();
         const inv_scale: f32 = if (scale != 0) 1.0 / scale else 1.0;
@@ -75,7 +77,7 @@ pub fn applyTransformToOptions(node: *const types.SolidNode, options: *dvui.Opti
             .h = bounds.h * inv_scale,
         };
         if (options.rotation == null) {
-            options.rotation = node.transform.rotation;
+            options.rotation = t.rotation;
         }
     }
 }

@@ -95,7 +95,7 @@ local function build_ui()
   ui.set_class(ids.buttons_row, "flex flex-row gap-3 items-center")
 
   ui.create("button", ids.inc_button, ids.buttons_row, nil)
-  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg bg-emerald-500 cursor-pointer")
+  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 transition-colors duration-200 ease-sine ease-in-out cursor-pointer")
   ui.set_visual(ids.inc_button, { background = 0x10b981ff, cornerRadius = 10 })
   ui.listen(ids.inc_button, "click")
 
@@ -104,7 +104,7 @@ local function build_ui()
   ui.set_class(ids.inc_button_text, "text-base text-slate-900 font-bold")
 
   ui.create("button", ids.dec_button, ids.buttons_row, nil)
-  ui.set_class(ids.dec_button, "px-4 py-2 rounded-lg bg-slate-800 cursor-pointer")
+  ui.set_class(ids.dec_button, "px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors duration-200 ease-sine ease-in-out cursor-pointer")
   ui.set_visual(ids.dec_button, { background = 0x1f2937ff, cornerRadius = 10 })
   ui.listen(ids.dec_button, "click")
 
