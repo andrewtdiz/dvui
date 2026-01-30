@@ -24,7 +24,7 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 12 });
+        const ui_table = self.lua.createTable(.{ .rec = 14 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
@@ -34,6 +34,8 @@ pub const LuaUi = struct {
         try ui_table.set("insert", luaz.Lua.Capture(self, luaInsert));
         try ui_table.set("set_text", luaz.Lua.Capture(self, luaSetText));
         try ui_table.set("set_class", luaz.Lua.Capture(self, luaSetClass));
+        try ui_table.set("set_src", luaz.Lua.Capture(self, luaSetSrc));
+        try ui_table.set("set_image", luaz.Lua.Capture(self, luaSetImage));
         try ui_table.set("set_visual", luaz.Lua.Capture(self, luaSetVisual));
         try ui_table.set("set_transform", luaz.Lua.Capture(self, luaSetTransform));
         try ui_table.set("set_scroll", luaz.Lua.Capture(self, luaSetScroll));
@@ -93,6 +95,15 @@ pub const LuaUi = struct {
 
     fn luaSetClass(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, class_name: []const u8) !void {
         try upv.value.setClass(id, class_name);
+    }
+
+    fn luaSetSrc(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, src: []const u8) !void {
+        try upv.value.setSrc(id, src);
+    }
+
+    fn luaSetImage(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
+        defer props.deinit();
+        try upv.value.setImage(id, props);
     }
 
     fn luaSetVisual(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, props: luaz.Lua.Table) !void {
@@ -169,6 +180,39 @@ pub const LuaUi = struct {
     fn setClass(self: *LuaUi, id: u32, class_name: []const u8) !void {
         if (id == 0) return error.MissingId;
         try self.store.setClassName(id, class_name);
+    }
+
+    fn setSrc(self: *LuaUi, id: u32, src: []const u8) !void {
+        if (id == 0) return error.MissingId;
+        try self.store.setImageSource(id, src);
+    }
+
+    fn setImage(self: *LuaUi, id: u32, props: luaz.Lua.Table) !void {
+        if (id == 0) return error.MissingId;
+        var changed = false;
+
+        if (try readOptionalField([]const u8, props, "src")) |value| {
+            try self.store.setImageSource(id, value);
+            changed = true;
+        }
+
+        // Optional image-only properties (no-op on stores that don't implement them).
+        if (try readOptionalField(u32, props, "tint")) |value| {
+            if (@hasDecl(solid.NodeStore, "setImageTint")) {
+                try self.store.setImageTint(id, value);
+                changed = true;
+            }
+        }
+        if (try readOptionalField(f32, props, "opacity")) |value| {
+            if (@hasDecl(solid.NodeStore, "setImageOpacity")) {
+                try self.store.setImageOpacity(id, value);
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            self.store.markNodeChanged(id);
+        }
     }
 
     fn setVisual(self: *LuaUi, id: u32, props: luaz.Lua.Table) !void {

@@ -5,8 +5,13 @@ Ralph is a Bun script that runs an `opencode run` loop with a prompt and a PRD, 
 ### **How It Works**
 
 - Agent reads `.ralph/prd.json` and `.ralph/context.md`
-- Assigned to a model based on `complexity` (`Low` → medium, `Medium`/`High` → xhigh)
-- Marks work is completed when output includes `<promise>COMPLETE</promise>`
+- Assigned to a model based on complexity
+
+<Important> 
+Tasks should be expanded from the core of the most important, value-adding functionality.
+Tasks should be designed to get verifiable functionality as soon as possible. Then features are added to expand the core feature-set. 
+Occasional tasks may be added to address runtime performance, memory management, and clear code organization.
+</Important>
 
 ### **Core Files**
 
@@ -19,8 +24,8 @@ type PrdItem = {
   title: string;
   description: string;
   complete: boolean;
-  priority?: "critical" | "high" | "medium" | "low";
-  complexity?: "Low" | "Medium" | "High";
+  priority?: "low" | "medium" | "high" | "critical";
+  complexity?: "low" | "medium" | "high" | "xhigh";
 };
 ```
 
@@ -47,7 +52,7 @@ Use these to help an agent start working immediately with minimal back-and-forth
 **Context (`.ralph/context.md`)**
 
 - Start with a 2-4 sentence project overview (what this repo does and who it serves).
-- List key paths and what lives there (e.g. `src/api`, `apps/web`, `infra/`).
+- List key paths and what lives there.
 - Note critical workflows and commands (dev server, tests, build, lint).
 - Call out constraints and policies (no network, API keys, coding style rules).
 - Include integrations and endpoints with links or file refs if needed.
@@ -69,6 +74,6 @@ Use these to help an agent start working immediately with minimal back-and-forth
   "description": "Implement exponential backoff for 5xx responses in `src/server/webhooks/payments.ts`. Cap at 3 retries. Add tests in `src/server/webhooks/__tests__/payments.test.ts` to cover retry behavior. Do not change public API types.",
   "complete": false,
   "priority": "high",
-  "complexity": "Medium"
+  "complexity": "medium"
 }
 ```

@@ -168,6 +168,37 @@ fn renderNode(
     }
 }
 
+fn updateHoverEvents(event_ring: ?*events.EventRing, node: *types.SolidNode) void {
+    const wants_enter = node.hasListener("mouseenter");
+    const wants_leave = node.hasListener("mouseleave");
+    if (!wants_enter and !wants_leave) return;
+
+    const prev_hovered = node.hovered;
+    var hovered = false;
+    if (node.layout.rect) |rect_base| {
+        const mouse = dvui.currentWindow().mouse_pt;
+        const rect = transformedRect(node, rect_base) orelse rect_base;
+        if (rectContains(rect, mouse)) {
+            const clip = dvui.clipGet();
+            if (mouse.x >= clip.x and mouse.x <= (clip.x + clip.w) and mouse.y >= clip.y and mouse.y <= (clip.y + clip.h)) {
+                hovered = true;
+            }
+        }
+    }
+
+    node.hovered = hovered;
+
+    if (event_ring) |ring| {
+        if (prev_hovered != hovered) {
+            if (hovered and wants_enter) {
+                _ = ring.push(.mouseenter, node.id, null);
+            } else if (!hovered and wants_leave) {
+                _ = ring.push(.mouseleave, node.id, null);
+            }
+        }
+    }
+}
+
 fn renderElement(
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
@@ -180,9 +211,19 @@ fn renderElement(
 
     // Skip rendering if element has 'hidden' class
     if (class_spec.hidden) {
+        if (node.hovered) {
+            node.hovered = false;
+            if (event_ring) |ring| {
+                if (node.hasListener("mouseleave")) {
+                    _ = ring.push(.mouseleave, node.id, null);
+                }
+            }
+        }
         node.markRendered();
         return;
     }
+
+    updateHoverEvents(event_ring, node);
 
     applyClassSpecToVisual(node, &class_spec);
     // DVUI path fallback: if class provided a background but visual is still null, copy it.
@@ -793,12 +834,14 @@ fn renderImage(
 ) void {
     const src = node.imageSource();
     if (src.len == 0) {
-        log.warn("Solid image node {d} missing src", .{node_id});
+        // Avoid log spam; a missing src is a normal intermediate state for retained UIs.
+        renderChildElements(event_ring, store, node, allocator, tracker);
         return;
     }
 
-    const resource = image_loader.load(src) catch |err| {
-        log.err("Solid image load failed for {s}: {s}", .{ src, @errorName(err) });
+    const resource = image_loader.load(src) catch {
+        // Avoid log spam here too; missing files are common during authoring.
+        renderChildElements(event_ring, store, node, allocator, tracker);
         return;
     };
 
@@ -811,7 +854,49 @@ fn renderImage(
     applyTransformToOptions(node, &options);
 
     const image_source = image_loader.imageSource(resource);
-    _ = dvui.image(@src(), .{ .source = image_source }, options);
+
+    // Replicate `dvui.image()` but allow an explicit image tint + independent opacity.
+    var size: dvui.Size = dvui.imageSize(image_source) catch .{ .w = 10, .h = 10 };
+    if (options.min_size_content) |msc| {
+        size = msc;
+    }
+
+    var wd = dvui.WidgetData.init(@src(), .{}, options.override(.{ .min_size_content = size }));
+    wd.register();
+
+    const cr = wd.contentRect();
+    const ms = wd.options.min_size_contentGet();
+    const expand = wd.options.expandGet();
+    const gravity = wd.options.gravityGet();
+    var rect = dvui.placeIn(cr, ms, expand, gravity);
+
+    wd.rect = rect.outset(wd.options.paddingGet()).outset(wd.options.borderGet()).outset(wd.options.marginGet());
+
+    var render_background: ?dvui.Color = if (wd.options.backgroundGet()) wd.options.color(.fill) else null;
+    if (wd.options.rotationGet() == 0.0) {
+        wd.borderAndBackground(.{});
+        render_background = null;
+    } else {
+        if (wd.options.borderGet().nonZero()) {
+            log.debug("solid image {x} can't render border while rotated", .{wd.id});
+        }
+    }
+
+    const tint_base = node.imageTint() orelse types.PackedColor{ .value = 0xffffffff };
+    const combined_opacity = node.visual.opacity * node.imageOpacity();
+    const tint_color = packedColorToDvui(tint_base, combined_opacity);
+
+    const render_tex_opts = dvui.RenderTextureOptions{
+        .rotation = wd.options.rotationGet(),
+        .colormod = tint_color,
+        .corner_radius = wd.options.corner_radiusGet(),
+        .uv = .{ .w = 1, .h = 1 },
+        .background_color = render_background,
+    };
+    const content_rs = wd.contentRectScale();
+    dvui.renderImage(image_source, content_rs, render_tex_opts) catch {};
+    wd.minSizeSetAndRefresh();
+    wd.minSizeReportToParent();
 
     renderChildElements(event_ring, store, node, allocator, tracker);
 }
@@ -1125,6 +1210,70 @@ fn scrollContentId(node_id: u32) dvui.Id {
     return dvui.Id.extendId(null, @src(), nodeIdExtra(node_id));
 }
 
+fn renderScrollBars(node: *types.SolidNode, viewport: types.Rect, scroll_info: *dvui.ScrollInfo, scroll_id: dvui.Id) bool {
+    const thickness = node.scroll.scrollbar_thickness;
+    if (thickness <= 0) return false;
+
+    const show_v = scroll_info.scrollMax(.vertical) > 0;
+    const show_h = scroll_info.scrollMax(.horizontal) > 0;
+    if (!show_v and !show_h) return false;
+
+    const prev_x = scroll_info.viewport.x;
+    const prev_y = scroll_info.viewport.y;
+
+    if (show_v) {
+        var bar_rect = viewport;
+        bar_rect.x = viewport.x + viewport.w - thickness;
+        bar_rect.w = thickness;
+        if (show_h) {
+            bar_rect.h = @max(0.0, bar_rect.h - thickness);
+        }
+
+        const options = dvui.Options{
+            .name = "solid-scrollbar",
+            .rect = physicalToDvuiRect(bar_rect),
+            .background = true,
+            .id_extra = nodeIdExtra(node.id ^ 0x9e3779b9),
+        };
+        var bar = dvui.ScrollBarWidget.init(
+            @src(),
+            .{ .scroll_info = scroll_info, .direction = .vertical, .focus_id = scroll_id },
+            options,
+        );
+        bar.install();
+        const grab = bar.grab();
+        grab.draw();
+        bar.deinit();
+    }
+
+    if (show_h) {
+        var bar_rect = viewport;
+        bar_rect.y = viewport.y + viewport.h - thickness;
+        bar_rect.h = thickness;
+        if (show_v) {
+            bar_rect.w = @max(0.0, bar_rect.w - thickness);
+        }
+
+        const options = dvui.Options{
+            .name = "solid-scrollbar",
+            .rect = physicalToDvuiRect(bar_rect),
+            .background = true,
+            .id_extra = nodeIdExtra(node.id ^ 0x3c6ef372),
+        };
+        var bar = dvui.ScrollBarWidget.init(
+            @src(),
+            .{ .scroll_info = scroll_info, .direction = .horizontal, .focus_id = scroll_id },
+            options,
+        );
+        bar.install();
+        const grab = bar.grab();
+        grab.draw();
+        bar.deinit();
+    }
+
+    return scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y;
+}
+
 fn handleScrollContainer(
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
@@ -1149,6 +1298,7 @@ fn handleScrollContainer(
     const prev_y = node.scroll.offset_y;
 
     _ = handleScrollInput(hit_rect, &scroll_info, scroll_id);
+    _ = renderScrollBars(node, rect, &scroll_info, scroll_id);
 
     node.scroll.offset_x = scroll_info.viewport.x;
     node.scroll.offset_y = scroll_info.viewport.y;

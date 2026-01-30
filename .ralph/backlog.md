@@ -1,1 +1,0 @@
-- Implement `iconKind`/`iconGlyph` handling in Zig retained rendering, then re-enable host serialization.

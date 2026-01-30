@@ -1,66 +1,70 @@
-UIFrame
-- Position (scale)
-- Size (scale)
-- Anchor/Pivot point
-- Background color
-- Transparency
-- Rotation
-- Z-index
-- Clipping (clips descendants)
+# UI Features Checklist
 
-ImageFrame
-- All UIFrame properties
-- Image source
-- Image scaling + Rotation
-- Image color/tint
-- Image transparency
+## div
+- [x] Position (X/Y)
+- [x] Size (W/H)
+- [x] Anchor/Pivot point
+- [x] Background color
+- [x] Transparency (alpha)
+- [x] Rotation (UI elements)
+- [x] Z-index
+- [x] Clipping (clips descendants)
 
-TextFrame
-- All UIFrame properties
-- Text string
-- Text scaling (auto-scale)
-- Font + weight
-- Text color
-- Text stroke (outline)
-- Text alignment (X/Y)
-- Line wrapping
+## image
+- [x] All div basics above (position/size/color/alpha)
+- [x] Image source
+- [x] Image scaling + Rotation (beyond resizing the node rect)
+- [x] Image color/tint
+- [x] Image transparency (separate from background alpha)
 
-UIListLayout
-- Sort order
-- Padding
-- Fill direction (vertical/horizontal)
-- Alignment
+## text
+- [x] All div basics above (position/size/color/alpha)
+- [x] Text string
+- [x] Text scaling (font size via fontSizing/fontSize)
+- [x] Font + weight
+- [x] Text color (color applies as textColor for text nodes)
+- [ ] Text stroke (outline)
+- [ ] Text alignment (X/Y) (partial: X only)
+- [x] Line wrapping
 
-UIAspectRatioConstraint
-- Aspect ratio value
-- Dominant axis (Width/Height)
-- Auto adjustment to maintain ratio
+## flexbox
+- [ ] Sort order
+- [x] Padding
+- [x] Fill direction (vertical/horizontal)
+- [x] Alignment
 
-UIScrollingFrame
-- Scrollbar support (vertical/horizontal)
-- Canvas size or AutomaticCanvasSize
-- Scroll input handling (wheel/touch)
+## Aspect Ratio
+- [ ] Aspect ratio value
+- [ ] Dominant axis (Width/Height)
+- [ ] Auto adjustment to maintain ratio
 
-UIPadding
-- Percent or offset Padding on each side (top/right/bottom/left)
+## overflow
+- [x] Scrollbar support (vertical/horizontal)
+- [x] Canvas size / AutomaticCanvasSize
+- [x] Scroll input handling (wheel/touch)
 
-UICorner
-- Corner radius
+## padding
+- [ ] Percent or offset padding (top/right/bottom/left) (partial: offset only)
 
-UIGradient
-- Color sequence
-- Transparency sequence
-- Rotation
+## rounded
+- [x] Corner radius
 
-Tweening System
-- Tween position, size, rotation, color, transparency
-- Easing styles (linear, quad, cubic, etc.)
-- Tween cancellation/override
-- Callback events on complete
+## gradient
+- [ ] Color sequence
+- [ ] Transparency sequence
+- [ ] Rotation
 
-Heartbeat or RenderStepped Event
-- A per Frame or render stepped update event I can use to move objects
+## transition
+- [ ] Tween position/size/rotation/color/transparency
+- [ ] Easing styles (Sine, Quad, Cubic, Quart, Quint, Expo, Circ, Back, Elastic, Bounce)
+- [ ] Easing Direction (In, Out, and InOut)
 
-Input Handling
-- Input Events
-- Hover enter/exit
+## on-frame
+- [x] App-level per-frame update callback (script `update(dt, input)`)
+- [ ] Per-node per-frame update event
+
+## on-events
+- [x] Input events (per UI element)
+- [x] Hover enter/exit (per UI element)
+- [ ] Editor-level pointer move + hover region telemetry (host-only; not per-element UI events)
+

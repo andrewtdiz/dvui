@@ -1,1 +1,0 @@
-- Solid host no longer serializes `iconKind`/`iconGlyph` in snapshots or mutation ops; props stay local until Zig icon rendering exists.

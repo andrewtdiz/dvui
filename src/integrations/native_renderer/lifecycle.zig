@@ -8,7 +8,11 @@ const solid_sync = @import("solid_sync.zig");
 const types = @import("types.zig");
 const Renderer = types.Renderer;
 
-const lua_script_path = "scripts/native_ui.luau";
+const lua_script_paths = [_][]const u8{
+    "scripts/ui_features.luau",
+    "scripts/ui_features_all.luau",
+    "scripts/native_ui.luau",
+};
 const max_lua_script_bytes: usize = 1024 * 1024;
 const max_lua_error_len: usize = 120;
 
@@ -68,10 +72,22 @@ pub fn logLuaError(renderer: *Renderer, label: []const u8, err: anyerror) void {
 }
 
 fn loadLuaScript(renderer: *Renderer) bool {
-    var file = std.fs.cwd().openFile(lua_script_path, .{ .mode = .read_only }) catch |err| {
-        logLuaError(renderer, "script open", err);
+    var file_opt: ?std.fs.File = null;
+    var chosen_path: []const u8 = "";
+    for (lua_script_paths) |candidate| {
+        file_opt = std.fs.cwd().openFile(candidate, .{ .mode = .read_only }) catch null;
+        if (file_opt != null) {
+            chosen_path = candidate;
+            break;
+        }
+    }
+
+    if (file_opt == null) {
+        logMessage(renderer, 3, "lua script open failed (no candidate found)", .{});
         return false;
-    };
+    }
+
+    var file = file_opt.?;
     defer file.close();
 
     const script_bytes = file.readToEndAlloc(renderer.allocator, max_lua_script_bytes) catch |err| {
@@ -81,6 +97,7 @@ fn loadLuaScript(renderer: *Renderer) bool {
     defer renderer.allocator.free(script_bytes);
 
     if (renderer.lua_state) |lua_state| {
+        logMessage(renderer, 1, "lua script: {s}", .{chosen_path});
         const compile_result = luaz.Compiler.compile(script_bytes, .{}) catch |err| {
             logLuaError(renderer, "script compile", err);
             return false;

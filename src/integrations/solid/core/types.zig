@@ -207,6 +207,8 @@ pub const SolidNode = struct {
     placeholder: []u8 = &.{},
     class_name: []u8 = &.{},
     image_src: []u8 = &.{},
+    image_tint: ?PackedColor = null,
+    image_opacity: f32 = 1.0,
     parent: ?u32 = null,
     children: std.ArrayList(u32),
     listeners: ListenerSet,
@@ -218,6 +220,7 @@ pub const SolidNode = struct {
     transform: Transform = .{},
     visual: VisualProps = .{},
     scroll: ScrollState = .{},
+    hovered: bool = false,
     interactive_self: bool = false,
     total_interactive: u32 = 0,
     anchor_id: ?u32 = null,
@@ -322,6 +325,21 @@ pub const SolidNode = struct {
         self.image_src = copy;
     }
 
+    pub fn setImageTint(self: *SolidNode, value: u32) void {
+        if (self.image_tint) |current| {
+            if (current.value == value) return;
+        }
+        self.image_tint = .{ .value = value };
+        self.invalidatePaint();
+    }
+
+    pub fn setImageOpacity(self: *SolidNode, value: f32) void {
+        const clamped: f32 = if (value < 0.0) 0.0 else if (value > 1.0) 1.0 else value;
+        if (self.image_opacity == clamped) return;
+        self.image_opacity = clamped;
+        self.invalidatePaint();
+    }
+
     pub fn ensureInputState(self: *SolidNode, allocator: std.mem.Allocator) !*InputState {
         if (self.input_state == null) {
             self.input_state = InputState.init(allocator);
@@ -346,6 +364,14 @@ pub const SolidNode = struct {
 
     pub fn imageSource(self: *const SolidNode) []const u8 {
         return self.image_src;
+    }
+
+    pub fn imageTint(self: *const SolidNode) ?PackedColor {
+        return self.image_tint;
+    }
+
+    pub fn imageOpacity(self: *const SolidNode) f32 {
+        return self.image_opacity;
     }
 
     pub fn gizmoRect(self: *const SolidNode) ?GizmoRect {
@@ -564,6 +590,18 @@ pub const NodeStore = struct {
     pub fn setImageSource(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
         try target.setImageSource(self.allocator, value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setImageTint(self: *NodeStore, id: u32, value: u32) !void {
+        const target = self.nodes.getPtr(id) orelse return;
+        target.setImageTint(value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setImageOpacity(self: *NodeStore, id: u32, value: f32) !void {
+        const target = self.nodes.getPtr(id) orelse return;
+        target.setImageOpacity(value);
         self.markNodeChanged(id);
     }
 

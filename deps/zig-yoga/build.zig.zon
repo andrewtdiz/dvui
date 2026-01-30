@@ -1,0 +1,13 @@
+.{
+    .name = .zig_yoga,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.15.2",
+    .paths = .{""},
+    .dependencies = .{
+        .yoga = .{
+            .url = "git+https://github.com/facebook/yoga#909e4bea6e6764e4028d5e47b2f67486e6d26c7e",
+            .hash = "N-V-__8AAKxW1wDvEjsFXqdCTmAEzRja8F1w4B6V1ZAfYadt",
+        },
+    },
+    .fingerprint = 0xac9bf35a9a682e3f,
+}
