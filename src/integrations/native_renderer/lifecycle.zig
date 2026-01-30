@@ -2,9 +2,9 @@ const std = @import("std");
 
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
-const solid = @import("solid");
 
-const solid_sync = @import("solid_sync.zig");
+const retained_sync = @import("retained_sync.zig");
+const retained = @import("retained");
 const types = @import("types.zig");
 const Renderer = types.Renderer;
 
@@ -168,8 +168,8 @@ pub fn teardownLua(renderer: *Renderer) void {
 fn initLua(renderer: *Renderer) void {
     if (renderer.lua_ready) return;
 
-    const store = solid_sync.ensureSolidStore(renderer, logMessage) catch |err| {
-        logLuaError(renderer, "solid store", err);
+    const store = retained_sync.ensureRetainedStore(renderer, logMessage) catch |err| {
+        logLuaError(renderer, "retained store", err);
         return;
     };
 
@@ -261,26 +261,27 @@ pub fn deinitRenderer(renderer: *Renderer) void {
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
     teardownLua(renderer);
-    if (renderer.solid_store_ready) {
-        if (types.solidStore(renderer)) |store| {
+    if (renderer.retained_store_ready) {
+        if (types.retainedStore(renderer)) |store| {
             store.deinit();
         }
-        renderer.solid_store_ready = false;
+        renderer.retained_store_ready = false;
     }
-    if (types.solidStore(renderer)) |store| {
+    if (types.retainedStore(renderer)) |store| {
         renderer.allocator.destroy(store);
-        renderer.solid_store_ptr = null;
+        renderer.retained_store_ptr = null;
     }
-    if (renderer.event_ring_ready) {
-        if (types.eventRing(renderer)) |ring| {
+    if (renderer.retained_event_ring_ready) {
+        if (types.retainedEventRing(renderer)) |ring| {
             ring.deinit();
         }
-        renderer.event_ring_ready = false;
+        renderer.retained_event_ring_ready = false;
     }
-    if (types.eventRing(renderer)) |ring| {
+    if (types.retainedEventRing(renderer)) |ring| {
         renderer.allocator.destroy(ring);
-        renderer.event_ring_ptr = null;
+        renderer.retained_event_ring_ptr = null;
     }
+    retained.deinit();
 }
 
 pub fn finalizeDestroy(renderer: *Renderer) void {
@@ -316,11 +317,11 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .callback_depth = 0,
         .pending_destroy = false,
         .destroy_started = false,
-        .solid_store_ready = false,
-        .solid_store_ptr = null,
         .frame_count = 0,
-        .event_ring_ptr = null,
-        .event_ring_ready = false,
+        .retained_store_ready = false,
+        .retained_store_ptr = null,
+        .retained_event_ring_ptr = null,
+        .retained_event_ring_ready = false,
         .lua_state = null,
         .lua_ui = null,
         .lua_ready = false,
@@ -329,23 +330,26 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
     renderer.allocator = renderer.gpa_instance.allocator();
     renderer.frame_arena = std.heap.ArenaAllocator.init(renderer.allocator);
 
-    // Initialize event ring buffer for Zig→JS event dispatch
-    const ring_instance = renderer.allocator.create(solid.EventRing) catch {
+    // Initialize event ring buffer for retained Lua UI.
+    const retained_ring_instance = renderer.allocator.create(retained.EventRing) catch {
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
-    renderer.event_ring_ptr = ring_instance;
-    ring_instance.* = solid.EventRing.init(renderer.allocator) catch {
-        renderer.allocator.destroy(ring_instance);
-        renderer.event_ring_ptr = null;
+    renderer.retained_event_ring_ptr = retained_ring_instance;
+    retained_ring_instance.* = retained.EventRing.init(renderer.allocator) catch {
+        renderer.allocator.destroy(retained_ring_instance);
+        renderer.retained_event_ring_ptr = null;
+        renderer.retained_event_ring_ready = false;
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
         std.heap.c_allocator.destroy(renderer);
         return null;
     };
-    renderer.event_ring_ready = true;
+    renderer.retained_event_ring_ready = true;
+
+    retained.init();
 
     initLua(renderer);
 

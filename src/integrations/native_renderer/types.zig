@@ -1,9 +1,7 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
 const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
-const solid = @import("solid");
+const retained = @import("retained");
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
 
@@ -54,13 +52,12 @@ pub const Renderer = struct {
     callback_depth: usize = 0,
     pending_destroy: bool = false,
     destroy_started: bool = false,
-    solid_store_ready: bool = false,
-    solid_store_ptr: ?*anyopaque = null,
-    solid_seq_last: u64 = 0,
+    retained_store_ready: bool = false,
+    retained_store_ptr: ?*anyopaque = null,
     frame_count: u64 = 0,
-    // Event ring buffer for Zig→JS event dispatch
-    event_ring_ptr: ?*anyopaque = null,
-    event_ring_ready: bool = false,
+    // Event ring buffer for retained UI (Lua dispatch).
+    retained_event_ring_ptr: ?*anyopaque = null,
+    retained_event_ring_ready: bool = false,
     // Luau VM state for retained UI
     lua_state: ?*luaz.Lua = null,
     lua_ui: ?*luau_ui.LuaUi = null,
@@ -85,12 +82,12 @@ pub fn asOpaquePtr(comptime T: type, raw: ?*anyopaque) ?*T {
     return null;
 }
 
-pub fn solidStore(renderer: *Renderer) ?*solid.NodeStore {
-    return asOpaquePtr(solid.NodeStore, renderer.solid_store_ptr);
+pub fn retainedStore(renderer: *Renderer) ?*retained.NodeStore {
+    return asOpaquePtr(retained.NodeStore, renderer.retained_store_ptr);
 }
 
-pub fn eventRing(renderer: *Renderer) ?*solid.EventRing {
-    return asOpaquePtr(solid.EventRing, renderer.event_ring_ptr);
+pub fn retainedEventRing(renderer: *Renderer) ?*retained.EventRing {
+    return asOpaquePtr(retained.EventRing, renderer.retained_event_ring_ptr);
 }
 
 pub fn colorFromPacked(value: u32) dvui.Color {

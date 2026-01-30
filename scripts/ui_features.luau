@@ -21,11 +21,15 @@ local ids = {
   input_echo = 13,
   focus_state = 14,
   image_label = 15,
+  counter_row = 16,
+  input_echo_row = 17,
+  focus_state_row = 18,
+  image_label_row = 19,
 }
 
 local ICON_ID_BASE = 1000
 
-local INPUT_CLASS_BASE = "w-32 h-10 px-4 rounded-lg bg-slate-800 border text-base text-slate-50"
+local INPUT_CLASS_BASE = "w-32 h-10 px-4 py-2 rounded-lg bg-slate-800 border text-base text-slate-50 text-left"
 local INPUT_BORDER_IDLE = "border-slate-700"
 local INPUT_BORDER_FOCUSED = "border-emerald-400"
 
@@ -79,38 +83,37 @@ local function build_ui()
   ui.set_class(ids.root, "w-full h-full flex flex-col justify-center items-center bg-slate-900 p-6")
 
   ui.create("div", ids.card, ids.root, nil)
-  ui.set_class(ids.card, "w-[520px] flex flex-col gap-4 bg-slate-950 border border-slate-700 rounded-2xl p-6")
+  ui.set_class(ids.card, "w-[520px] flex flex-col gap-2 bg-slate-950 border border-slate-700 rounded-2xl p-3")
   ui.set_visual(ids.card, { background = 0x020617ff, cornerRadius = 18 })
 
   ui.create("h1", ids.title, ids.card, nil)
+  ui.set_class(ids.title, "text-2xl text-slate-50 font-bold text-nowrap")
   ui.create("text", ids.title_text, ids.title, nil)
   ui.set_text(ids.title_text, "UI Features (Starter)")
-  ui.set_class(ids.title_text, "text-2xl text-slate-50 font-bold")
 
-  ui.create("text", ids.counter_text, ids.card, nil)
-  ui.set_class(ids.counter_text, "text-base text-slate-200")
+  ui.create("p", ids.counter_row, ids.card, nil)
+  ui.set_class(ids.counter_row, "w-full text-base text-slate-200 text-nowrap")
+  ui.create("text", ids.counter_text, ids.counter_row, nil)
   set_counter()
 
   ui.create("div", ids.buttons_row, ids.card, nil)
   ui.set_class(ids.buttons_row, "flex flex-row gap-3 items-center")
 
   ui.create("button", ids.inc_button, ids.buttons_row, nil)
-  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 transition-colors duration-200 ease-sine ease-in-out cursor-pointer")
+  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg border-blue-500 bg-emerald-500 hover:bg-emerald-800 text-base text-slate-900 font-bold transition-all duration-100 ease-quad ease-in-out cursor-pointer")
   ui.set_visual(ids.inc_button, { background = 0x10b981ff, cornerRadius = 10 })
   ui.listen(ids.inc_button, "click")
 
   ui.create("text", ids.inc_button_text, ids.inc_button, nil)
   ui.set_text(ids.inc_button_text, "+1")
-  ui.set_class(ids.inc_button_text, "text-base text-slate-900 font-bold")
 
   ui.create("button", ids.dec_button, ids.buttons_row, nil)
-  ui.set_class(ids.dec_button, "px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors duration-200 ease-sine ease-in-out cursor-pointer")
+  ui.set_class(ids.dec_button, "px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-500 text-base text-slate-100 font-bold transition-colors duration-100 ease-sine ease-in-out cursor-pointer")
   ui.set_visual(ids.dec_button, { background = 0x1f2937ff, cornerRadius = 10 })
   ui.listen(ids.dec_button, "click")
 
   ui.create("text", ids.dec_button_text, ids.dec_button, nil)
   ui.set_text(ids.dec_button_text, "-1")
-  ui.set_class(ids.dec_button_text, "text-base text-slate-100 font-bold")
 
   ui.create("div", ids.icons_row, ids.card, nil)
   ui.set_class(ids.icons_row, "flex flex-row flex-wrap gap-2 items-center")
@@ -121,17 +124,20 @@ local function build_ui()
   ui.listen(ids.input, "focus")
   ui.listen(ids.input, "blur")
 
-  ui.create("text", ids.input_echo, ids.card, nil)
+  ui.create("p", ids.input_echo_row, ids.card, nil)
+  ui.set_class(ids.input_echo_row, "w-full text-sm text-slate-300 break-words")
+  ui.create("text", ids.input_echo, ids.input_echo_row, nil)
   ui.set_text(ids.input_echo, "Input: ")
-  ui.set_class(ids.input_echo, "text-sm text-slate-300 break-words")
 
-  ui.create("text", ids.focus_state, ids.card, nil)
+  ui.create("p", ids.focus_state_row, ids.card, nil)
+  ui.set_class(ids.focus_state_row, "w-full text-sm text-slate-400 text-nowrap")
+  ui.create("text", ids.focus_state, ids.focus_state_row, nil)
   ui.set_text(ids.focus_state, "Focus: false")
-  ui.set_class(ids.focus_state, "text-sm text-slate-400")
 
-  ui.create("text", ids.image_label, ids.card, nil)
+  ui.create("p", ids.image_label_row, ids.card, nil)
+  ui.set_class(ids.image_label_row, "w-full text-xs text-slate-500 break-words")
+  ui.create("text", ids.image_label, ids.image_label_row, nil)
   ui.set_text(ids.image_label, string.format("Image: %s", IMAGE_SRC))
-  ui.set_class(ids.image_label, "text-xs text-slate-500 break-words")
 
   sync_icons()
 end
@@ -139,12 +145,6 @@ end
 function init()
   ui.log("ui_features starter init")
   build_ui()
-end
-
-function update(dt, input)
-  t = t + dt
-  local wave = math.sin(t * 1.5)
-  ui.set_transform(ids.card, { translateY = wave * 10 })
 end
 
 function on_event(kind, id, detail)

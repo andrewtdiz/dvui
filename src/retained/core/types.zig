@@ -143,6 +143,13 @@ pub const Size = struct {
     h: f32 = 0,
 };
 
+pub const SideOffsets = struct {
+    left: f32 = 0,
+    right: f32 = 0,
+    top: f32 = 0,
+    bottom: f32 = 0,
+};
+
 pub const PackedColor = struct {
     value: u32 = 0,
 };
@@ -155,6 +162,7 @@ pub const Gradient = struct {
 
 pub const LayoutCache = struct {
     rect: ?Rect = null,
+    child_rect: ?Rect = null,
     layout_scale: f32 = 1.0,
     version: u64 = 0,
     intrinsic_size: ?Size = null,
@@ -207,8 +215,11 @@ pub const ScrollState = struct {
 pub const TransitionState = struct {
     enabled: bool = false,
     active_props: tailwind.TransitionProps = .{},
+    prev_initialized: bool = false,
 
     prev_layout_rect: ?Rect = null,
+    prev_margin: SideOffsets = .{},
+    prev_padding: SideOffsets = .{},
     prev_translation: [2]f32 = .{ 0, 0 },
     prev_scale: [2]f32 = .{ 1, 1 },
     prev_rotation: f32 = 0,

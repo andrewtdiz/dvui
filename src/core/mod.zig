@@ -21,6 +21,3 @@ pub const enums = @import("enums.zig");
 
 pub const data = @import("data.zig");
 pub const Data = data.Data;
-
-pub const ffi = @import("ffi.zig");
-

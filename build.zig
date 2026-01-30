@@ -91,24 +91,14 @@ pub fn build(b: *Build) !void {
     native_module.addImport("raylib-backend", raylib_mod);
     native_module.addImport("retained", retained_mod);
 
-    // Create solid module for native_renderer
-
-    const solid_mod = b.createModule(.{
-        .root_source_file = b.path("src/integrations/solid/mod.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    solid_mod.addImport("dvui", dvui_mod);
-
     const luau_ui_mod = b.createModule(.{
         .root_source_file = b.path("src/integrations/luau_ui/mod.zig"),
         .target = target,
         .optimize = optimize,
     });
-    luau_ui_mod.addImport("solid", solid_mod);
+    luau_ui_mod.addImport("retained", retained_mod);
     luau_ui_mod.addImport("luaz", luaz_dep.module("luaz"));
 
-    native_module.addImport("solid", solid_mod);
     native_module.addImport("luaz", luaz_dep.module("luaz"));
     native_module.addImport("luau_ui", luau_ui_mod);
 
@@ -120,7 +110,6 @@ pub fn build(b: *Build) !void {
     });
     luau_runner_mod.addImport("native_renderer", native_module);
     luau_runner_mod.addImport("luaz", luaz_dep.module("luaz"));
-    luau_runner_mod.addImport("solid", solid_mod);
 
     if (target.result.os.tag == .windows) {
         if (b.lazyDependency("win32", .{})) |zigwin32| {

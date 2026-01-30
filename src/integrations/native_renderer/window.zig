@@ -5,7 +5,7 @@ const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
-const solid = @import("solid");
+const retained = @import("retained");
 const luaz = @import("luaz");
 
 const commands = @import("commands.zig");
@@ -100,7 +100,7 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
 }
 
-fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *solid.EventRing) void {
+fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.EventRing) void {
     const has_handler = lifecycle.isLuaFuncPresent(lua_state, "on_event");
 
     const header = ring.getHeader();
@@ -164,7 +164,7 @@ pub fn renderFrame(renderer: *Renderer) void {
     ray.beginDrawing();
     defer ray.endDrawing();
 
-    // Clear to neutral black; Solid will draw its own backgrounds.
+    // Clear to neutral black; retained UI draws its own backgrounds.
     ray.clearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
 
     if (renderer.window) |*win| {
@@ -263,16 +263,16 @@ pub fn renderFrame(renderer: *Renderer) void {
             }
         }
 
-        const event_ring_ptr = types.eventRing(renderer);
-        const store = types.solidStore(renderer);
-        const drew_solid = renderer.solid_store_ready and store != null and solid.render(event_ring_ptr, store.?);
-        if (!drew_solid) {
+        const retained_event_ring_ptr = types.retainedEventRing(renderer);
+        const retained_store = types.retainedStore(renderer);
+        const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true);
+        if (!drew_retained) {
             commands.renderCommandsDvui(renderer, win);
         }
 
         if (renderer.lua_ready) {
             if (renderer.lua_state) |lua_state| {
-                if (event_ring_ptr) |ring| {
+                if (retained_event_ring_ptr) |ring| {
                     drainLuaEvents(renderer, lua_state, ring);
                 }
             }

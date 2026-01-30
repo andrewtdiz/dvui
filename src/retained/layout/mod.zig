@@ -3,6 +3,7 @@ const dvui = @import("dvui");
 const types = @import("../core/types.zig");
 const flex = @import("flex.zig");
 const measure = @import("measure.zig");
+const transitions = @import("../render/transitions.zig");
 
 const use_yoga_layout = true;
 
@@ -101,6 +102,7 @@ fn sideValue(value: ?f32) f32 {
 
 pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
     const prev_rect = node.layout.rect;
+    const prev_child_rect = node.layout.child_rect;
     const prev_scale = node.layout.layout_scale;
     const spec = node.prepareClassSpec();
     const base_scale = dvui.windowNaturalScale();
@@ -183,10 +185,17 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     } else {
         rect = parent_rect;
 
-        const margin_left = sideValue(spec.margin.left) * scale;
-        const margin_right = sideValue(spec.margin.right) * scale;
-        const margin_top = sideValue(spec.margin.top) * scale;
-        const margin_bottom = sideValue(spec.margin.bottom) * scale;
+        const margin_base = types.SideOffsets{
+            .left = sideValue(spec.margin.left) * scale,
+            .right = sideValue(spec.margin.right) * scale,
+            .top = sideValue(spec.margin.top) * scale,
+            .bottom = sideValue(spec.margin.bottom) * scale,
+        };
+        const margin = if (spec.transition.enabled and spec.transition.props.layout) transitions.effectiveMargin(node, margin_base) else margin_base;
+        const margin_left = margin.left;
+        const margin_right = margin.right;
+        const margin_top = margin.top;
+        const margin_bottom = margin.bottom;
 
         rect.x += margin_left;
         rect.y += margin_top;
@@ -221,18 +230,17 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     node.layout.rect = rect;
     node.layout.version = store.currentVersion();
 
-    if (prev_rect) |prev| {
-        if (prev.x != rect.x or prev.y != rect.y or prev.w != rect.w or prev.h != rect.h or prev_scale != node.layout.layout_scale) {
-            invalidateLayoutSubtree(store, node);
-            node.layout.rect = rect;
-            node.layout.version = store.currentVersion();
-        }
-    }
-
-    const pad_left = sideValue(spec.padding.left) * scale;
-    const pad_right = sideValue(spec.padding.right) * scale;
-    const pad_top = sideValue(spec.padding.top) * scale;
-    const pad_bottom = sideValue(spec.padding.bottom) * scale;
+    const padding_base = types.SideOffsets{
+        .left = sideValue(spec.padding.left) * scale,
+        .right = sideValue(spec.padding.right) * scale,
+        .top = sideValue(spec.padding.top) * scale,
+        .bottom = sideValue(spec.padding.bottom) * scale,
+    };
+    const padding = if (spec.transition.enabled and spec.transition.props.layout) transitions.effectivePadding(node, padding_base) else padding_base;
+    const pad_left = padding.left;
+    const pad_right = padding.right;
+    const pad_top = padding.top;
+    const pad_bottom = padding.bottom;
     const border_left = sideValue(spec.border.left) * scale;
     const border_right = sideValue(spec.border.right) * scale;
     const border_top = sideValue(spec.border.top) * scale;
@@ -243,6 +251,21 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     child_rect.y += pad_top + border_top;
     child_rect.w = @max(0.0, child_rect.w - (pad_left + pad_right + border_left + border_right));
     child_rect.h = @max(0.0, child_rect.h - (pad_top + pad_bottom + border_top + border_bottom));
+
+    node.layout.child_rect = child_rect;
+
+    if (prev_rect) |prev| {
+        const rect_changed = prev.x != rect.x or prev.y != rect.y or prev.w != rect.w or prev.h != rect.h or prev_scale != node.layout.layout_scale;
+        const child_changed = if (prev_child_rect) |prev_child| blk: {
+            break :blk prev_child.x != child_rect.x or prev_child.y != child_rect.y or prev_child.w != child_rect.w or prev_child.h != child_rect.h;
+        } else true;
+        if (rect_changed or child_changed) {
+            invalidateLayoutSubtree(store, node);
+            node.layout.rect = rect;
+            node.layout.child_rect = child_rect;
+            node.layout.version = store.currentVersion();
+        }
+    }
 
     var layout_rect = child_rect;
     const scroll_enabled = node.scroll.enabled;
@@ -291,6 +314,14 @@ fn offsetLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode, dx: f32,
         };
         node.layout.version = version;
         node.invalidatePaint();
+    }
+    if (node.layout.child_rect) |child_rect| {
+        node.layout.child_rect = types.Rect{
+            .x = child_rect.x + dx,
+            .y = child_rect.y + dy,
+            .w = child_rect.w,
+            .h = child_rect.h,
+        };
     }
 
     for (node.children.items) |child_id| {

@@ -1,16 +1,16 @@
 const std = @import("std");
 
 const luaz = @import("luaz");
-const solid = @import("solid");
+const retained = @import("retained");
 
 pub const LogFn = fn (level: u8, msg_ptr: [*]const u8, msg_len: usize) callconv(.c) void;
 
 pub const LuaUi = struct {
-    store: *solid.NodeStore,
+    store: *retained.NodeStore,
     lua: *luaz.Lua,
     log_cb: ?*const LogFn = null,
 
-    pub fn init(self: *LuaUi, store: *solid.NodeStore, lua: *luaz.Lua, log_cb: ?*const LogFn) !void {
+    pub fn init(self: *LuaUi, store: *retained.NodeStore, lua: *luaz.Lua, log_cb: ?*const LogFn) !void {
         self.* = .{
             .store = store,
             .lua = lua,
@@ -62,7 +62,7 @@ pub const LuaUi = struct {
         };
     }
 
-    fn parseAnchorSide(value: []const u8) ?solid.AnchorSide {
+    fn parseAnchorSide(value: []const u8) ?retained.AnchorSide {
         if (std.mem.eql(u8, value, "top")) return .top;
         if (std.mem.eql(u8, value, "bottom")) return .bottom;
         if (std.mem.eql(u8, value, "left")) return .left;
@@ -70,7 +70,7 @@ pub const LuaUi = struct {
         return null;
     }
 
-    fn parseAnchorAlign(value: []const u8) ?solid.AnchorAlign {
+    fn parseAnchorAlign(value: []const u8) ?retained.AnchorAlign {
         if (std.mem.eql(u8, value, "start")) return .start;
         if (std.mem.eql(u8, value, "center")) return .center;
         if (std.mem.eql(u8, value, "end")) return .end;
@@ -198,13 +198,13 @@ pub const LuaUi = struct {
 
         // Optional image-only properties (no-op on stores that don't implement them).
         if (try readOptionalField(u32, props, "tint")) |value| {
-            if (@hasDecl(solid.NodeStore, "setImageTint")) {
+            if (@hasDecl(retained.NodeStore, "setImageTint")) {
                 try self.store.setImageTint(id, value);
                 changed = true;
             }
         }
         if (try readOptionalField(f32, props, "opacity")) |value| {
-            if (@hasDecl(solid.NodeStore, "setImageOpacity")) {
+            if (@hasDecl(retained.NodeStore, "setImageOpacity")) {
                 try self.store.setImageOpacity(id, value);
                 changed = true;
             }
@@ -345,7 +345,7 @@ pub const LuaUi = struct {
 
     fn addListener(self: *LuaUi, id: u32, event_name: []const u8) !void {
         if (id == 0) return error.MissingId;
-        _ = solid.events.eventKindFromName(event_name) orelse return error.InvalidEvent;
+        _ = retained.events.eventKindFromName(event_name) orelse return error.InvalidEvent;
         try self.store.addListener(id, event_name);
     }
 };

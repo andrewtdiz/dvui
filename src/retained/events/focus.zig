@@ -11,7 +11,8 @@ pub const TabIndexInfo = struct {
 const FocusEntry = struct {
     node_id: u32,
     widget_id: dvui.Id,
-    widget_data: *dvui.WidgetData,
+    widget_data: *const dvui.WidgetData,
+    border_rect: dvui.Rect.Physical,
     tab_index: i32,
     roving_group: ?u32,
     trap_id: ?u32,
@@ -108,10 +109,13 @@ pub fn registerFocusable(store: *types.NodeStore, node: *types.SolidNode, wd: *d
         _ = ensureRovingActive(state, store, group_id, node.id);
     }
 
+    const stored_wd = dvui.widgetAlloc(dvui.WidgetData);
+    stored_wd.* = wd.*;
     const entry = FocusEntry{
         .node_id = node.id,
         .widget_id = wd.id,
-        .widget_data = wd,
+        .widget_data = stored_wd,
+        .border_rect = wd.borderRectScale().r,
         .tab_index = tab_index,
         .roving_group = roving_group,
         .trap_id = findFocusTrap(store, node.id),
@@ -228,7 +232,7 @@ fn handleKeyEvents(event_ring: ?*events.EventRing, store: *types.NodeStore, stat
         const focused_widget = dvui.focusedWidgetId() orelse continue;
         const entry = entryForWidget(state, focused_widget) orelse continue;
 
-        if (!dvui.eventMatch(event, .{ .id = entry.widget_id, .r = entry.widget_data.borderRectScale().r })) {
+        if (!dvui.eventMatch(event, .{ .id = entry.widget_id, .r = entry.border_rect })) {
             continue;
         }
 

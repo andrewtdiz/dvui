@@ -9,6 +9,16 @@ const key_layout_ty = "_tw_layout_ty";
 const key_layout_sx = "_tw_layout_sx";
 const key_layout_sy = "_tw_layout_sy";
 
+const key_margin_l = "_tw_margin_l";
+const key_margin_r = "_tw_margin_r";
+const key_margin_t = "_tw_margin_t";
+const key_margin_b = "_tw_margin_b";
+
+const key_padding_l = "_tw_padding_l";
+const key_padding_r = "_tw_padding_r";
+const key_padding_t = "_tw_padding_t";
+const key_padding_b = "_tw_padding_b";
+
 const key_trans_x = "_tw_trans_x";
 const key_trans_y = "_tw_trans_y";
 const key_scale_x = "_tw_scale_x";
@@ -30,6 +40,33 @@ fn nodeIdExtra(id: u32) usize {
 
 fn nodeAnimId(node_id: u32) dvui.Id {
     return dvui.Id.extendId(null, @src(), nodeIdExtra(node_id));
+}
+
+fn sideValue(value: ?f32) f32 {
+    return value orelse 0;
+}
+
+fn layoutScale(node: *const types.SolidNode) f32 {
+    if (node.layout.layout_scale != 0) return node.layout.layout_scale;
+    return dvui.windowNaturalScale();
+}
+
+fn scaledMargin(spec: *const tailwind.Spec, scale: f32) types.SideOffsets {
+    return .{
+        .left = sideValue(spec.margin.left) * scale,
+        .right = sideValue(spec.margin.right) * scale,
+        .top = sideValue(spec.margin.top) * scale,
+        .bottom = sideValue(spec.margin.bottom) * scale,
+    };
+}
+
+fn scaledPadding(spec: *const tailwind.Spec, scale: f32) types.SideOffsets {
+    return .{
+        .left = sideValue(spec.padding.left) * scale,
+        .right = sideValue(spec.padding.right) * scale,
+        .top = sideValue(spec.padding.top) * scale,
+        .bottom = sideValue(spec.padding.bottom) * scale,
+    };
 }
 
 fn clearOverrides(node: *types.SolidNode) void {
@@ -66,18 +103,23 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
     beginFrameForNode(node, cfg);
 
     if (!cfg.enabled) {
-        updatePrevTargets(node);
+        updatePrevTargets(node, class_spec);
         return;
+    }
+
+    if (!node.transition_state.prev_initialized) {
+        updatePrevTargets(node, class_spec);
     }
 
     if (cfg.duration_us <= 0 or (!cfg.props.layout and !cfg.props.transform and !cfg.props.colors and !cfg.props.opacity)) {
         clearOverrides(node);
-        updatePrevTargets(node);
+        updatePrevTargets(node, class_spec);
         return;
     }
 
     if (cfg.props.layout) {
         scheduleOrUpdateLayoutFlip(node, cfg);
+        scheduleOrUpdateSpacingTweens(node, cfg, class_spec);
     }
 
     if (cfg.props.transform) {
@@ -92,16 +134,22 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
     if (hasAnyActiveAnimation(node, cfg)) {
         node.invalidatePaint();
     }
+    if (hasAnyActiveSpacingAnimation(node, cfg)) {
+        node.invalidateLayout();
+    }
 
-    updatePrevTargets(node);
+    updatePrevTargets(node, class_spec);
 }
 
-fn updatePrevTargets(node: *types.SolidNode) void {
+fn updatePrevTargets(node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
     if (node.layout.rect) |rect| {
         node.transition_state.prev_layout_rect = rect;
     } else {
         node.transition_state.prev_layout_rect = null;
     }
+    const scale = layoutScale(node);
+    node.transition_state.prev_margin = scaledMargin(class_spec, scale);
+    node.transition_state.prev_padding = scaledPadding(class_spec, scale);
     node.transition_state.prev_translation = node.transform.translation;
     node.transition_state.prev_scale = node.transform.scale;
     node.transition_state.prev_rotation = node.transform.rotation;
@@ -110,6 +158,7 @@ fn updatePrevTargets(node: *types.SolidNode) void {
     node.transition_state.prev_bg = node.visual.background;
     node.transition_state.prev_text = node.visual.text_color;
     node.transition_state.prev_tint = node.image_tint;
+    node.transition_state.prev_initialized = true;
 }
 
 fn updateActiveFromAnimations(node: *types.SolidNode) void {
@@ -194,6 +243,14 @@ fn hasAnyActiveAnimation(node: *types.SolidNode, cfg: *const tailwind.Transition
         if (dvui.animationGet(id, key_layout_ty) != null) return true;
         if (dvui.animationGet(id, key_layout_sx) != null) return true;
         if (dvui.animationGet(id, key_layout_sy) != null) return true;
+        if (dvui.animationGet(id, key_margin_l) != null) return true;
+        if (dvui.animationGet(id, key_margin_r) != null) return true;
+        if (dvui.animationGet(id, key_margin_t) != null) return true;
+        if (dvui.animationGet(id, key_margin_b) != null) return true;
+        if (dvui.animationGet(id, key_padding_l) != null) return true;
+        if (dvui.animationGet(id, key_padding_r) != null) return true;
+        if (dvui.animationGet(id, key_padding_t) != null) return true;
+        if (dvui.animationGet(id, key_padding_b) != null) return true;
     }
     if (cfg.props.transform) {
         if (dvui.animationGet(id, key_trans_x) != null) return true;
@@ -211,6 +268,20 @@ fn hasAnyActiveAnimation(node: *types.SolidNode, cfg: *const tailwind.Transition
         if (dvui.animationGet(id, key_text_t) != null) return true;
         if (dvui.animationGet(id, key_tint_t) != null) return true;
     }
+    return false;
+}
+
+fn hasAnyActiveSpacingAnimation(node: *types.SolidNode, cfg: *const tailwind.TransitionConfig) bool {
+    if (!cfg.props.layout) return false;
+    const id = nodeAnimId(node.id);
+    if (dvui.animationGet(id, key_margin_l) != null) return true;
+    if (dvui.animationGet(id, key_margin_r) != null) return true;
+    if (dvui.animationGet(id, key_margin_t) != null) return true;
+    if (dvui.animationGet(id, key_margin_b) != null) return true;
+    if (dvui.animationGet(id, key_padding_l) != null) return true;
+    if (dvui.animationGet(id, key_padding_r) != null) return true;
+    if (dvui.animationGet(id, key_padding_t) != null) return true;
+    if (dvui.animationGet(id, key_padding_b) != null) return true;
     return false;
 }
 
@@ -239,6 +310,46 @@ fn scheduleOrUpdateLayoutFlip(node: *types.SolidNode, cfg: *const tailwind.Trans
     scheduleAnimation(id, key_layout_ty, dy, 0, cfg);
     scheduleAnimation(id, key_layout_sx, sx, 1, cfg);
     scheduleAnimation(id, key_layout_sy, sy, 1, cfg);
+}
+
+fn animValueOr(id: dvui.Id, key: []const u8, fallback: f32) f32 {
+    if (dvui.animationGet(id, key)) |a| return a.value();
+    return fallback;
+}
+
+fn scheduleOrUpdateSpacingTweens(node: *types.SolidNode, cfg: *const tailwind.TransitionConfig, class_spec: *const tailwind.Spec) void {
+    const scale = layoutScale(node);
+    const target_margin = scaledMargin(class_spec, scale);
+    const target_padding = scaledPadding(class_spec, scale);
+    const prev_margin = node.transition_state.prev_margin;
+    const prev_padding = node.transition_state.prev_padding;
+    const id = nodeAnimId(node.id);
+
+    if (target_margin.left != prev_margin.left) {
+        scheduleAnimation(id, key_margin_l, animValueOr(id, key_margin_l, prev_margin.left), target_margin.left, cfg);
+    }
+    if (target_margin.right != prev_margin.right) {
+        scheduleAnimation(id, key_margin_r, animValueOr(id, key_margin_r, prev_margin.right), target_margin.right, cfg);
+    }
+    if (target_margin.top != prev_margin.top) {
+        scheduleAnimation(id, key_margin_t, animValueOr(id, key_margin_t, prev_margin.top), target_margin.top, cfg);
+    }
+    if (target_margin.bottom != prev_margin.bottom) {
+        scheduleAnimation(id, key_margin_b, animValueOr(id, key_margin_b, prev_margin.bottom), target_margin.bottom, cfg);
+    }
+
+    if (target_padding.left != prev_padding.left) {
+        scheduleAnimation(id, key_padding_l, animValueOr(id, key_padding_l, prev_padding.left), target_padding.left, cfg);
+    }
+    if (target_padding.right != prev_padding.right) {
+        scheduleAnimation(id, key_padding_r, animValueOr(id, key_padding_r, prev_padding.right), target_padding.right, cfg);
+    }
+    if (target_padding.top != prev_padding.top) {
+        scheduleAnimation(id, key_padding_t, animValueOr(id, key_padding_t, prev_padding.top), target_padding.top, cfg);
+    }
+    if (target_padding.bottom != prev_padding.bottom) {
+        scheduleAnimation(id, key_padding_b, animValueOr(id, key_padding_b, prev_padding.bottom), target_padding.bottom, cfg);
+    }
 }
 
 fn currentTransformNoFlip(node: *const types.SolidNode) types.Transform {
@@ -349,6 +460,30 @@ pub fn effectiveTransform(node: *const types.SolidNode) types.Transform {
     return t;
 }
 
+pub fn effectiveMargin(node: *const types.SolidNode, base: types.SideOffsets) types.SideOffsets {
+    if (!node.transition_state.enabled) return base;
+    if (!node.transition_state.active_props.layout) return base;
+    const id = nodeAnimId(node.id);
+    var out = base;
+    if (dvui.animationGet(id, key_margin_l)) |a| out.left = a.value();
+    if (dvui.animationGet(id, key_margin_r)) |a| out.right = a.value();
+    if (dvui.animationGet(id, key_margin_t)) |a| out.top = a.value();
+    if (dvui.animationGet(id, key_margin_b)) |a| out.bottom = a.value();
+    return out;
+}
+
+pub fn effectivePadding(node: *const types.SolidNode, base: types.SideOffsets) types.SideOffsets {
+    if (!node.transition_state.enabled) return base;
+    if (!node.transition_state.active_props.layout) return base;
+    const id = nodeAnimId(node.id);
+    var out = base;
+    if (dvui.animationGet(id, key_padding_l)) |a| out.left = a.value();
+    if (dvui.animationGet(id, key_padding_r)) |a| out.right = a.value();
+    if (dvui.animationGet(id, key_padding_t)) |a| out.top = a.value();
+    if (dvui.animationGet(id, key_padding_b)) |a| out.bottom = a.value();
+    return out;
+}
+
 pub fn effectiveVisual(node: *const types.SolidNode) types.VisualProps {
     var v = node.visual;
     if (!node.transition_state.enabled) return v;
@@ -392,8 +527,8 @@ pub fn lerpPackedColor(a: types.PackedColor, b: types.PackedColor, t: f32) types
     const bch: u8 = @intFromFloat(std.math.clamp(std.math.lerp(ab, bb, tt), 0.0, 255.0));
     const aout: u8 = @intFromFloat(std.math.clamp(std.math.lerp(aa, ba, tt), 0.0, 255.0));
 
-    const packed: u32 = (@as(u32, r) << 24) | (@as(u32, g) << 16) | (@as(u32, bch) << 8) | @as(u32, aout);
-    return .{ .value = packed };
+    const packed_rgb: u32 = (@as(u32, r) << 24) | (@as(u32, g) << 16) | (@as(u32, bch) << 8) | @as(u32, aout);
+    return .{ .value = packed_rgb };
 }
 
 pub fn shortestAngleTarget(from: f32, to: f32) f32 {

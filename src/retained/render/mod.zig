@@ -2275,14 +2275,20 @@ fn renderInput(
 
     box.drawBackground();
     const rs = wd.contentRectScale();
-    const text_rect_nat = rs.rectFromPhysical(rs.r);
-    const text_rect = types.Rect{
-        .x = text_rect_nat.x,
-        .y = text_rect_nat.y,
-        .w = text_rect_nat.w,
-        .h = text_rect_nat.h,
+    var text_rect = types.Rect{
+        .x = rs.r.x,
+        .y = rs.r.y,
+        .w = rs.r.w,
+        .h = rs.r.h,
     };
     const text_slice = state.currentText();
+    if (text_slice.len > 0) {
+        const font = wd.options.fontGet();
+        const text_h = font.textSize(text_slice).h * dvui.windowNaturalScale();
+        if (text_h < text_rect.h) {
+            text_rect.y += (text_rect.h - text_h) * 0.5;
+        }
+    }
     direct.drawTextDirect(text_rect, text_slice, transitions.effectiveVisual(node), wd.options.fontGet());
 
     if (input_enabled_state) {
