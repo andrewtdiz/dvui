@@ -66,6 +66,7 @@ pub const InputState = struct {
     allocator: std.mem.Allocator,
     buffer: []u8 = &.{},
     text_len: usize = 0,
+    caret: usize = 0,
     limit: usize = default_input_limit,
     value_owned: []u8 = &.{},
     value_serial: u64 = 0,
@@ -110,6 +111,7 @@ pub const InputState = struct {
             self.buffer[self.value_owned.len] = 0;
         }
         self.text_len = self.value_owned.len;
+        self.caret = self.text_len;
         self.applied_serial = self.value_serial;
     }
 
@@ -124,6 +126,7 @@ pub const InputState = struct {
         self.value_serial +%= 1;
         self.applied_serial = self.value_serial;
         self.text_len = text.len;
+        self.caret = @min(self.caret, self.text_len);
     }
 
     pub fn currentText(self: *const InputState) []const u8 {

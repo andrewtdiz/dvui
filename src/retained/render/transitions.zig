@@ -484,6 +484,21 @@ pub fn effectivePadding(node: *const types.SolidNode, base: types.SideOffsets) t
     return out;
 }
 
+pub fn hasActiveSpacingAnimation(node: *const types.SolidNode) bool {
+    if (!node.transition_state.enabled) return false;
+    if (!node.transition_state.active_props.layout) return false;
+    const id = nodeAnimId(node.id);
+    if (dvui.animationGet(id, key_margin_l) != null) return true;
+    if (dvui.animationGet(id, key_margin_r) != null) return true;
+    if (dvui.animationGet(id, key_margin_t) != null) return true;
+    if (dvui.animationGet(id, key_margin_b) != null) return true;
+    if (dvui.animationGet(id, key_padding_l) != null) return true;
+    if (dvui.animationGet(id, key_padding_r) != null) return true;
+    if (dvui.animationGet(id, key_padding_t) != null) return true;
+    if (dvui.animationGet(id, key_padding_b) != null) return true;
+    return false;
+}
+
 pub fn effectiveVisual(node: *const types.SolidNode) types.VisualProps {
     var v = node.visual;
     if (!node.transition_state.enabled) return v;

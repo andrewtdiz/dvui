@@ -1,66 +1,39 @@
-# Zig Application Architecture: State and Memory Design
+# DVUI
 
-## Global Access Pattern
+See ARCHITECTURE.md for high-level project context.
 
-Large Zig applications often use **global or module-level pointers** for accessing core subsystems such as configuration, assets, or application state.
-This approach enables **cross-module communication** without requiring allocators or context objects to be passed through every function call.
+## CRITICAL RULES (Always Follow)
 
-### Guidelines
+1. **NO COMMENTS** - Code must be self-documenting through clear names
+2. **NO CLASSES** - Use plain functions, not OOP patterns unless explicitly asked
+3. **NO PREMATURE ABSTRACTION** - Write clear, minimal and functional code on first pass. Respect existing architecture boundaries.
+4. **BE CONCISE**
+5. **NEVER GIT PUSH or REVERT LOCAL CHANGES** - NEVER push to git history or revert local changes. ONLY add and commit changes.
 
-- Initialize global references at startup and clean them up explicitly at shutdown.
-- Keep globals minimal—only expose stable, long-lived systems.
-- Avoid hidden dependencies by documenting which modules rely on global state.
+**IMPORTANT: ASK BEFORE MODIFYING DEPENDENCIES** - You must ask the user first before making a change in deps/
+**IMPORTANT: NO PREMATURE OPTIMIZATION** – If a request seems to violate this, ask for clarification before proceeding.
+**IMPORTANT: CORE-FIRST TASKS** – Expand work from the core of the most important, value-adding functionality. Ship verifiable functionality as early as possible, then layer on features to extend the core. Recommend performance/memory/organization tasks only when needed.
 
-## Layered Allocator Strategy
+After changing Zig code, verify compilation from WSL (runs on Windows) by running `./zig_build_simple.sh`.
+Use raw `zigwin build --summary failures` output for deep debugging.
+- Example: `zigwin build --summary failures`. Supported `--summary` values: `all`, `new`, `failures`, `none`.
 
-Zig gives fine-grained control over memory. A **multi-tiered allocator design** helps manage different allocation patterns efficiently.
-
-### 1. Application Allocator (Primary)
-
-- Use a general-purpose allocator for most long-lived structures.
-- Choose between debugging and performance allocators depending on build mode
-
-### 2. Temporary or Frame Allocators
-
-- Use `ArenaAllocator` or similar for short-lived data such as UI buffers or temporary calculations.
-- Reset arenas periodically (e.g., every frame or operation) with `.retain_capacity` to reuse memory efficiently.
-
-### 3. Independent Subsystem Allocators
-
-- Allow independent modules (e.g., asset management, networking, etc.) to maintain their own allocator when they manage large or isolated memory domains.
-- This separation makes tracking, profiling, and cleanup more predictable.
+You won't be able to start the runtime or test with `zig build run` or `zig test`, it won't work on WSL.
 
 ---
 
-## Lifecycle and Ownership
+Research codebase via `deepwiki` CLI
 
-### Explicit Initialization and Cleanup
+- Useful deepwiki for implementation discovery across many files.
+- Semantic “how is this implemented?” questions—e.g., identifying core files, entry points, or code paths related to a feature.
+- It’s best for wide discovery; once you have paths, open files locally for details.
+Note: Slow, it takes ~20 seconds to return.
 
-- Each struct should define clear `init()` and `deinit()` functions.
-- Use explicit ownership — the struct that allocates memory must also free it.
-- No automatic RAII: memory and resource lifetimes must be manually managed.
+Usage
+- deepwiki "<query>"
 
-### Nested Resource Ownership
-
-- Parent structs are responsible for deinitializing all nested resources.
-- Follow a top-down cleanup order to prevent leaks and dangling pointers.
-
----
-
-## Key Architectural Principles
-
-1. **Explicit State** – Global pointers simplify access but require discipline and documentation.
-2. **Allocator Specialization** – Match allocator type to the lifetime and frequency of allocations.
-3. **Manual Resource Control** – Always define and follow `init()`/`deinit()` lifecycles for core-logic structs.
-4. **Debug Safety** – Use debug allocators and leak detection during development.
-5. **Subsystem Independence** – Isolate allocators and data lifecycles for modular, testable components.
-
-## Clay Engine Programming Guide
-
-Provide concise, clear, data-oriented, and decoupled code architecture for any new features.
-No boiler plate or syntax sugar, ONLY the minimal core functionality needed.
-
-If on WSL, don't try to `zig build` or `zig test`, it won't work. I will verify your work myself.
+Example
+- deepwiki "how does Zig bind functions to Luau?"
 
 ---
 
@@ -104,7 +77,7 @@ Unlike some other languages, there is no `std.math.float` function; use the buil
 
 ### ArrayList syntax
 
-For detailed `std.ArrayList` usage, see `Zig_ArrayList.md`.
+For detailed `std.ArrayList` usage, see `@agents/Zig_ArrayList.md`.
 
 ```zig
 const std = @import("std");
@@ -141,3 +114,4 @@ zigdoc std.mem.Allocator
 zigdoc std.http.Server
 zigdoc std.fs.Dir.readFileAlloc
 ```
+

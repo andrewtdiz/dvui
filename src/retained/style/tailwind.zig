@@ -105,6 +105,8 @@ pub const Spec = struct {
     hover_text: ?dvui.Color = null,
     hover_border: SideValues = .{},
     hover_border_color: ?dvui.Color = null,
+    hover_margin: SideValues = .{},
+    hover_padding: SideValues = .{},
     hover_opacity: ?f32 = null,
     transition: TransitionConfig = .{},
 };
@@ -381,6 +383,18 @@ pub fn applyHover(spec: *Spec, hovered: bool) void {
     if (spec.hover_background) |bg| spec.background = bg;
     if (spec.hover_text) |tc| spec.text = tc;
     if (spec.hover_opacity) |value| spec.opacity = value;
+    if (spec.hover_margin.any()) {
+        if (spec.hover_margin.left) |v| spec.margin.left = v;
+        if (spec.hover_margin.right) |v| spec.margin.right = v;
+        if (spec.hover_margin.top) |v| spec.margin.top = v;
+        if (spec.hover_margin.bottom) |v| spec.margin.bottom = v;
+    }
+    if (spec.hover_padding.any()) {
+        if (spec.hover_padding.left) |v| spec.padding.left = v;
+        if (spec.hover_padding.right) |v| spec.padding.right = v;
+        if (spec.hover_padding.top) |v| spec.padding.top = v;
+        if (spec.hover_padding.bottom) |v| spec.padding.bottom = v;
+    }
     if (spec.hover_border.any()) {
         if (spec.hover_border.left) |v| spec.border.left = v;
         if (spec.hover_border.right) |v| spec.border.right = v;
@@ -394,8 +408,14 @@ pub fn hasHover(spec: *const Spec) bool {
     return spec.hover_background != null or
         spec.hover_text != null or
         spec.hover_opacity != null or
+        spec.hover_margin.any() or
+        spec.hover_padding.any() or
         spec.hover_border_color != null or
         spec.hover_border.any();
+}
+
+pub fn hasHoverLayout(spec: *const Spec) bool {
+    return spec.hover_margin.any() or spec.hover_padding.any();
 }
 
 pub fn applyToOptions(spec: *const Spec, options: *dvui.Options) void {
@@ -512,6 +532,7 @@ fn handleHover(spec: *Spec, token: []const u8) bool {
     const inner = token[prefix.len..];
     if (inner.len == 0) return true;
     if (handleHoverOpacity(spec, inner)) return true;
+    if (handleHoverSpacing(spec, inner)) return true;
     if (handleHoverBorder(spec, inner)) return true;
     if (handleHoverPrefixed(spec, inner)) return true;
     return true;
@@ -527,6 +548,39 @@ fn handleHoverPrefixed(spec: *Spec, token: []const u8) bool {
         return true;
     }
     return false;
+}
+
+fn handleHoverSpacing(spec: *Spec, token: []const u8) bool {
+    if (token.len < 3) return false;
+    const kind = token[0];
+    const is_margin = kind == 'm';
+    const is_padding = kind == 'p';
+    if (!is_margin and !is_padding) return false;
+
+    var idx: usize = 1;
+    var target: SideTarget = .all;
+    if (idx < token.len and token[idx] != '-') {
+        target = switch (token[idx]) {
+            'x' => .horizontal,
+            'y' => .vertical,
+            't' => .top,
+            'r' => .right,
+            'b' => .bottom,
+            'l' => .left,
+            else => return false,
+        };
+        idx += 1;
+    }
+    if (idx >= token.len or token[idx] != '-') return false;
+    idx += 1;
+    if (idx >= token.len) return false;
+    const value = parseSpacingValue(token[idx..]) orelse return false;
+    if (is_margin) {
+        spec.hover_margin.set(target, value);
+    } else {
+        spec.hover_padding.set(target, value);
+    }
+    return true;
 }
 
 fn handleHoverBackground(spec: *Spec, suffix: []const u8) void {
@@ -711,6 +765,8 @@ fn fontTraitsFromId(font_id: dvui.Font.FontId) ?FontTraits {
         .PixelifyBd => .{ .family = .game, .weight = .bold, .slant = .normal },
         .PixelifyMe => .{ .family = .game, .weight = .medium, .slant = .normal },
         .PixelifySeBd => .{ .family = .game, .weight = .semibold, .slant = .normal },
+        .PixelOperator => .{ .family = .game, .weight = .normal, .slant = .normal },
+        .PixelOperatorBd => .{ .family = .game, .weight = .bold, .slant = .normal },
         .OpenDyslexic => .{ .family = .dyslexic, .weight = .normal, .slant = .normal },
         .OpenDyslexicBd => .{ .family = .dyslexic, .weight = .bold, .slant = .normal },
         .OpenDyslexicIt => .{ .family = .dyslexic, .weight = .normal, .slant = .italic },
@@ -746,10 +802,8 @@ fn fontIdForMono(weight: FontWeight, slant: FontSlant) dvui.Font.FontId {
 fn fontIdForGame(weight: FontWeight, slant: FontSlant) dvui.Font.FontId {
     _ = slant;
     return switch (weight) {
-        .bold => dvui.Font.FontId.PixelifyBd,
-        .semibold => dvui.Font.FontId.PixelifySeBd,
-        .medium => dvui.Font.FontId.PixelifyMe,
-        .light, .normal => dvui.Font.FontId.Pixelify,
+        .bold, .semibold => dvui.Font.FontId.PixelOperatorBd,
+        .light, .medium, .normal => dvui.Font.FontId.PixelOperator,
     };
 }
 

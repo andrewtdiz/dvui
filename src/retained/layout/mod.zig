@@ -4,6 +4,7 @@ const types = @import("../core/types.zig");
 const flex = @import("flex.zig");
 const measure = @import("measure.zig");
 const transitions = @import("../render/transitions.zig");
+const tailwind = @import("../style/tailwind.zig");
 
 const use_yoga_layout = true;
 
@@ -40,6 +41,7 @@ pub fn updateLayouts(store: *types.NodeStore) void {
     const root = store.node(0) orelse return;
 
     const missing_layout = hasMissingLayout(store, root);
+    const has_layout_animation = hasActiveLayoutAnimations(store, root);
 
     // If screen size changed, invalidate the entire layout tree so descendants recompute.
     const size_changed = last_screen_size.w != screen_w or last_screen_size.h != screen_h;
@@ -52,7 +54,7 @@ pub fn updateLayouts(store: *types.NodeStore) void {
     }
 
     // Skip work when nothing is dirty and the screen size is stable.
-    if (!size_changed and !scale_changed and !root.hasDirtySubtree() and !missing_layout) {
+    if (!size_changed and !scale_changed and !root.hasDirtySubtree() and !missing_layout and !has_layout_animation) {
         return;
     }
 
@@ -77,7 +79,8 @@ pub fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) 
 
 fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
     // Skip hidden elements entirely - they should not take up layout space
-    const spec = node.prepareClassSpec();
+    var spec = node.prepareClassSpec();
+    tailwind.applyHover(&spec, node.hovered);
     if (spec.hidden) {
         node.layout.rect = types.Rect{}; // Zero rect
         return;
@@ -104,7 +107,8 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     const prev_rect = node.layout.rect;
     const prev_child_rect = node.layout.child_rect;
     const prev_scale = node.layout.layout_scale;
-    const spec = node.prepareClassSpec();
+    var spec = node.prepareClassSpec();
+    tailwind.applyHover(&spec, node.hovered);
     const base_scale = dvui.windowNaturalScale();
     var parent_scale = base_scale;
     if (node.parent) |pid| {
@@ -426,6 +430,16 @@ fn hasMissingLayout(store: *types.NodeStore, node: *types.SolidNode) bool {
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
             if (hasMissingLayout(store, child)) return true;
+        }
+    }
+    return false;
+}
+
+fn hasActiveLayoutAnimations(store: *types.NodeStore, node: *types.SolidNode) bool {
+    if (transitions.hasActiveSpacingAnimation(node)) return true;
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            if (hasActiveLayoutAnimations(store, child)) return true;
         }
     }
     return false;

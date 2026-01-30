@@ -57,6 +57,7 @@ var last_hover_layer: RenderLayer = .base;
 var portal_cache_allocator: ?std.mem.Allocator = null;
 var portal_cache_version: u64 = 0;
 var cached_portal_ids: std.ArrayList(u32) = .empty;
+var hover_layout_invalidated: bool = false;
 
 pub fn init() void {
     gizmo_override_rect = null;
@@ -74,6 +75,7 @@ pub fn init() void {
     last_mouse_pt = null;
     last_input_enabled = null;
     last_hover_layer = .base;
+    hover_layout_invalidated = false;
     resetPortalCache();
     drag_drop.init();
     focus.init();
@@ -92,6 +94,7 @@ pub fn deinit() void {
     last_mouse_pt = null;
     last_input_enabled = null;
     last_hover_layer = .base;
+    hover_layout_invalidated = false;
     gizmo_override_rect = null;
     gizmo_rect_pending = null;
     logged_tree_dump = false;
@@ -683,6 +686,7 @@ fn syncVisualsFromClasses(
 ) void {
     const class_spec_base = node.prepareClassSpec();
     const has_hover = tailwind.hasHover(&class_spec_base);
+    const hover_affects_layout = tailwind.hasHoverLayout(&class_spec_base);
     const has_mouseenter = node.hasListener("mouseenter");
     const has_mouseleave = node.hasListener("mouseleave");
     const prev_bg = node.visual.background;
@@ -733,6 +737,12 @@ fn syncVisualsFromClasses(
                 }
             }
         }
+    }
+
+    if (prev_hovered != hovered and hover_affects_layout) {
+        node.invalidateLayout();
+        store.markNodeChanged(node.id);
+        hover_layout_invalidated = true;
     }
 
     node.visual = node.visual_props;
@@ -810,8 +820,9 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
 
     input_enabled_state = input_enabled;
     focus.beginFrame(store);
+    hover_layout_invalidated = false;
     layout.updateLayouts(store);
-    const layout_did_update = layout.didUpdateLayouts();
+    var layout_did_update = layout.didUpdateLayouts();
     if (input_enabled_state) {
         drag_drop.cancelIfMissing(event_ring, store);
     }
@@ -856,6 +867,19 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         } else {
             render_layer = .base;
         }
+        if (hover_layout_invalidated) {
+            hover_layout_invalidated = false;
+            layout.updateLayouts(store);
+            if (layout.didUpdateLayouts()) {
+                layout_did_update = true;
+            }
+            syncVisualLayer(event_ring, store, root, portal_ids, .base, current_mouse);
+            if (portal_ids.len > 0) {
+                syncVisualLayer(event_ring, store, root, portal_ids, .overlay, current_mouse);
+            } else {
+                render_layer = .base;
+            }
+        }
     } else {
         render_layer = .base;
     }
@@ -863,7 +887,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
-    const needs_paint_cache = needs_visual_sync or root.needsPaintUpdate();
+    const needs_paint_cache = needs_visual_sync or layout_did_update or root.needsPaintUpdate();
     if (needs_paint_cache) {
         updatePaintCache(store, &dirty_tracker);
     }
@@ -2151,6 +2175,17 @@ fn renderSlider(
     }
 }
 
+fn findUtf8Next(text: []const u8, pos: usize) usize {
+    const len = text.len;
+    const p = @min(pos, len);
+    if (p >= len) return len;
+    var next = p + 1;
+    while (next < len and text[next] & 0xc0 == 0x80) {
+        next += 1;
+    }
+    return next;
+}
+
 fn renderInput(
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
@@ -2202,6 +2237,8 @@ fn renderInput(
     var prev_focused = state.focused;
     var focused_now = false;
     var text_changed = false;
+    var caret_changed = false;
+    var enter_pressed = false;
 
     if (input_enabled_state) {
         if (tab_info.focusable and focus_allowed) {
@@ -2226,16 +2263,22 @@ fn renderInput(
             switch (e.evt) {
                 .text => |te| {
                     if (te.txt.len == 0) break;
+                    const insert_at = @min(state.caret, state.text_len);
                     const new_len = state.text_len + te.txt.len;
                     state.ensureCapacity(new_len + 1) catch |err| {
                         log.err("Solid input ensureCapacity failed for node {d}: {s}", .{ node_id, @errorName(err) });
                         break;
                     };
-                    @memcpy(state.buffer[state.text_len .. state.text_len + te.txt.len], te.txt);
+                    const tail_len = state.text_len - insert_at;
+                    if (tail_len > 0) {
+                        @memmove(state.buffer[insert_at + te.txt.len .. insert_at + te.txt.len + tail_len], state.buffer[insert_at .. insert_at + tail_len]);
+                    }
+                    @memcpy(state.buffer[insert_at .. insert_at + te.txt.len], te.txt);
                     if (state.buffer.len > new_len) {
                         state.buffer[new_len] = 0;
                     }
                     state.text_len = new_len;
+                    state.caret = insert_at + te.txt.len;
                     state.updateFromText(state.buffer[0..new_len]) catch |err| {
                         log.err("Solid input update failed for node {d}: {s}", .{ node_id, @errorName(err) });
                         break;
@@ -2246,14 +2289,42 @@ fn renderInput(
                 },
                 .key => |ke| {
                     if (ke.action != .down and ke.action != .repeat) break;
+                    if (ke.matchBind("char_left")) {
+                        if (state.caret > 0) {
+                            const new_pos = dvui.findUtf8Start(state.buffer[0..state.text_len], state.caret - 1);
+                            if (new_pos != state.caret) {
+                                state.caret = new_pos;
+                                caret_changed = true;
+                            }
+                        }
+                        e.handle(@src(), wd);
+                        break;
+                    }
+                    if (ke.matchBind("char_right")) {
+                        if (state.caret < state.text_len) {
+                            const new_pos = findUtf8Next(state.buffer[0..state.text_len], state.caret);
+                            if (new_pos != state.caret) {
+                                state.caret = new_pos;
+                                caret_changed = true;
+                            }
+                        }
+                        e.handle(@src(), wd);
+                        break;
+                    }
                     switch (ke.code) {
                         .backspace => {
-                            if (state.text_len == 0) break;
-                            const new_len = dvui.findUtf8Start(state.buffer[0..state.text_len], state.text_len - 1);
+                            if (state.caret == 0 or state.text_len == 0) break;
+                            const new_pos = dvui.findUtf8Start(state.buffer[0..state.text_len], state.caret - 1);
+                            const tail_len = state.text_len - state.caret;
+                            if (tail_len > 0) {
+                                @memmove(state.buffer[new_pos .. new_pos + tail_len], state.buffer[state.caret .. state.caret + tail_len]);
+                            }
+                            const new_len = state.text_len - (state.caret - new_pos);
                             if (state.buffer.len > new_len) {
                                 state.buffer[new_len] = 0;
                             }
                             state.text_len = new_len;
+                            state.caret = new_pos;
                             state.updateFromText(state.buffer[0..new_len]) catch |err| {
                                 log.err("Solid input backspace update failed for node {d}: {s}", .{ node_id, @errorName(err) });
                                 break;
@@ -2262,11 +2333,20 @@ fn renderInput(
                             text_changed = true;
                             e.handle(@src(), wd);
                         },
+                        .enter, .kp_enter => {
+                            if (ke.action == .down) {
+                                enter_pressed = true;
+                                e.handle(@src(), wd);
+                            }
+                        },
                         else => {},
                     }
                 },
                 else => {},
             }
+        }
+        if (caret_changed) {
+            store.markNodeChanged(node_id);
         }
     } else {
         state.focused = false;
@@ -2274,22 +2354,67 @@ fn renderInput(
     }
 
     box.drawBackground();
-    const rs = wd.contentRectScale();
-    var text_rect = types.Rect{
-        .x = rs.r.x,
-        .y = rs.r.y,
-        .w = rs.r.w,
-        .h = rs.r.h,
-    };
+    const content_rs = wd.contentRectScale();
     const text_slice = state.currentText();
+    const font = wd.options.fontGet();
+    const visual = transitions.effectiveVisual(node);
+    const text_color = if (visual.text_color) |tc|
+        direct.packedColorToDvui(tc, visual.opacity)
+    else
+        direct.packedColorToDvui(.{ .value = 0xffffffff }, visual.opacity);
+
+    const prev_clip = dvui.clip(content_rs.r);
+    defer dvui.clipSet(prev_clip);
+
+    const text_size = font.textSize(text_slice);
+    const text_w = text_size.w * content_rs.s;
+    const caret_index = @min(state.caret, text_slice.len);
+    const caret_prefix = text_slice[0..caret_index];
+    const caret_size = font.textSize(caret_prefix);
+    const caret_w = caret_size.w * content_rs.s;
+    const fallback_h = font.textSize("M").h * content_rs.s;
+    const text_h = if (text_slice.len > 0) text_size.h * content_rs.s else fallback_h;
+    var text_x = content_rs.r.x;
+    var text_y = content_rs.r.y;
+    if (text_h < content_rs.r.h) {
+        text_y += (content_rs.r.h - text_h) * 0.5;
+    }
+    if (text_w > content_rs.r.w) {
+        const max_scroll = text_w - content_rs.r.w;
+        const desired_scroll = @min(@max(caret_w - content_rs.r.w, 0.0), max_scroll);
+        text_x -= desired_scroll;
+    }
+
+    var text_rs = content_rs;
+    text_rs.r.x = text_x;
+    text_rs.r.y = text_y;
+    text_rs.r.w = text_w;
+    text_rs.r.h = text_h;
+
     if (text_slice.len > 0) {
-        const font = wd.options.fontGet();
-        const text_h = font.textSize(text_slice).h * dvui.windowNaturalScale();
-        if (text_h < text_rect.h) {
-            text_rect.y += (text_rect.h - text_h) * 0.5;
+        dvui.renderText(.{
+            .font = font,
+            .text = text_slice,
+            .rs = text_rs,
+            .color = text_color,
+        }) catch {};
+    }
+
+    if (focused_now) {
+        const blink_period_ns: i128 = 1_000_000_000;
+        const phase = @mod(dvui.frameTimeNS(), blink_period_ns);
+        if (phase < (blink_period_ns / 2)) {
+            var caret_rs = content_rs;
+            caret_rs.r.x = text_x + caret_w;
+            caret_rs.r.y = text_y;
+            dvui.renderText(.{
+                .font = font,
+                .text = "|",
+                .rs = caret_rs,
+                .color = text_color,
+            }) catch {};
         }
     }
-    direct.drawTextDirect(text_rect, text_slice, transitions.effectiveVisual(node), wd.options.fontGet());
 
     if (input_enabled_state) {
         if (event_ring) |ring| {
@@ -2302,6 +2427,10 @@ fn renderInput(
             if (text_changed and node.hasListener("input")) {
                 const payload = state.currentText();
                 _ = ring.pushInput(node_id, payload);
+            }
+            if (enter_pressed and node.hasListener("enter")) {
+                const payload = state.currentText();
+                _ = ring.push(.enter, node_id, payload);
             }
         }
     }

@@ -87,7 +87,7 @@ local function build_ui()
   ui.set_visual(ids.card, { background = 0x020617ff, cornerRadius = 18 })
 
   ui.create("h1", ids.title, ids.card, nil)
-  ui.set_class(ids.title, "text-2xl text-slate-50 font-bold text-nowrap")
+  ui.set_class(ids.title, "text-2xl text-slate-50 font-bold font-game text-nowrap")
   ui.create("text", ids.title_text, ids.title, nil)
   ui.set_text(ids.title_text, "UI Features (Starter)")
 
@@ -100,7 +100,7 @@ local function build_ui()
   ui.set_class(ids.buttons_row, "flex flex-row gap-3 items-center")
 
   ui.create("button", ids.inc_button, ids.buttons_row, nil)
-  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg border-blue-500 bg-emerald-500 hover:bg-emerald-800 text-base text-slate-900 font-bold transition-all duration-100 ease-quad ease-in-out cursor-pointer")
+  ui.set_class(ids.inc_button, "px-4 py-2 rounded-lg border-blue-500 bg-emerald-500 hover:bg-emerald-800 text-base text-slate-900 font-bold transition duration-100 ease-quad ease-in-out cursor-pointer")
   ui.set_visual(ids.inc_button, { background = 0x10b981ff, cornerRadius = 10 })
   ui.listen(ids.inc_button, "click")
 
@@ -123,6 +123,7 @@ local function build_ui()
   ui.listen(ids.input, "input")
   ui.listen(ids.input, "focus")
   ui.listen(ids.input, "blur")
+  ui.listen(ids.input, "enter")
 
   ui.create("p", ids.input_echo_row, ids.card, nil)
   ui.set_class(ids.input_echo_row, "w-full text-sm text-slate-300 break-words")
@@ -178,6 +179,12 @@ function on_event(kind, id, detail)
     focused = false
     ui.set_text(ids.focus_state, "Focus: false")
     set_input_focus_style(false)
+    return
+  end
+
+  if kind == "enter" and id == ids.input then
+    ui.set_text(ids.input_echo, string.format("Submit: %s", detail))
+    ui.set_input(ids.input, "")
     return
   end
 end

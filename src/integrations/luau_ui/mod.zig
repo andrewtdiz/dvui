@@ -24,7 +24,7 @@ pub const LuaUi = struct {
     }
 
     fn registerBindings(self: *LuaUi) !void {
-        const ui_table = self.lua.createTable(.{ .rec = 14 });
+        const ui_table = self.lua.createTable(.{ .rec = 15 });
         defer ui_table.deinit();
 
         try ui_table.set("log", luaz.Lua.Capture(self, luaLog));
@@ -33,6 +33,7 @@ pub const LuaUi = struct {
         try ui_table.set("remove", luaz.Lua.Capture(self, luaRemove));
         try ui_table.set("insert", luaz.Lua.Capture(self, luaInsert));
         try ui_table.set("set_text", luaz.Lua.Capture(self, luaSetText));
+        try ui_table.set("set_input", luaz.Lua.Capture(self, luaSetInput));
         try ui_table.set("set_class", luaz.Lua.Capture(self, luaSetClass));
         try ui_table.set("set_src", luaz.Lua.Capture(self, luaSetSrc));
         try ui_table.set("set_image", luaz.Lua.Capture(self, luaSetImage));
@@ -91,6 +92,10 @@ pub const LuaUi = struct {
 
     fn luaSetText(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, text: []const u8) !void {
         try upv.value.setText(id, text);
+    }
+
+    fn luaSetInput(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, text: []const u8) !void {
+        try upv.value.setInput(id, text);
     }
 
     fn luaSetClass(upv: luaz.Lua.Upvalues(*LuaUi), id: u32, class_name: []const u8) !void {
@@ -177,6 +182,11 @@ pub const LuaUi = struct {
         try self.store.setTextNode(id, text);
     }
 
+    fn setInput(self: *LuaUi, id: u32, text: []const u8) !void {
+        if (id == 0) return error.MissingId;
+        try self.store.setInputValue(id, text);
+    }
+
     fn setClass(self: *LuaUi, id: u32, class_name: []const u8) !void {
         if (id == 0) return error.MissingId;
         try self.store.setClassName(id, class_name);
@@ -248,6 +258,10 @@ pub const LuaUi = struct {
         if (id == 0) return error.MissingId;
         const target = self.store.node(id) orelse return error.MissingId;
         var changed = false;
+        if (try readOptionalField(f32, props, "scale")) |value| {
+            target.transform.scale = .{ value, value };
+            changed = true;
+        }
         if (try readOptionalField(f32, props, "rotation")) |value| {
             target.transform.rotation = value;
             changed = true;

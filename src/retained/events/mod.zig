@@ -23,6 +23,7 @@ pub const EventKind = enum(u8) {
     dragleave = 18,
     drop = 19,
     scroll = 20,
+    enter = 21,
 };
 
 /// Packed event entry for efficient memory layout
@@ -236,6 +237,7 @@ pub fn eventKindFromName(name: []const u8) ?EventKind {
         .{ "dragleave", .dragleave },
         .{ "drop", .drop },
         .{ "scroll", .scroll },
+        .{ "enter", .enter },
     });
     return map.get(name);
 }
