@@ -57,14 +57,6 @@ pub fn build(b: *Build) !void {
     root_mod.addImport("dvui", dvui_mod);
     root_mod.addImport("raylib-backend", raylib_mod);
 
-    const retained_harness_mod = b.createModule(.{
-        .root_source_file = b.path("src/retained-harness.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    retained_harness_mod.addImport("dvui", dvui_mod);
-    retained_harness_mod.addImport("dvui_retained", retained_mod);
-    retained_harness_mod.addImport("raylib-backend", raylib_mod);
 
     if (raylib_dep) |dep| {
         root_mod.addImport("raylib", dep.module("raylib"));
@@ -143,14 +135,6 @@ pub fn build(b: *Build) !void {
         exe.subsystem = .Console;
     }
 
-    const retained_exe = b.addExecutable(.{
-        .name = "retained-harness",
-        .root_module = retained_harness_mod,
-        .use_lld = use_lld,
-    });
-    if (raylib_dep) |dep| {
-        retained_exe.linkLibrary(dep.artifact("raylib"));
-    }
 
     const luau_runner_exe = b.addExecutable(.{
         .name = "luau-native-runner",
@@ -161,13 +145,7 @@ pub fn build(b: *Build) !void {
         luau_runner_exe.linkLibrary(dep.artifact("raylib"));
     }
 
-    if (target.result.os.tag == .windows) {
-        retained_exe.win32_manifest = b.path("src/main.manifest");
-        retained_exe.subsystem = .Console;
-    }
-
     b.installArtifact(exe);
-    b.installArtifact(retained_exe);
     b.installArtifact(luau_runner_exe);
     b.installArtifact(dvui_lib);
 
@@ -181,14 +159,6 @@ pub fn build(b: *Build) !void {
 
     const run_step = b.step("run", "Run the raylib ontop example");
     run_step.dependOn(&run_cmd.step);
-
-    const retained_run_cmd = b.addRunArtifact(retained_exe);
-    if (b.args) |args| {
-        retained_run_cmd.addArgs(args);
-    }
-
-    const retained_run_step = b.step("run-retained", "Run the retained harness");
-    retained_run_step.dependOn(&retained_run_cmd.step);
 
     const luau_run_cmd = b.addRunArtifact(luau_runner_exe);
     if (b.args) |args| {
