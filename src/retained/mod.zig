@@ -72,6 +72,144 @@ pub fn pickNodeAt(store: *types.NodeStore, x_pos: f32, y_pos: f32) ?PickResult {
     return result;
 }
 
+pub fn pickNodeAtRange(store: *types.NodeStore, x_pos: f32, y_pos: f32, ignore_min: u32, ignore_max: u32) ?PickResult {
+    if (dvui.current_window != null) {
+        layout.updateLayouts(store);
+    }
+    const root = store.node(0) orelse return null;
+    var result = PickResult{};
+    var order: u32 = 0;
+    scanPickNodeRange(store, root, x_pos, y_pos, null, &result, &order, ignore_min, ignore_max);
+    if (result.id == 0) return null;
+    return result;
+}
+
+fn scanPickNodeRange(
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    x_pos: f32,
+    y_pos: f32,
+    clip_rect: ?types.Rect,
+    result: *PickResult,
+    order: *u32,
+    ignore_min: u32,
+    ignore_max: u32,
+) void {
+    if (clip_rect) |clip| {
+        if (!rectContainsPoint(clip, x_pos, y_pos)) return;
+    }
+
+    var next_clip = clip_rect;
+    var node_rect: ?types.Rect = null;
+    if (node.kind == .element) {
+        const spec = node.prepareClassSpec();
+        if (spec.hidden) return;
+        if (node.layout.rect) |base_rect| {
+            node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
+        }
+        if (node_rect) |rect| {
+            if (rectContainsPoint(rect, x_pos, y_pos)) {
+                order.* += 1;
+                const ignored = node.id >= ignore_min and node.id <= ignore_max;
+                if (!ignored) {
+                    const z_index = node.visual.z_index;
+                    if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
+                        result.* = .{
+                            .id = node.id,
+                            .z_index = z_index,
+                            .order = order.*,
+                            .rect = rect,
+                        };
+                    }
+                }
+            }
+            if (spec.clip_children orelse false) {
+                if (next_clip) |clip| {
+                    next_clip = intersectRect(clip, rect);
+                    if (next_clip == null) return;
+                } else {
+                    next_clip = rect;
+                }
+            }
+        }
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            scanPickNodeRange(store, child, x_pos, y_pos, next_clip, result, order, ignore_min, ignore_max);
+        }
+    }
+}
+
+fn scanPickFrameNodeRange(
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    x_pos: f32,
+    y_pos: f32,
+    clip_rect: ?types.Rect,
+    result: *PickResult,
+    order: *u32,
+    ignore_min: u32,
+    ignore_max: u32,
+) void {
+    if (clip_rect) |clip| {
+        if (!rectContainsPoint(clip, x_pos, y_pos)) return;
+    }
+
+    var next_clip = clip_rect;
+    var node_rect: ?types.Rect = null;
+    if (node.kind == .element) {
+        const spec = node.prepareClassSpec();
+        if (spec.hidden) return;
+        if (node.layout.rect) |base_rect| {
+            node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
+        }
+        if (node_rect) |rect| {
+            if (rectContainsPoint(rect, x_pos, y_pos)) {
+                order.* += 1;
+                const ignored = node.id >= ignore_min and node.id <= ignore_max;
+                if (!ignored and isFrameNode(node)) {
+                    const z_index = node.visual.z_index;
+                    if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
+                        result.* = .{
+                            .id = node.id,
+                            .z_index = z_index,
+                            .order = order.*,
+                            .rect = rect,
+                        };
+                    }
+                }
+            }
+            if (spec.clip_children orelse false) {
+                if (next_clip) |clip| {
+                    next_clip = intersectRect(clip, rect);
+                    if (next_clip == null) return;
+                } else {
+                    next_clip = rect;
+                }
+            }
+        }
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            scanPickFrameNodeRange(store, child, x_pos, y_pos, next_clip, result, order, ignore_min, ignore_max);
+        }
+    }
+}
+
+pub fn pickFrameAtRange(store: *types.NodeStore, x_pos: f32, y_pos: f32, ignore_min: u32, ignore_max: u32) ?PickResult {
+    if (dvui.current_window != null) {
+        layout.updateLayouts(store);
+    }
+    const root = store.node(0) orelse return null;
+    var result = PickResult{};
+    var order: u32 = 0;
+    scanPickFrameNodeRange(store, root, x_pos, y_pos, null, &result, &order, ignore_min, ignore_max);
+    if (result.id == 0) return null;
+    return result;
+}
+
 pub fn pickFrameAt(store: *types.NodeStore, x_pos: f32, y_pos: f32) ?PickResult {
     if (dvui.current_window != null) {
         layout.updateLayouts(store);

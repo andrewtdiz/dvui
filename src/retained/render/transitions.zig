@@ -31,6 +31,7 @@ const key_image_opacity = "_tw_img_opacity";
 const key_bg_t = "_tw_bg_t";
 const key_text_t = "_tw_text_t";
 const key_tint_t = "_tw_tint_t";
+const key_border_t = "_tw_border_t";
 
 fn nodeIdExtra(id: u32) usize {
     var hasher = std.hash.Wyhash.init(0);
@@ -80,12 +81,15 @@ fn clearOverrides(node: *types.SolidNode) void {
     node.transition_state.anim_bg = null;
     node.transition_state.anim_text = null;
     node.transition_state.anim_tint = null;
+    node.transition_state.anim_border = null;
     node.transition_state.bg_from = null;
     node.transition_state.bg_to = null;
     node.transition_state.text_from = null;
     node.transition_state.text_to = null;
     node.transition_state.tint_from = null;
     node.transition_state.tint_to = null;
+    node.transition_state.border_from = null;
+    node.transition_state.border_to = null;
 }
 
 pub fn beginFrameForNode(node: *types.SolidNode, cfg: *const tailwind.TransitionConfig) void {
@@ -127,7 +131,8 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
     }
 
     if (cfg.props.opacity or cfg.props.colors) {
-        scheduleOrUpdateVisualTweens(node, cfg, node.visual);
+        const target_border = resolvedBorderColor(class_spec);
+        scheduleOrUpdateVisualTweens(node, cfg, node.visual, target_border);
     }
 
     updateActiveFromAnimations(node);
@@ -158,6 +163,7 @@ fn updatePrevTargets(node: *types.SolidNode, class_spec: *const tailwind.Spec) v
     node.transition_state.prev_bg = node.visual.background;
     node.transition_state.prev_text = node.visual.text_color;
     node.transition_state.prev_tint = node.image_tint;
+    node.transition_state.prev_border = resolvedBorderColor(class_spec);
     node.transition_state.prev_initialized = true;
 }
 
@@ -209,6 +215,7 @@ fn updateActiveFromAnimations(node: *types.SolidNode) void {
     node.transition_state.anim_bg = null;
     node.transition_state.anim_text = null;
     node.transition_state.anim_tint = null;
+    node.transition_state.anim_border = null;
     if (node.transition_state.active_props.colors) {
         if (dvui.animationGet(id, key_bg_t)) |a| {
             if (node.transition_state.bg_from) |from| {
@@ -230,6 +237,14 @@ fn updateActiveFromAnimations(node: *types.SolidNode) void {
             if (node.transition_state.tint_from) |from| {
                 if (node.transition_state.tint_to) |to| {
                     node.transition_state.anim_tint = lerpPackedColor(from, to, a.value());
+                }
+            }
+        }
+
+        if (dvui.animationGet(id, key_border_t)) |a| {
+            if (node.transition_state.border_from) |from| {
+                if (node.transition_state.border_to) |to| {
+                    node.transition_state.anim_border = lerpPackedColor(from, to, a.value());
                 }
             }
         }
@@ -267,6 +282,7 @@ fn hasAnyActiveAnimation(node: *types.SolidNode, cfg: *const tailwind.Transition
         if (dvui.animationGet(id, key_bg_t) != null) return true;
         if (dvui.animationGet(id, key_text_t) != null) return true;
         if (dvui.animationGet(id, key_tint_t) != null) return true;
+        if (dvui.animationGet(id, key_border_t) != null) return true;
     }
     return false;
 }
@@ -401,7 +417,22 @@ fn packedEqual(a: ?types.PackedColor, b: ?types.PackedColor) bool {
     return b == null;
 }
 
-fn scheduleOrUpdateVisualTweens(node: *types.SolidNode, cfg: *const tailwind.TransitionConfig, target_visual: types.VisualProps) void {
+fn packedFromDvui(color: dvui.Color) types.PackedColor {
+    const value: u32 = (@as(u32, color.r) << 24) | (@as(u32, color.g) << 16) | (@as(u32, color.b) << 8) | @as(u32, color.a);
+    return .{ .value = value };
+}
+
+fn resolvedBorderColor(spec: *const tailwind.Spec) types.PackedColor {
+    const base = spec.border_color orelse (dvui.Options{}).color(.border);
+    return packedFromDvui(base);
+}
+
+fn scheduleOrUpdateVisualTweens(
+    node: *types.SolidNode,
+    cfg: *const tailwind.TransitionConfig,
+    target_visual: types.VisualProps,
+    target_border: types.PackedColor,
+) void {
     const id = nodeAnimId(node.id);
 
     if (cfg.props.opacity) {
@@ -437,6 +468,13 @@ fn scheduleOrUpdateVisualTweens(node: *types.SolidNode, cfg: *const tailwind.Tra
             node.transition_state.tint_from = from;
             node.transition_state.tint_to = node.image_tint;
             scheduleAnimation(id, key_tint_t, 0, 1, cfg);
+        }
+
+        if (target_border.value != node.transition_state.prev_border.value) {
+            const from = node.transition_state.anim_border orelse node.transition_state.prev_border;
+            node.transition_state.border_from = from;
+            node.transition_state.border_to = target_border;
+            scheduleAnimation(id, key_border_t, 0, 1, cfg);
         }
     }
 }
@@ -511,6 +549,11 @@ pub fn effectiveVisual(node: *const types.SolidNode) types.VisualProps {
         if (node.transition_state.anim_opacity) |opacity| v.opacity = opacity;
     }
     return v;
+}
+
+pub fn effectiveBorderColor(node: *const types.SolidNode) types.PackedColor {
+    if (node.transition_state.anim_border) |color| return color;
+    return node.transition_state.prev_border;
 }
 
 pub fn effectiveImageOpacity(node: *const types.SolidNode) f32 {

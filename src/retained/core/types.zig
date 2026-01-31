@@ -233,6 +233,7 @@ pub const TransitionState = struct {
     prev_bg: ?PackedColor = null,
     prev_text: ?PackedColor = null,
     prev_tint: ?PackedColor = null,
+    prev_border: PackedColor = .{ .value = 0 },
 
     bg_from: ?PackedColor = null,
     bg_to: ?PackedColor = null,
@@ -240,6 +241,8 @@ pub const TransitionState = struct {
     text_to: ?PackedColor = null,
     tint_from: ?PackedColor = null,
     tint_to: ?PackedColor = null,
+    border_from: ?PackedColor = null,
+    border_to: ?PackedColor = null,
 
     flip_translation: [2]f32 = .{ 0, 0 },
     flip_scale: [2]f32 = .{ 1, 1 },
@@ -252,6 +255,7 @@ pub const TransitionState = struct {
     anim_bg: ?PackedColor = null,
     anim_text: ?PackedColor = null,
     anim_tint: ?PackedColor = null,
+    anim_border: ?PackedColor = null,
 };
 
 const ListenerSet = struct {

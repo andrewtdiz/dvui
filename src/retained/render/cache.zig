@@ -114,6 +114,7 @@ pub fn renderCachedOrDirectBackground(
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
+    const border_color_packed = transitions.effectiveBorderColor(node);
 
     const corner_radius = spec.corner_radius orelse visual_eff.corner_radius;
     const has_rounding = corner_radius != 0;
@@ -121,8 +122,13 @@ pub fn renderCachedOrDirectBackground(
     if (!has_border and !has_rounding and visual_eff.background == null and fallback_bg == null) return;
 
     if (has_rounding) {
-        const radius_phys_val = corner_radius * scale;
-        const outer_phys = draw.rectToPhysical(rect);
+        const transform_scale = @min(@abs(transform_eff.scale[0]), @abs(transform_eff.scale[1]));
+        const radius_phys_val = corner_radius * scale * transform_scale;
+        const rounded_rect = if (transform_eff.rotation == 0 and (transform_eff.scale[0] != 1 or transform_eff.scale[1] != 1 or transform_eff.translation[0] != 0 or transform_eff.translation[1] != 0))
+            draw.transformedRect(node, rect) orelse rect
+        else
+            rect;
+        const outer_phys = draw.rectToPhysical(rounded_rect);
         const outer_radius = dvui.Rect.Physical.all(radius_phys_val);
         const fade: f32 = 2.0;
 
@@ -134,8 +140,7 @@ pub fn renderCachedOrDirectBackground(
             bg_color_opt = bg_color.opacity(opacity);
         }
 
-        const border_color_base = if (spec.border_color) |bc| bc else (dvui.Options{}).color(.border);
-        const border_color = border_color_base.opacity(opacity);
+        const border_color = draw.packedColorToDvui(border_color_packed, opacity);
 
         if (has_border) {
             const uniform = border_left == border_right and border_left == border_top and border_left == border_bottom;
@@ -174,7 +179,7 @@ pub fn renderCachedOrDirectBackground(
     }
 
     if (has_border) {
-        const geom = buildRectGeometry(rect, scale, visual_eff, transform_eff, allocator, spec, fallback_bg) catch {
+        const geom = buildRectGeometry(rect, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, fallback_bg) catch {
             draw.drawRectDirect(rect, visual_eff, transform_eff, allocator, fallback_bg);
             return;
         };
@@ -244,6 +249,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
+    const border_color_packed = transitions.effectiveBorderColor(node);
 
     if (!shouldCachePaint(node) or rect == null) {
         const bounds = if (rect) |r| draw.transformedRect(node, r) orelse r else null;
@@ -255,7 +261,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
         return;
     }
 
-    const geom = buildRectGeometry(rect.?, scale, visual_eff, transform_eff, allocator, spec, null) catch {
+    const geom = buildRectGeometry(rect.?, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, null) catch {
         const bounds = draw.transformedRect(node, rect.?) orelse rect.?;
         node.paint.painted_rect = bounds;
         tracker.add(bounds);
@@ -280,6 +286,7 @@ fn buildRectGeometry(
     visual: types.VisualProps,
     transform: types.Transform,
     allocator: std.mem.Allocator,
+    border_color_packed: types.PackedColor,
     spec: tailwind.Spec,
     fallback_bg: ?dvui.Color,
 ) !struct { vertices: []dvui.Vertex, indices: []u16, bounds: dvui.Rect.Physical } {
@@ -302,8 +309,7 @@ fn buildRectGeometry(
         bg_color_opt = bg_color.opacity(opacity);
     }
 
-    const border_color_base = if (spec.border_color) |bc| bc else (dvui.Options{}).color(.border);
-    const border_color = border_color_base.opacity(opacity);
+    const border_color = draw.packedColorToDvui(border_color_packed, opacity);
     const border_pma = dvui.Color.PMA.fromColor(border_color);
 
     const ax = rect.x + rect.w * transform.anchor[0];
