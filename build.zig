@@ -49,29 +49,10 @@ pub fn build(b: *Build) !void {
         },
     );
 
-    const root_mod = b.createModule(.{
-        .root_source_file = b.path("src/raylib-ontop-zig.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    root_mod.addImport("dvui", dvui_mod);
-    root_mod.addImport("raylib-backend", raylib_mod);
-
-
-    if (raylib_dep) |dep| {
-        root_mod.addImport("raylib", dep.module("raylib"));
-    }
-
-    const wgpu_dep = b.dependency("wgpu_native_zig", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    root_mod.addImport("wgpu", wgpu_dep.module("wgpu"));
     const luaz_dep = b.dependency("luaz", .{
         .target = target,
         .optimize = optimize,
     });
-    root_mod.addImport("luaz", luaz_dep.module("luaz"));
 
     const native_module = b.createModule(.{
         .root_source_file = b.path("src/integrations/native_renderer/mod.zig"),
@@ -121,21 +102,6 @@ pub fn build(b: *Build) !void {
 
     b.installArtifact(native_lib);
 
-    const exe = b.addExecutable(.{
-        .name = "raylib-ontop",
-        .root_module = root_mod,
-        .use_lld = use_lld,
-    });
-    if (raylib_dep) |dep| {
-        exe.linkLibrary(dep.artifact("raylib"));
-    }
-
-    if (target.result.os.tag == .windows) {
-        exe.win32_manifest = b.path("src/main.manifest");
-        exe.subsystem = .Console;
-    }
-
-
     const luau_runner_exe = b.addExecutable(.{
         .name = "luau-native-runner",
         .root_module = luau_runner_mod,
@@ -145,20 +111,11 @@ pub fn build(b: *Build) !void {
         luau_runner_exe.linkLibrary(dep.artifact("raylib"));
     }
 
-    b.installArtifact(exe);
     b.installArtifact(luau_runner_exe);
     b.installArtifact(dvui_lib);
 
     const dvui_lib_step = b.step("dvui-lib", "Build the dvui static library");
     dvui_lib_step.dependOn(&dvui_lib.step);
-
-    const run_cmd = b.addRunArtifact(exe);
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the raylib ontop example");
-    run_step.dependOn(&run_cmd.step);
 
     const luau_run_cmd = b.addRunArtifact(luau_runner_exe);
     if (b.args) |args| {

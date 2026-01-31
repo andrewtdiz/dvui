@@ -256,14 +256,14 @@ store.setClassName(node_id, "flex flex-col gap-4 p-4 bg-slate-100");
 - `apply.zig` - Style application to nodes
 - `colors.zig` - Color palette definitions
 
-### Operations API (`retained/mod.zig`)
+### Luau Retained API (`src/integrations/luau_ui/mod.zig`)
 
-Update the tree via JSON operations:
+Update the tree via Luau bindings:
 
-```zig
-// Operations: create, remove, move, set_text, set_class, etc.
-retained.applyOps(store, &seq, json_bytes);
-retained.setSnapshot(store, event_ring, json_bytes);
+```luau
+ui.create("div", id, parent, nil)
+ui.set_class(id, "flex flex-col gap-4 p-4 bg-slate-100")
+ui.set_text(text_id, "Hello")
 ```
 
 ### Rendering (`retained/render/`)

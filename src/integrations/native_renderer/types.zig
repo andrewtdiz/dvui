@@ -62,6 +62,8 @@ pub const Renderer = struct {
     lua_state: ?*luaz.Lua = null,
     lua_ui: ?*luau_ui.LuaUi = null,
     lua_ready: bool = false,
+    screenshot_key_enabled: bool = false,
+    screenshot_index: u32 = 0,
 };
 
 // ============================================================

@@ -287,9 +287,8 @@ pub fn deinitRenderer(renderer: *Renderer) void {
 pub fn finalizeDestroy(renderer: *Renderer) void {
     if (renderer.destroy_started) return;
     renderer.destroy_started = true;
-    var gpa_instance = renderer.gpa_instance;
     deinitRenderer(renderer);
-    _ = gpa_instance.deinit();
+    _ = renderer.gpa_instance.deinit();
     std.heap.c_allocator.destroy(renderer);
 }
 
@@ -325,6 +324,8 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .lua_state = null,
         .lua_ui = null,
         .lua_ready = false,
+        .screenshot_key_enabled = false,
+        .screenshot_index = 0,
     };
 
     renderer.allocator = renderer.gpa_instance.allocator();

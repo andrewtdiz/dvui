@@ -50,6 +50,8 @@ const overlay_subwindow_seed: u32 = 0x4f564c59;
 
 var render_layer: RenderLayer = .base;
 var hover_layer: RenderLayer = .base;
+var pointer_top_base_id: u32 = 0;
+var pointer_top_overlay_id: u32 = 0;
 var modal_overlay_active: bool = false;
 var last_mouse_pt: ?dvui.Point.Physical = null;
 var last_input_enabled: ?bool = null;
@@ -71,6 +73,8 @@ pub fn init() void {
     input_enabled_state = true;
     render_layer = .base;
     hover_layer = .base;
+    pointer_top_base_id = 0;
+    pointer_top_overlay_id = 0;
     modal_overlay_active = false;
     last_mouse_pt = null;
     last_input_enabled = null;
@@ -106,6 +110,8 @@ pub fn deinit() void {
     input_enabled_state = true;
     render_layer = .base;
     hover_layer = .base;
+    pointer_top_base_id = 0;
+    pointer_top_overlay_id = 0;
     modal_overlay_active = false;
 }
 
@@ -133,6 +139,7 @@ fn applyLayoutScaleToOptions(node: *const types.SolidNode, options: *dvui.Option
     if (options.corner_radius) |c| options.corner_radius = c.scale(factor, dvui.Rect);
     if (options.min_size_content) |ms| options.min_size_content = dvui.Size{ .w = ms.w * factor, .h = ms.h * factor };
     if (options.max_size_content) |mx| options.max_size_content = dvui.Options.MaxSize{ .w = mx.w * factor, .h = mx.h * factor };
+    if (options.text_outline_thickness) |v| options.text_outline_thickness = v * factor;
     const font = options.fontGet();
     options.font = font.resize(font.size * factor);
 }
@@ -260,8 +267,152 @@ fn isPortalNode(node: *const types.SolidNode) bool {
     return node.kind == .element and std.mem.eql(u8, node.tag, "portal");
 }
 
+const PointerPick = struct {
+    id: u32 = 0,
+    z_index: i16 = std.math.minInt(i16),
+    order: u32 = 0,
+};
+
+fn scanPickInteractive(
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    point: dvui.Point.Physical,
+    clip_rect: ?types.Rect,
+    result: *PointerPick,
+    order: *u32,
+    skip_portals: bool,
+) void {
+    if (skip_portals and isPortalNode(node)) return;
+    if (clip_rect) |clip| {
+        if (!rectContains(clip, point)) return;
+    }
+
+    var next_clip = clip_rect;
+    var node_rect: ?types.Rect = null;
+    if (node.kind == .element) {
+        const spec = node.prepareClassSpec();
+        if (!spec.hidden and node.visual.opacity > 0) {
+            if (node.layout.rect) |base_rect| {
+                node_rect = transformedRect(node, base_rect) orelse base_rect;
+            }
+            if (node_rect) |rect| {
+                if (rectContains(rect, point)) {
+                    if (node.isInteractive()) {
+                        order.* += 1;
+                        const z_index = node.visual.z_index;
+                        if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
+                            result.* = .{
+                                .id = node.id,
+                                .z_index = z_index,
+                                .order = order.*,
+                            };
+                        }
+                    }
+                }
+                if ((spec.clip_children orelse false) or node.visual.clip_children) {
+                    if (next_clip) |clip| {
+                        next_clip = intersectRect(clip, rect);
+                        if (next_clip == null) return;
+                    } else {
+                        next_clip = rect;
+                    }
+                }
+            }
+        }
+    }
+
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            scanPickInteractive(store, child, point, next_clip, result, order, skip_portals);
+        }
+    }
+}
+
+fn pickInteractiveId(store: *types.NodeStore, root: *types.SolidNode, point: dvui.Point.Physical, skip_portals: bool) u32 {
+    var result: PointerPick = .{};
+    var order: u32 = 0;
+    scanPickInteractive(store, root, point, null, &result, &order, skip_portals);
+    return result.id;
+}
+
 fn allowPointerInput() bool {
     return input_enabled_state and render_layer == hover_layer;
+}
+
+fn pointerTargetId() u32 {
+    return if (render_layer == .overlay) pointer_top_overlay_id else pointer_top_base_id;
+}
+
+fn pointerEventAllowed(node_id: u32, widget_id: dvui.Id, e: *dvui.Event) bool {
+    switch (e.evt) {
+        .mouse => {
+            if (e.target_widgetId) |target| {
+                return target == widget_id;
+            }
+            return pointerTargetId() == node_id;
+        },
+        else => return true,
+    }
+}
+
+fn clickedExTopmost(wd: *const dvui.WidgetData, node_id: u32, opts: dvui.ClickOptions) ?dvui.Event.EventTypes {
+    var click_event: ?dvui.Event.EventTypes = null;
+
+    const click_rect = opts.rect orelse wd.borderRectScale().r;
+    for (dvui.events()) |*e| {
+        if (!pointerEventAllowed(node_id, wd.id, e)) continue;
+        if (!dvui.eventMatch(e, .{ .id = wd.id, .r = click_rect })) continue;
+
+        switch (e.evt) {
+            .mouse => |me| {
+                if (me.action == .focus) {
+                    e.handle(@src(), wd);
+                    dvui.focusWidget(wd.id, null, e.num);
+                } else if (me.action == .press and (if (opts.buttons == .pointer) me.button.pointer() else true)) {
+                    e.handle(@src(), wd);
+                    dvui.captureMouse(wd, e.num);
+                    dvui.dragPreStart(me.p, .{});
+                } else if (me.action == .release and (if (opts.buttons == .pointer) me.button.pointer() else true)) {
+                    if (dvui.captured(wd.id)) {
+                        e.handle(@src(), wd);
+                        dvui.captureMouse(null, e.num);
+                        dvui.dragEnd();
+                        if (click_rect.contains(me.p)) {
+                            dvui.refresh(null, @src(), wd.id);
+                            click_event = .{ .mouse = me };
+                        }
+                    }
+                } else if (me.action == .motion and me.button.touch()) {
+                    if (dvui.captured(wd.id)) {
+                        if (dvui.dragging(me.p, null)) |_| {
+                            dvui.captureMouse(null, e.num);
+                            dvui.dragEnd();
+                        }
+                    }
+                } else if (me.action == .position) {
+                    if (opts.hover_cursor) |cursor| {
+                        dvui.cursorSet(cursor);
+                    }
+                    if (opts.hovered) |hovered| {
+                        hovered.* = true;
+                    }
+                }
+            },
+            .key => |ke| {
+                if (ke.action == .down and ke.matchBind("activate")) {
+                    e.handle(@src(), wd);
+                    click_event = .{ .key = ke };
+                    dvui.refresh(null, @src(), wd.id);
+                }
+            },
+            else => {},
+        }
+    }
+    return click_event;
+}
+
+fn clickedTopmost(wd: *const dvui.WidgetData, node_id: u32, opts: dvui.ClickOptions) bool {
+    return clickedExTopmost(wd, node_id, opts) != null;
 }
 
 fn allowFocusRegistration() bool {
@@ -884,6 +1035,22 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         render_layer = .base;
     }
 
+    if (input_enabled_state) {
+        pointer_top_base_id = pickInteractiveId(store, root, current_mouse, true);
+        var overlay_pick: PointerPick = .{};
+        var overlay_order: u32 = 0;
+        if (portal_ids.len > 0) {
+            for (portal_ids) |portal_id| {
+                const portal = store.node(portal_id) orelse continue;
+                scanPickInteractive(store, portal, current_mouse, null, &overlay_pick, &overlay_order, false);
+            }
+        }
+        pointer_top_overlay_id = overlay_pick.id;
+    } else {
+        pointer_top_base_id = 0;
+        pointer_top_overlay_id = 0;
+    }
+
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
@@ -1250,7 +1417,7 @@ fn renderParagraphDirect(
                     .w = line.width,
                     .h = text_layout.line_height,
                 };
-                drawTextDirect(line_rect, line_text, transitions.effectiveVisual(node), draw_font);
+                drawTextDirect(line_rect, line_text, transitions.effectiveVisual(node), draw_font, font_scale);
             }
         }
     }
@@ -1658,7 +1825,8 @@ fn renderButton(
         focus.registerFocusable(store, node, bw.data());
     }
     if (input_enabled_state) {
-        bw.processEvents();
+        bw.hover = false;
+        bw.click = clickedTopmost(bw.data(), node_id, .{ .hovered = &bw.hover });
     }
     bw.drawBackground();
 
@@ -1685,6 +1853,8 @@ fn renderButton(
         .text = caption,
         .rs = text_rs,
         .color = text_style.color(.text),
+        .outline_color = text_style.text_outline_color,
+        .outline_thickness = text_style.text_outline_thickness,
     }) catch |err| {
         if (button_text_error_log_count < 8) {
             button_text_error_log_count += 1;
@@ -2246,7 +2416,7 @@ fn renderInput(
         }
 
         var hovered = false;
-        _ = dvui.clickedEx(wd, .{ .hovered = &hovered, .hover_cursor = class_spec.cursor orelse .ibeam });
+        _ = clickedExTopmost(wd, node_id, .{ .hovered = &hovered, .hover_cursor = class_spec.cursor orelse .ibeam });
 
         focused_now = dvui.focusedWidgetId() == wd.id;
         state.focused = focused_now;
@@ -2362,6 +2532,8 @@ fn renderInput(
         direct.packedColorToDvui(tc, visual.opacity)
     else
         direct.packedColorToDvui(.{ .value = 0xffffffff }, visual.opacity);
+    const outline_color = wd.options.text_outline_color;
+    const outline_thickness = wd.options.text_outline_thickness;
 
     const prev_clip = dvui.clip(content_rs.r);
     defer dvui.clipSet(prev_clip);
@@ -2397,6 +2569,8 @@ fn renderInput(
             .text = text_slice,
             .rs = text_rs,
             .color = text_color,
+            .outline_color = outline_color,
+            .outline_thickness = outline_thickness,
         }) catch {};
     }
 
@@ -2412,6 +2586,8 @@ fn renderInput(
                 .text = "|",
                 .rs = caret_rs,
                 .color = text_color,
+                .outline_color = outline_color,
+                .outline_thickness = outline_thickness,
             }) catch {};
         }
     }

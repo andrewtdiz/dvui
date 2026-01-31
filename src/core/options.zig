@@ -58,6 +58,8 @@ color_fill_press: ?Color = null,
 color_text: ?Color = null,
 color_text_hover: ?Color = null,
 color_text_press: ?Color = null,
+text_outline_color: ?Color = null,
+text_outline_thickness: ?f32 = null,
 color_border: ?Color = null,
 
 // If a color above is null, source it from this style (if null, .content) in the theme.
@@ -326,6 +328,8 @@ pub fn styleOnly(self: *const Options) Options {
         .color_text = self.color_text,
         .color_text_hover = self.color_text_hover,
         .color_text_press = self.color_text_press,
+        .text_outline_color = self.text_outline_color,
+        .text_outline_thickness = self.text_outline_thickness,
         .color_border = self.color_border,
 
         .font = self.font,
@@ -388,6 +392,8 @@ pub fn strip(self: *const Options) Options {
         .color_text = self.color_text,
         .color_text_hover = self.color_text_hover,
         .color_text_press = self.color_text_press,
+        .text_outline_color = self.text_outline_color,
+        .text_outline_thickness = self.text_outline_thickness,
         .color_border = self.color_border,
 
         .font = self.font,
@@ -466,6 +472,8 @@ pub fn hash(self: *const Options) u64 {
     if (self.color_text) |col| hasher.update(asBytes(&col));
     if (self.color_text_hover) |col| hasher.update(asBytes(&col));
     if (self.color_text_press) |col| hasher.update(asBytes(&col));
+    if (self.text_outline_color) |col| hasher.update(asBytes(&col));
+    if (self.text_outline_thickness) |v| hasher.update(asBytes(&v));
     if (self.color_border) |col| hasher.update(asBytes(&col));
 
     const fontStyle: FontStyle = self.font_style orelse .body;

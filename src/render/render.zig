@@ -119,6 +119,8 @@ pub const TextOptions = struct {
     sel_start: ?usize = null,
     sel_end: ?usize = null,
     sel_color: ?Color = null,
+    outline_color: ?Color = null,
+    outline_thickness: ?f32 = null,
     debug: bool = false,
     kerning: ?bool = null,
     kern_in: ?[]u32 = null,
@@ -326,7 +328,43 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
             .fill(.{}, .{ .color = opts.sel_color orelse dvui.themeGet().focus, .fade = 0 });
     }
 
-    try renderTriangles(builder.build_unowned(), texture_atlas);
+    const base_tri = builder.build_unowned();
+
+    const outline_col = opts.outline_color;
+    const outline_thickness = opts.outline_thickness orelse 1.0;
+    if (outline_col != null and outline_thickness > 0) {
+        var d = outline_thickness * opts.rs.s;
+        if (cw.snap_to_pixels) {
+            d = @round(d);
+        }
+        if (d > 0) {
+            const outline_pma: Color.PMA = .fromColor(outline_col.?.opacity(cw.alpha));
+            const offsets = [_]Point.Physical{
+                .{ .x = -d, .y = 0 },
+                .{ .x = d, .y = 0 },
+                .{ .x = 0, .y = -d },
+                .{ .x = 0, .y = d },
+                .{ .x = -d, .y = -d },
+                .{ .x = -d, .y = d },
+                .{ .x = d, .y = -d },
+                .{ .x = d, .y = d },
+            };
+
+            for (offsets) |off| {
+                var tri = try base_tri.dupe(cw.lifo());
+                errdefer tri.deinit(cw.lifo());
+                for (tri.vertexes) |*v| {
+                    v.pos = v.pos.plus(off);
+                    v.col = outline_pma;
+                }
+                tri.bounds = tri.bounds.offsetPoint(off);
+                try renderTriangles(tri, texture_atlas);
+                tri.deinit(cw.lifo());
+            }
+        }
+    }
+
+    try renderTriangles(base_tri, texture_atlas);
 }
 
 pub const TextureOptions = struct {

@@ -28,6 +28,12 @@ pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec
     if (spec.text) |tc| {
         node.visual.text_color = dvuiColorToPacked(tc);
     }
+    if (spec.text_outline_color) |tc| {
+        node.visual.text_outline_color = dvuiColorToPacked(tc);
+    }
+    if (spec.text_outline_thickness) |v| {
+        node.visual.text_outline_thickness = v;
+    }
     if (spec.corner_radius) |radius| {
         node.visual.corner_radius = radius;
     }
@@ -61,6 +67,10 @@ pub fn applyVisualPropsToOptions(visual: types.VisualProps, options: *dvui.Optio
         options.color_text = color;
         options.color_text_hover = color;
         options.color_text_press = color;
+    }
+    if (visual.text_outline_color) |tc| {
+        options.text_outline_color = packedColorToDvui(tc, opacity);
+        options.text_outline_thickness = visual.text_outline_thickness;
     }
     if (visual.corner_radius != 0) {
         options.corner_radius = dvui.Rect.all(visual.corner_radius);

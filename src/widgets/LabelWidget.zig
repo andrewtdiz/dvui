@@ -155,6 +155,8 @@ pub fn draw(self: *LabelWidget) void {
             .text = line,
             .rs = rs,
             .color = self.data().options.color(.text),
+            .outline_color = self.data().options.text_outline_color,
+            .outline_thickness = self.data().options.text_outline_thickness,
         }) catch |err| {
             dvui.logError(@src(), err, "Failed to render text: {s}", .{line});
         };
@@ -166,6 +168,8 @@ pub fn draw(self: *LabelWidget) void {
                 .text = ellip,
                 .rs = rs,
                 .color = self.data().options.color(.text),
+                .outline_color = self.data().options.text_outline_color,
+                .outline_thickness = self.data().options.text_outline_thickness,
             }) catch |err| {
                 dvui.logError(@src(), err, "Failed to render ellipses after text: {s}", .{line});
             };

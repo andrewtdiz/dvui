@@ -1,14 +1,13 @@
 # DVUI Retained Feature Implementation Guide
 
-This guide maps the feature specification in `DVUI_RETAINED.md` to the current retained implementation and calls out the exact files/functions to extend. It is intentionally high level and data-oriented so you can start coding immediately without changing the public snapshot/ops/event-ring surface.
+This guide maps the feature specification in `DVUI_RETAINED.md` to the current retained implementation and calls out the exact files/functions to extend. It is intentionally high level and data-oriented so you can start coding immediately without changing the public Luau retained-mode surface.
 
 ## Scope and invariants
-- Keep the snapshot/ops JSON contract and exported C ABI stable in `src/retained/mod.zig` (`dvui_retained_set_snapshot`, `dvui_retained_apply_ops`, event ring and picking exports).
-- Preserve runtime state on snapshot apply by extending `captureRuntimeState` and `restoreRuntimeState` in `src/retained/mod.zig` if new runtime fields are introduced.
+- Keep the Luau UI surface stable in `src/integrations/luau_ui/mod.zig`; extend it for new retained props.
 - Follow explicit ownership: any new heap allocations added to nodes must be freed in `SolidNode.deinit` in `src/retained/core/types.zig`.
 
 ## Current retained pipeline (quick map)
-- Snapshot/ops ingestion: `setSnapshot`, `applyOps`, and `applySolidOp` in `src/retained/mod.zig`.
+- Luau bindings: `src/integrations/luau_ui/mod.zig` writes to `NodeStore`.
 - Node storage and ownership: `SolidNode`, `NodeStore` in `src/retained/core/types.zig`.
 - Tailwind parsing and class spec: `parse` and `Spec` in `src/retained/style/tailwind.zig`; adapter in `src/retained/style/apply.zig`.
 - Layout: `updateLayouts` and `computeNodeLayout` in `src/retained/layout/mod.zig`; flex in `src/retained/layout/flex.zig` and `src/retained/layout/yoga.zig`; text sizing in `src/retained/layout/measure.zig`; wrap in `src/retained/layout/text_wrap.zig`.
@@ -19,9 +18,9 @@ This guide maps the feature specification in `DVUI_RETAINED.md` to the current r
 ## Feature-by-feature implementation map
 
 ### 1) div baseline (layout + transforms + visual props)
-Data model and ops:
-- Extend `SolidSnapshotNode` and `SolidOp` in `src/retained/mod.zig` only when new props are added.
-- Store new per-node values in `SolidNode` in `src/retained/core/types.zig`; apply them via `setSnapshot` and `applySolidOp` in `src/retained/mod.zig`.
+Data model and bindings:
+- Store new per-node values in `SolidNode` in `src/retained/core/types.zig`.
+- Expose new setters in `src/integrations/luau_ui/mod.zig` and apply them in layout/render paths.
 
 Layout:
 - Absolute layout via `left/top/right/bottom` and `w/h` already lives in `computeNodeLayout` in `src/retained/layout/mod.zig`.
@@ -58,9 +57,9 @@ Required changes:
 - Preserve wrapping defaults via `class_spec.text_wrap` and `class_spec.break_words` in `src/retained/layout/text_wrap.zig`.
 
 ### 4) Image nodes (tag `image`)
-Data and ops:
-- Add image-specific props to `SolidSnapshotNode` and `SolidOp` in `src/retained/mod.zig` (fit mode, tint color, image opacity, per-image transform).
-- Store them in `SolidNode` in `src/retained/core/types.zig` and apply in `renderImage` in `src/retained/render/mod.zig`.
+Data and bindings:
+- Add image-specific props to `SolidNode` in `src/retained/core/types.zig` (fit mode, tint color, image opacity, per-image transform).
+- Expose setters in `src/integrations/luau_ui/mod.zig` and apply in `renderImage` in `src/retained/render/mod.zig`.
 
 Rendering path:
 - Fit modes map to DVUI’s `Options.Expand` and image shrink behavior in `src/dvui.zig` (`ImageInitOptions.shrink`, `Options.expand`). If `cover` requires cropping, bypass `dvui.image` and call `render.renderImage` with custom `TextureOptions.uv` in `src/render/render.zig`.
@@ -82,9 +81,9 @@ Rendering and input:
 - Ensure scrollbars are visible for enabled axes even when only one axis is scrollable.
 
 ### 6) Gradient backgrounds
-Data and ops:
-- `types.Gradient` already exists in `src/retained/core/types.zig` but is unused. Add props in `SolidSnapshotNode`/`SolidOp` in `src/retained/mod.zig` to carry gradient data (colors, stops, rotation).
-- Store gradient data on `SolidNode.visual_props` and apply in render.
+Data and bindings:
+- `types.Gradient` already exists in `src/retained/core/types.zig` but is unused. Add props on `SolidNode.visual_props` and expose them via `src/integrations/luau_ui/mod.zig` to carry gradient data (colors, stops, rotation).
+- Apply gradient data in render.
 
 Rendering:
 - Implement gradient rendering in `src/retained/render/cache.zig` or `src/retained/render/direct.zig`. Build a quad with per-vertex colors derived from the gradient angle and stops.
@@ -118,6 +117,6 @@ Default fonts:
 - `pick_node_at` and `get_node_rect` match visual output after transforms/clipping.
 
 ## Suggested validation path
-- Use `src/retained-harness.zig` to load a snapshot/ops JSON and visually confirm rendering.
-- Add a minimal retained snapshot covering the acceptance scene and verify `pick_node_at` and `get_node_rect`.
+- Run `luau-native-runner` with `scripts/ui_features_all.luau` (or a minimal custom script) to visually confirm rendering.
+- Add a minimal Luau scene covering the acceptance checklist and verify `pick_node_at` and `get_node_rect`.
 - Manually exercise scrolling and ensure `scroll` events are emitted by `renderScrollFrame` in `src/retained/render/mod.zig`.

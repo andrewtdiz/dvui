@@ -176,15 +176,32 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
             if (rect.h == 0) rect.h = intrinsic.h;
         }
 
-        if (spec.left != null) {
-            rect.x = parent_rect.x + left_offset;
-        } else if (spec.right != null) {
-            rect.x = parent_rect.x + parent_rect.w - right_offset - rect.w;
-        }
-        if (spec.top != null) {
-            rect.y = parent_rect.y + top_offset;
-        } else if (spec.bottom != null) {
-            rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
+        if (spec.layout_anchor) |anchor| {
+            var anchor_x = parent_rect.x;
+            var anchor_y = parent_rect.y;
+            if (spec.left != null) {
+                anchor_x = parent_rect.x + left_offset;
+            } else if (spec.right != null) {
+                anchor_x = parent_rect.x + parent_rect.w - right_offset;
+            }
+            if (spec.top != null) {
+                anchor_y = parent_rect.y + top_offset;
+            } else if (spec.bottom != null) {
+                anchor_y = parent_rect.y + parent_rect.h - bottom_offset;
+            }
+            rect.x = anchor_x - rect.w * anchor[0];
+            rect.y = anchor_y - rect.h * anchor[1];
+        } else {
+            if (spec.left != null) {
+                rect.x = parent_rect.x + left_offset;
+            } else if (spec.right != null) {
+                rect.x = parent_rect.x + parent_rect.w - right_offset - rect.w;
+            }
+            if (spec.top != null) {
+                rect.y = parent_rect.y + top_offset;
+            } else if (spec.bottom != null) {
+                rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
+            }
         }
     } else {
         rect = parent_rect;

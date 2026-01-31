@@ -100,6 +100,32 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
 }
 
+fn saveScreenshotPng(renderer: *Renderer, picture: *dvui.Picture) void {
+    var name_buf: [96]u8 = undefined;
+    const index = renderer.screenshot_index;
+    renderer.screenshot_index +%= 1;
+    const name = std.fmt.bufPrint(&name_buf, "screenshot-{d}.png", .{index}) catch {
+        logMessage(renderer, 3, "screenshot name failed", .{});
+        return;
+    };
+    const file = std.fs.cwd().createFile(name, .{}) catch |err| {
+        logMessage(renderer, 3, "screenshot create failed: {s}", .{@errorName(err)});
+        return;
+    };
+    defer file.close();
+    var buf: [8192]u8 = undefined;
+    var writer = file.writer(&buf);
+    picture.png(&writer.interface) catch |err| {
+        logMessage(renderer, 3, "screenshot write failed: {s}", .{@errorName(err)});
+        return;
+    };
+    writer.end() catch |err| {
+        logMessage(renderer, 3, "screenshot finalize failed: {s}", .{@errorName(err)});
+        return;
+    };
+    logMessage(renderer, 1, "screenshot saved: {s}", .{name});
+}
+
 fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.EventRing) void {
     const has_handler = lifecycle.isLuaFuncPresent(lua_state, "on_event");
 
@@ -189,6 +215,17 @@ pub fn renderFrame(renderer: *Renderer) void {
             }
         }
 
+        var picture_opt: ?dvui.Picture = null;
+        if (renderer.screenshot_key_enabled) {
+            const pressed = ray.isKeyPressed(ray.KeyboardKey.print_screen) or ray.isKeyPressed(ray.KeyboardKey.f12);
+            if (pressed) {
+                picture_opt = dvui.Picture.start(dvui.windowRectPixels());
+                if (picture_opt == null) {
+                    logMessage(renderer, 2, "screenshot not supported", .{});
+                }
+            }
+        }
+
         if (renderer.lua_ready) {
             if (renderer.lua_state) |lua_state| {
                 if (lifecycle.isLuaFuncPresent(lua_state, "update")) {
@@ -268,6 +305,13 @@ pub fn renderFrame(renderer: *Renderer) void {
         const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true);
         if (!drew_retained) {
             commands.renderCommandsDvui(renderer, win);
+        }
+
+        if (picture_opt) |*picture| {
+            win.endRendering(.{});
+            picture.stop();
+            saveScreenshotPng(renderer, picture);
+            picture.deinit();
         }
 
         if (renderer.lua_ready) {

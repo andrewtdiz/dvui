@@ -65,11 +65,14 @@ pub const FontSlant = enum {
 pub const Spec = struct {
     background: ?dvui.Color = null,
     text: ?dvui.Color = null,
+    text_outline_color: ?dvui.Color = null,
+    text_outline_thickness: ?f32 = null,
     width: ?Width = null,
     height: ?Height = null,
     scale: ?f32 = null,
     is_flex: bool = false,
     position: ?Position = null,
+    layout_anchor: ?[2]f32 = null,
     top: ?f32 = null,
     right: ?f32 = null,
     bottom: ?f32 = null,
@@ -103,6 +106,8 @@ pub const Spec = struct {
     cursor: ?dvui.enums.Cursor = null,
     hover_background: ?dvui.Color = null,
     hover_text: ?dvui.Color = null,
+    hover_text_outline_color: ?dvui.Color = null,
+    hover_text_outline_thickness: ?f32 = null,
     hover_border: SideValues = .{},
     hover_border_color: ?dvui.Color = null,
     hover_margin: SideValues = .{},
@@ -328,6 +333,23 @@ const literal_rules = [_]LiteralRule{
 
 const rounded_rules = design_tokens.radius_tokens;
 
+const AnchorRule = struct {
+    token: []const u8,
+    anchor: [2]f32,
+};
+
+const anchor_rules = [_]AnchorRule{
+    .{ .token = "anchor-top-left", .anchor = .{ 0.0, 0.0 } },
+    .{ .token = "anchor-top", .anchor = .{ 0.5, 0.0 } },
+    .{ .token = "anchor-top-right", .anchor = .{ 1.0, 0.0 } },
+    .{ .token = "anchor-left", .anchor = .{ 0.0, 0.5 } },
+    .{ .token = "anchor-center", .anchor = .{ 0.5, 0.5 } },
+    .{ .token = "anchor-right", .anchor = .{ 1.0, 0.5 } },
+    .{ .token = "anchor-bottom-left", .anchor = .{ 0.0, 1.0 } },
+    .{ .token = "anchor-bottom", .anchor = .{ 0.5, 1.0 } },
+    .{ .token = "anchor-bottom-right", .anchor = .{ 1.0, 1.0 } },
+};
+
 const PrefixRule = struct {
     prefix: []const u8,
     handler: fn (*Spec, []const u8) void,
@@ -357,6 +379,7 @@ pub fn parse(classes: []const u8) Spec {
         if (token.len == 0) continue;
         if (handleHover(&spec, token)) continue;
         if (handleLiteral(&spec, token)) continue;
+        if (handleAnchor(&spec, token)) continue;
         if (handleSpacing(&spec, token)) continue;
         if (handleInset(&spec, token)) continue;
         if (handleGap(&spec, token)) continue;
@@ -382,6 +405,8 @@ pub fn applyHover(spec: *Spec, hovered: bool) void {
     if (!hovered) return;
     if (spec.hover_background) |bg| spec.background = bg;
     if (spec.hover_text) |tc| spec.text = tc;
+    if (spec.hover_text_outline_color) |tc| spec.text_outline_color = tc;
+    if (spec.hover_text_outline_thickness) |v| spec.text_outline_thickness = v;
     if (spec.hover_opacity) |value| spec.opacity = value;
     if (spec.hover_margin.any()) {
         if (spec.hover_margin.left) |v| spec.margin.left = v;
@@ -407,6 +432,8 @@ pub fn applyHover(spec: *Spec, hovered: bool) void {
 pub fn hasHover(spec: *const Spec) bool {
     return spec.hover_background != null or
         spec.hover_text != null or
+        spec.hover_text_outline_color != null or
+        spec.hover_text_outline_thickness != null or
         spec.hover_opacity != null or
         spec.hover_margin.any() or
         spec.hover_padding.any() or
@@ -506,6 +533,16 @@ fn handleLiteral(spec: *Spec, token: []const u8) bool {
     return false;
 }
 
+fn handleAnchor(spec: *Spec, token: []const u8) bool {
+    for (anchor_rules) |rule| {
+        if (std.mem.eql(u8, token, rule.token)) {
+            spec.layout_anchor = rule.anchor;
+            return true;
+        }
+    }
+    return false;
+}
+
 fn handlePrefixed(spec: *Spec, token: []const u8) bool {
     inline for (prefix_rules) |rule| {
         if (token.len > rule.prefix.len and std.mem.startsWith(u8, token, rule.prefix)) {
@@ -590,6 +627,19 @@ fn handleHoverBackground(spec: *Spec, suffix: []const u8) void {
 }
 
 fn handleHoverText(spec: *Spec, suffix: []const u8) void {
+    const outline_prefix = "outline-";
+    if (std.mem.startsWith(u8, suffix, outline_prefix)) {
+        const rest = suffix[outline_prefix.len..];
+        if (rest.len == 0) return;
+        if (parseOutlineThickness(rest)) |v| {
+            spec.hover_text_outline_thickness = v;
+            return;
+        }
+        if (lookupColorToken(.text_hover, rest)) |color_value| {
+            spec.hover_text_outline_color = color_value;
+        }
+        return;
+    }
     if (lookupColorToken(.text_hover, suffix)) |color_value| {
         spec.hover_text = color_value;
     }
@@ -1133,6 +1183,17 @@ fn parseBracketValue(token: []const u8) ?f32 {
     return value;
 }
 
+fn parseOutlineThickness(token: []const u8) ?f32 {
+    if (parseBracketValue(token)) |v| return v;
+    var num_slice = token;
+    if (std.mem.endsWith(u8, num_slice, "px")) {
+        num_slice = num_slice[0 .. num_slice.len - 2];
+    }
+    const value = std.fmt.parseFloat(f32, num_slice) catch return null;
+    if (!std.math.isFinite(value) or value < 0) return null;
+    return value;
+}
+
 fn handleBackground(spec: *Spec, suffix: []const u8) void {
     if (lookupColorToken(.fill, suffix)) |color_value| {
         spec.background = color_value;
@@ -1140,6 +1201,19 @@ fn handleBackground(spec: *Spec, suffix: []const u8) void {
 }
 
 fn handleText(spec: *Spec, suffix: []const u8) void {
+    const outline_prefix = "outline-";
+    if (std.mem.startsWith(u8, suffix, outline_prefix)) {
+        const rest = suffix[outline_prefix.len..];
+        if (rest.len == 0) return;
+        if (parseOutlineThickness(rest)) |v| {
+            spec.text_outline_thickness = v;
+            return;
+        }
+        if (lookupColorToken(.text, rest)) |color_value| {
+            spec.text_outline_color = color_value;
+        }
+        return;
+    }
     if (lookupColorToken(.text, suffix)) |color_value| {
         spec.text = color_value;
     }

@@ -13,6 +13,7 @@ pub fn main() !void {
     };
     defer native.lifecycle.destroyRendererImpl(renderer);
 
+    renderer.screenshot_key_enabled = true;
     renderer.size = .{ 1280, 720 };
     renderer.pixel_size = .{ 1280, 720 };
     try native.window.ensureWindow(renderer);

@@ -31,30 +31,16 @@ Concrete changes requested
         - setImageTint(id: u32, value: u32) !void
         - setImageOpacity(id: u32, value: f32) !void
 
-2. JSON snapshot parsing
+2. Luau bindings
 
-- In deps/dvui/src/retained/mod.zig:
-    - Extend SolidSnapshotNode with an optional image object:
-        - image: ?struct { src?: []const u8, tint?: u32, opacity?: f32 } = null
-    - Backward compat:
-        - If image is present, prefer image.src over legacy src.
-        - Continue supporting legacy src for older snapshots.
-    - Apply snapshot:
-        - After node creation, apply src as today.
-        - If image.tint present => set image tint.
-        - If image.opacity present => set image opacity.
+- In `src/integrations/luau_ui/mod.zig`:
+    - Extend `ui.set_image(id, props)` to accept `src`, `tint`, and `opacity`.
+    - Ensure setters call `NodeStore` methods and mark the node changed.
 
-3. Incremental ops parsing
+3. Luau API
 
-- In deps/dvui/src/retained/mod.zig:
-    - Extend SolidOp to accept image object too:
-        - image: ?struct { src?: []const u8, tint?: u32, opacity?: f32 } = null
-    - Add op(s):
-        - Either:
-            - New op name "set_image" that updates any provided image fields, OR
-            - Support "set" with name: "image" and value containing JSON for the object.
-        - Prefer "set_image" since other domains already use "set_visual", "set_transform", etc.
-    - Ensure applying image fields calls store setters and markNodeChanged.
+- Example:
+    - `ui.set_image(id, { src = "path.png", tint = 0xffffffff, opacity = 0.8 })`
 
 4. Rendering (tint + opacity)
 

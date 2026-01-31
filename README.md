@@ -13,7 +13,6 @@ How to run the built-in examples:
 - Raylib
   - if you encounter error `No Wayland` also add flag `-Dlinux_display_backend=X11`
   - ```zig build raylib-standalone```
-  - ```zig build raylib-ontop```
   - ```zig build raylib-app```
 - Dx11
   - ```zig build dx11-standalone```
@@ -341,4 +340,3 @@ DVUI has varying support for different kinds of accessibility infrastructure.  C
   * add `-Daccesskit` to `zig build`
   * uses `Options.role` and `Options.label`
   * see [readme-accessibility](readme-accessibility.md) for more information
-

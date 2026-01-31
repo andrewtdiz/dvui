@@ -179,7 +179,7 @@ pub fn drawTriangleDirect(
     dvui.renderTriangles(tris, null) catch {};
 }
 
-pub fn drawTextDirect(rect: types.Rect, text: []const u8, visual: types.VisualProps, font: dvui.Font) void {
+pub fn drawTextDirect(rect: types.Rect, text: []const u8, visual: types.VisualProps, font: dvui.Font, style_scale: f32) void {
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
     if (trimmed.len == 0) return;
 
@@ -187,6 +187,16 @@ pub fn drawTextDirect(rect: types.Rect, text: []const u8, visual: types.VisualPr
         packedColorToDvui(tc, visual.opacity)
     else
         packedColorToDvui(.{ .value = 0xffffffff }, visual.opacity);
+
+    const outline_color = if (visual.text_outline_color) |tc|
+        packedColorToDvui(tc, visual.opacity)
+    else
+        null;
+
+    const outline_thickness = if (visual.text_outline_thickness) |v|
+        v * style_scale
+    else
+        null;
 
     const phys = rectToPhysical(rect);
     const rs = dvui.RectScale{
@@ -198,6 +208,8 @@ pub fn drawTextDirect(rect: types.Rect, text: []const u8, visual: types.VisualPr
         .text = trimmed,
         .rs = rs,
         .color = color,
+        .outline_color = outline_color,
+        .outline_thickness = outline_thickness,
     };
     dvui.renderText(text_opts) catch {};
 }

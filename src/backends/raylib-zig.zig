@@ -450,7 +450,7 @@ pub fn textureReadTarget(_: *RaylibBackend, texture: dvui.TextureTarget, pixels_
 
     const img = raylib.cdef.LoadImageFromTexture(t);
     defer raylib.unloadImage(img);
-    if (raylib.isImageValid(img)) return dvui.Backend.TextureError.TextureRead;
+    if (!raylib.isImageValid(img)) return dvui.Backend.TextureError.TextureRead;
 
     const imgData: [*]u8 = @ptrCast(img.data);
     for (0..@intCast(t.width * t.height * 4)) |i| {
