@@ -51,6 +51,8 @@ pub fn measureTextCached(store: *types.NodeStore, node: *types.SolidNode) types.
 pub fn measureNodeSize(store: *types.NodeStore, node: *types.SolidNode, parent_available: types.Size) types.Size {
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
+    const width_explicit = spec.width != null;
+    const height_explicit = spec.height != null;
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
     const local_scale = spec.scale orelse 1.0;
@@ -123,8 +125,12 @@ pub fn measureNodeSize(store: *types.NodeStore, node: *types.SolidNode, parent_a
         const border_right = sideValue(spec.border.right) * scale;
         const border_top = sideValue(spec.border.top) * scale;
         const border_bottom = sideValue(spec.border.bottom) * scale;
-        size.w += pad_left + pad_right + border_left + border_right;
-        size.h += pad_top + pad_bottom + border_top + border_bottom;
+        if (!width_explicit) {
+            size.w += pad_left + pad_right + border_left + border_right;
+        }
+        if (!height_explicit) {
+            size.h += pad_top + pad_bottom + border_top + border_bottom;
+        }
     }
     return size;
 }
