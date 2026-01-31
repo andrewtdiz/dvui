@@ -2,6 +2,7 @@ local function Create(tag)
   return function(spec)
     return {
       tag = tag,
+      id = spec.id,
       class = spec.class,
       props = spec.props,
       children = spec.children,
@@ -18,16 +19,19 @@ local function For(spec)
 end
 
 local menuOptions = { "Play Game", "Load Game", "Settings", "Quit" }
+local count = 0
+local rerender_requested = false
+local inc_button_id = 100
 
 local function UiFeatures()
   return Create("div"){
     class = "w-full h-full flex flex-col justify-center items-center bg-neutral-950",
     children = {
       Create("div"){
-        class = "w-[320px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-3xl p-10",
+        class = "w-[420px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-3xl p-10",
         children = {
           Create("h1"){
-            class = "text-4xl text-neutral-50 text-outline-black text-outline-[1px] font-game text-center text-nowrap",
+            class = "text-4xl text-neutral-50 text-outline-black text-outline-[1px] text-center text-nowrap",
             children = { "Main Menu" },
           },
           Create("div"){
@@ -39,11 +43,26 @@ local function UiFeatures()
               each = menuOptions,
               children = function(label)
                 return Create("button"){
-                  class = "w-full px-6 py-3 rounded-lg flex items-center justify-center text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] text-center font-game cursor-pointer transition duration",
+                  class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] cursor-pointer",
                   props = { type = "button" },
                   children = { label },
                 }
               end,
+            },
+          },
+          Create("div"){
+            class = "w-full flex flex-col gap-3 items-center",
+            children = {
+              Create("p"){
+                class = "text-lg text-neutral-300 text-outline-black text-outline-[1px]",
+                children = { string.format("Count: %d", count) },
+              },
+              Create("button"){
+                id = inc_button_id,
+                class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] cursor-pointer",
+                props = { type = "button" },
+                children = { "Increment" },
+              },
             },
           },
         },
@@ -129,7 +148,14 @@ local function mount(node, parent_id)
     return nil
   end
 
-  local id = alloc_id()
+  local id = node.id
+  if id == nil then
+    id = alloc_id()
+  else
+    if id >= next_id then
+      next_id = id + 1
+    end
+  end
   ui.create(tag, id, parent_id, nil)
   if node.class ~= nil then
     ui.set_class(id, node.class)
@@ -142,14 +168,27 @@ local function mount(node, parent_id)
   return id
 end
 
-function init()
+local function render()
   ui.reset()
   next_id = 1
   mount(UiFeatures(), nil)
 end
 
+function init()
+  rerender_requested = false
+  render()
+end
+
 function update(dt, input)
+  if rerender_requested then
+    rerender_requested = false
+    render()
+  end
 end
 
 function on_event(kind, id, detail)
+  if kind == "click" and id == inc_button_id then
+    count = count + 1
+    rerender_requested = true
+  end
 end
