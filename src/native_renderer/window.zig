@@ -13,6 +13,7 @@ const commands = @import("commands.zig");
 const lifecycle = @import("lifecycle.zig");
 const logMessage = lifecycle.logMessage;
 const types = @import("types.zig");
+const utils = @import("utils.zig");
 const Renderer = types.Renderer;
 
 // ============================================================
@@ -147,7 +148,18 @@ fn saveScreenshotPng(renderer: *Renderer, picture: *dvui.Picture) void {
 }
 
 fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.EventRing) void {
-    const has_handler = lifecycle.isLuaFuncPresent(lua_state, "on_event");
+    const has_handler_v2 = lifecycle.isLuaFuncPresent(lua_state, "on_event_v2");
+    const has_handler_v1 = lifecycle.isLuaFuncPresent(lua_state, "on_event");
+
+    const emit_legacy = blk: {
+        if (!has_handler_v1) break :blk false;
+        const globals_table = lua_state.globals();
+        const enabled = globals_table.get("DVUI_EMIT_LEGACY_EVENTS", bool) catch |err| switch (err) {
+            error.KeyNotFound => true,
+            else => true,
+        };
+        break :blk enabled;
+    };
 
     const header = ring.getHeader();
     if (header.read_head == header.write_head or header.capacity == 0) {
@@ -155,10 +167,12 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
         return;
     }
 
-    if (!has_handler) {
+    if (!has_handler_v2 and !emit_legacy) {
         ring.setReadHead(header.write_head);
         return;
     }
+
+    const globals = lua_state.globals();
 
     var cursor = header.read_head;
     while (cursor < header.write_head) : (cursor += 1) {
@@ -174,19 +188,50 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
             }
         }
 
-        const globals = lua_state.globals();
-        const call_result = globals.call("on_event", .{ @tagName(entry.kind), entry.node_id, detail }, void) catch |err| {
-            lifecycle.logLuaError(renderer, "on_event", err);
-            lifecycle.teardownLua(renderer);
-            return;
-        };
-        switch (call_result) {
-            .ok => {},
-            else => {
-                logMessage(renderer, 3, "lua on_event did not complete", .{});
+        const kind_int: u32 = @intFromEnum(entry.kind);
+
+        if (has_handler_v2) {
+            const call_result = globals.call("on_event_v2", .{ kind_int, entry.node_id, detail }, void) catch |err| {
+                lifecycle.logLuaError(renderer, "on_event_v2", err);
                 lifecycle.teardownLua(renderer);
                 return;
-            },
+            };
+            switch (call_result) {
+                .ok => {},
+                else => {
+                    logMessage(renderer, 3, "lua on_event_v2 did not complete", .{});
+                    lifecycle.teardownLua(renderer);
+                    return;
+                },
+            }
+        }
+
+        if (emit_legacy) {
+            var legacy_detail = detail;
+            var legacy_buf: [192]u8 = undefined;
+            if (entry.kind == .scroll and detail.len == @sizeOf(retained.events.ScrollPayload)) {
+                var payload: retained.events.ScrollPayload = undefined;
+                @memcpy(std.mem.asBytes(&payload), detail);
+                legacy_detail = std.fmt.bufPrint(
+                    &legacy_buf,
+                    "{{\"x\":{},\"y\":{},\"viewportW\":{},\"viewportH\":{},\"contentW\":{},\"contentH\":{}}}",
+                    .{ payload.x, payload.y, payload.viewport_w, payload.viewport_h, payload.content_w, payload.content_h },
+                ) catch "";
+            }
+
+            const call_result = globals.call("on_event", .{ @tagName(entry.kind), entry.node_id, legacy_detail }, void) catch |err| {
+                lifecycle.logLuaError(renderer, "on_event", err);
+                lifecycle.teardownLua(renderer);
+                return;
+            };
+            switch (call_result) {
+                .ok => {},
+                else => {
+                    logMessage(renderer, 3, "lua on_event did not complete", .{});
+                    lifecycle.teardownLua(renderer);
+                    return;
+                },
+            }
         }
     }
 
@@ -245,6 +290,15 @@ pub fn renderFrame(renderer: *Renderer) void {
                 picture_opt = dvui.Picture.start(dvui.windowRectPixels());
                 if (picture_opt == null) {
                     logMessage(renderer, 2, "screenshot not supported", .{});
+                }
+            }
+        }
+
+        const retained_event_ring_ptr = utils.retainedEventRing(renderer);
+        if (renderer.lua_ready) {
+            if (renderer.lua_state) |lua_state| {
+                if (retained_event_ring_ptr) |ring| {
+                    drainLuaEvents(renderer, lua_state, ring);
                 }
             }
         }
@@ -323,8 +377,7 @@ pub fn renderFrame(renderer: *Renderer) void {
             }
         }
 
-        const retained_event_ring_ptr = types.retainedEventRing(renderer);
-        const retained_store = types.retainedStore(renderer);
+        const retained_store = utils.retainedStore(renderer);
         const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true);
         if (!drew_retained) {
             commands.renderCommandsDvui(renderer, win);
@@ -335,14 +388,6 @@ pub fn renderFrame(renderer: *Renderer) void {
             picture.stop();
             saveScreenshotPng(renderer, picture);
             picture.deinit();
-        }
-
-        if (renderer.lua_ready) {
-            if (renderer.lua_state) |lua_state| {
-                if (retained_event_ring_ptr) |ring| {
-                    drainLuaEvents(renderer, lua_state, ring);
-                }
-            }
         }
 
         if (renderer.backend) |*backend| {

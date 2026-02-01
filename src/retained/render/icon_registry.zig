@@ -36,8 +36,8 @@ var icon_cache = IconCache.init(icon_allocator);
 const max_icon_bytes: usize = 16 * 1024 * 1024;
 const icon_search_roots = [_][]const u8{
     "examples/resources/assets",
-    "examples/resources/js/assets",
-    "examples/resources/js",
+    "examples/resources/assets",
+    "examples/resources",
     "examples",
     "src",
     "",

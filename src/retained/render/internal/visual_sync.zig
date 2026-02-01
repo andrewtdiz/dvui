@@ -1,22 +1,6 @@
-const std = @import("std");
 const dvui = @import("dvui");
 
 const types = @import("../../core/types.zig");
-const events = @import("../../events/mod.zig");
-const style_apply = @import("../../style/apply.zig");
-const tailwind = @import("../../style/tailwind.zig");
-const direct = @import("../direct.zig");
-const transitions = @import("../transitions.zig");
-const state = @import("state.zig");
-
-const applyVisualPropsToOptions = style_apply.applyVisualPropsToOptions;
-const applyClassSpecToVisual = style_apply.applyClassSpecToVisual;
-const dvuiColorToPacked = direct.dvuiColorToPacked;
-const transformedRect = direct.transformedRect;
-const rectContains = state.rectContains;
-const intersectRect = state.intersectRect;
-const ClipState = state.ClipState;
-const isPortalNode = state.isPortalNode;
 
 pub fn applyLayoutScaleToOptions(node: *const types.SolidNode, options: *dvui.Options) void {
     const natural = dvui.windowNaturalScale();
@@ -34,13 +18,6 @@ pub fn applyLayoutScaleToOptions(node: *const types.SolidNode, options: *dvui.Op
     if (options.text_outline_thickness) |v| options.text_outline_thickness = v * factor;
     const font = options.fontGet();
     options.font = font.resize(font.size * factor);
-}
-
-pub fn applyCursorHint(node: *const types.SolidNode, class_spec: *const tailwind.Spec) void {
-    if (!state.allowPointerInput()) return;
-    if (!node.hovered) return;
-    const cursor = class_spec.cursor orelse return;
-    dvui.cursorSet(cursor);
 }
 
 pub fn nodeHasAccessibilityProps(node: *const types.SolidNode) bool {
@@ -126,130 +103,6 @@ pub fn applyAccessibilityState(node: *const types.SolidNode, wd: *dvui.WidgetDat
             dvui.AccessKit.nodeSetModal(ak_node, flag);
         } else {
             dvui.AccessKit.nodeClearModal(ak_node);
-        }
-    }
-}
-
-pub fn syncVisualsFromClasses(
-    event_ring: ?*events.EventRing,
-    store: *types.NodeStore,
-    node: *types.SolidNode,
-    clip: ClipState,
-    mouse: dvui.Point.Physical,
-    pointer_allowed: bool,
-) void {
-    const class_spec_base = node.prepareClassSpec();
-    const has_hover = tailwind.hasHover(&class_spec_base);
-    const hover_affects_layout = tailwind.hasHoverLayout(&class_spec_base);
-    const has_mouseenter = node.hasListener("mouseenter");
-    const has_mouseleave = node.hasListener("mouseleave");
-    const prev_bg = node.visual.background;
-    const prev_hovered = node.hovered;
-
-    transitions.beginFrameForNode(node, &class_spec_base.transition);
-
-    var rect_opt: ?types.Rect = null;
-    if (node.layout.rect) |rect_base| {
-        rect_opt = transformedRect(node, rect_base) orelse rect_base;
-    }
-
-    const wants_hover = has_hover or has_mouseenter or has_mouseleave or class_spec_base.cursor != null;
-    var hovered = false;
-    if (pointer_allowed and wants_hover and !class_spec_base.hidden and node.kind == .element) {
-        if (rect_opt) |rect| {
-            if (rectContains(rect, mouse)) {
-                if (!clip.active or rectContains(clip.rect, mouse)) {
-                    hovered = true;
-                }
-            }
-        }
-    }
-
-    node.hovered = hovered;
-
-    if (class_spec_base.hidden) {
-        if (state.input_enabled_state) {
-            if (event_ring) |ring| {
-                if (prev_hovered and has_mouseleave) {
-                    _ = ring.push(.mouseleave, node.id, null);
-                }
-            }
-        }
-        if (prev_hovered and has_hover) {
-            node.invalidatePaint();
-        }
-        return;
-    }
-
-    if (state.input_enabled_state) {
-        if (event_ring) |ring| {
-            if (prev_hovered != hovered) {
-                if (hovered and has_mouseenter) {
-                    _ = ring.push(.mouseenter, node.id, null);
-                } else if (!hovered and has_mouseleave) {
-                    _ = ring.push(.mouseleave, node.id, null);
-                }
-            }
-        }
-    }
-
-    if (prev_hovered != hovered and hover_affects_layout) {
-        node.invalidateLayout();
-        store.markNodeChanged(node.id);
-        state.hover_layout_invalidated = true;
-    }
-
-    node.visual = node.visual_props;
-    var class_spec = class_spec_base;
-    tailwind.applyHover(&class_spec, hovered);
-
-    const class_scroll_enabled = class_spec.scroll_x or class_spec.scroll_y;
-    node.scroll.class_enabled = class_scroll_enabled;
-    node.scroll.class_x = class_spec.scroll_x;
-    node.scroll.class_y = class_spec.scroll_y;
-
-    applyClassSpecToVisual(node, &class_spec);
-    if (node.scroll.isEnabled()) {
-        node.visual.clip_children = true;
-    }
-    if (node.visual.background == null) {
-        if (class_spec.background) |bg| {
-            node.visual.background = dvuiColorToPacked(bg);
-        } else {
-            node.visual.background = .{ .value = 0x00000000 };
-        }
-    }
-    transitions.updateNode(node, &class_spec);
-    const bg_changed = blk: {
-        if (node.visual.background) |bg| {
-            if (prev_bg) |prev| break :blk bg.value != prev.value;
-            break :blk true;
-        } else {
-            break :blk prev_bg != null;
-        }
-    };
-    if (bg_changed or (prev_hovered != hovered and has_hover)) {
-        node.invalidatePaint();
-    }
-
-    var next_clip = clip;
-    if (node.visual.clip_children) {
-        const rect_for_clip = blk: {
-            if (node.layout.rect) |rect_base| {
-                break :blk transformedRect(node, rect_base) orelse rect_base;
-            }
-            break :blk rect_opt;
-        };
-        if (rect_for_clip) |rect| {
-            next_clip.active = true;
-            next_clip.rect = if (clip.active) intersectRect(clip.rect, rect) else rect;
-        }
-    }
-
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            if (state.render_layer == .base and isPortalNode(child)) continue;
-            syncVisualsFromClasses(event_ring, store, child, next_clip, mouse, pointer_allowed);
         }
     }
 }

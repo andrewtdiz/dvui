@@ -8,6 +8,7 @@ const measure = @import("measure.zig");
 pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area: types.Rect, spec: tailwind.Spec) void {
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
+    const lifo = dvui.currentWindow().lifo();
     const dir = spec.direction orelse .horizontal;
     const gap_main_unscaled = switch (dir) {
         .horizontal => spec.gap_col,
@@ -16,19 +17,19 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
     const gap_main = gap_main_unscaled * scale;
 
     var child_sizes: std.ArrayListUnmanaged(types.Size) = .{};
-    defer child_sizes.deinit(std.heap.page_allocator);
+    defer child_sizes.deinit(lifo);
 
     // Track which children participate in flex layout. Solid's universal renderer
     // inserts empty text nodes as control-flow anchors (e.g. <Show/> when false).
     // These should not count as flex items or gaps.
     var visible_mask: std.ArrayListUnmanaged(bool) = .{};
-    defer visible_mask.deinit(std.heap.page_allocator);
+    defer visible_mask.deinit(lifo);
     var visible_count: usize = 0;
 
     // Absolute-positioned children are laid out relative to the flex container
     // but do not participate in flex flow or gaps.
     var absolute_children: std.ArrayListUnmanaged(u32) = .{};
-    defer absolute_children.deinit(std.heap.page_allocator);
+    defer absolute_children.deinit(lifo);
 
     const available_size = types.Size{ .w = area.w, .h = area.h };
     var total_main: f32 = 0;
@@ -41,27 +42,27 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             const child_scale = scale * (child_spec.scale orelse 1.0);
             child.layout.layout_scale = child_scale;
             if (child_spec.hidden) {
-                child_sizes.append(std.heap.page_allocator, .{}) catch {};
-                visible_mask.append(std.heap.page_allocator, false) catch {};
+                child_sizes.append(lifo, .{}) catch {};
+                visible_mask.append(lifo, false) catch {};
                 continue;
             }
 
             if (child_spec.position != null and child_spec.position.? == .absolute) {
-                child_sizes.append(std.heap.page_allocator, .{}) catch {};
-                visible_mask.append(std.heap.page_allocator, false) catch {};
-                absolute_children.append(std.heap.page_allocator, child_id) catch {};
+                child_sizes.append(lifo, .{}) catch {};
+                visible_mask.append(lifo, false) catch {};
+                absolute_children.append(lifo, child_id) catch {};
                 continue;
             }
 
             const child_size = measure.measureNodeSize(store, child, available_size);
-            child_sizes.append(std.heap.page_allocator, child_size) catch {};
+            child_sizes.append(lifo, child_size) catch {};
 
             const is_empty_text = child.kind == .text and child_size.w == 0 and child_size.h == 0;
             if (is_empty_text) {
-                visible_mask.append(std.heap.page_allocator, false) catch {};
+                visible_mask.append(lifo, false) catch {};
                 continue;
             }
-            visible_mask.append(std.heap.page_allocator, true) catch {};
+            visible_mask.append(lifo, true) catch {};
             visible_count += 1;
 
             const main = switch (dir) {
@@ -75,8 +76,8 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             total_main += main;
             if (cross > max_cross) max_cross = cross;
         } else {
-            child_sizes.append(std.heap.page_allocator, .{}) catch {};
-            visible_mask.append(std.heap.page_allocator, false) catch {};
+            child_sizes.append(lifo, .{}) catch {};
+            visible_mask.append(lifo, false) catch {};
         }
     }
 

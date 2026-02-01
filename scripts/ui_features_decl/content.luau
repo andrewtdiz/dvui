@@ -2,8 +2,13 @@ local dsl = require("scripts/ui_features_decl/dsl")
 local reactivity = require("scripts/ui_features_decl/reactivity")
 local animation = require("scripts/ui_features_decl/animation")
 
-local Create = dsl.Create
+local Tag = dsl.Tag
 local For = dsl.For
+
+local div = Tag.div
+local h1 = Tag.h1
+local p = Tag.p
+local button = Tag.button
 
 local source = reactivity.source
 local selected_label = source("None")
@@ -15,71 +20,98 @@ end
 
 local function UiFeatures()
   local menu_scale_target = source(1)
-  local menu_scale = animation.spring(menu_scale_target, 0.4, 1)
+  local menu_scale = animation.spring(menu_scale_target, 0.2, 1)
 
-  return Create("div"){
+  return div({
     class = "w-full h-full flex flex-col justify-center items-center bg-neutral-950",
-    children = {
-      Create("div"){
-        class = "w-[320px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-xl p-6",
-        scale = menu_scale,
-        onMouseLeave = function()
-            menu_scale_target(1)
-        end,
-        children = {
-          Create("h1"){
-            class = "text-4xl text-neutral-50 text-center text-nowrap",
-            props = {
-              visual = {
-                fontRenderMode = "msdf",
-                textOutlineColor = 0x000000ff,
-                textOutlineThickness = 1,
-              },
-            },
-            children = { "Main Menu" },
-          },
-          Create("div"){
-            class = "w-full h-px bg-neutral-700 opacity-60",
-          },
-          Create("p"){
-            class = "text-sm text-neutral-300 text-center",
-            children = {
-              function()
-                return string.format("Selected: %s", selected_label())
-              end,
-            },
-          },
-          Create("div"){
-            class = "w-full h-[160px] flex flex-col gap-1 items-center overflow-y-scroll",
-            children = For{
-              each = function()
-                return menuOptions
-              end,
-              key = function(label)
-                return label
-              end,
-              children = function(label)
-                return Create("button"){
-                  class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 cursor-pointer",
-                  props = {
-                    visual = {
-                      fontRenderMode = "msdf",
-                      textOutlineColor = 0x000000ff,
-                      textOutlineThickness = 1,
-                    },
-                  },
-                  onMouseEnter = function()
-                    selected_label(label)
-                    menu_scale_target(1.13)
-                  end,
-                  children = { label },
-                }
-              end,
-            },
+  }){
+    div({
+      class = "w-[220px] flex flex-col absolute top-[250px] left-[250px] anchor-center items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-xl p-6",
+      scale = menu_scale,
+      onMouseLeave = function()
+        menu_scale_target(1)
+      end,
+    }){
+      -- h1({
+      --   class = "text-4xl text-neutral-50 text-center text-nowrap",
+      --   props = {
+      --     visual = {
+      --       fontRenderMode = "msdf",
+      --       textOutlineColor = 0x000000ff,
+      --       textOutlineThickness = 1,
+      --     },
+      --   },
+      -- }){ "Main Menu" },
+      -- div({
+      --   class = "w-full h-px bg-neutral-700 opacity-60",
+      -- })(),
+      -- p({
+      --   class = "text-sm text-neutral-300 text-center",
+      -- }){
+      --   function()
+      --     return string.format("Selected: %s", selected_label())
+      --   end,
+      -- },
+      -- div({
+      --   class = "w-full h-[160px] flex flex-col gap-1 items-center overflow-y-scroll",
+      -- }){
+      --   For{
+      --     each = function()
+      --       return menuOptions
+      --     end,
+      --     key = function(label)
+      --       return label
+      --     end,
+      --     children = function(label)
+      --       return button({
+      --         class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 cursor-pointer",
+      --         props = {
+      --           visual = {
+      --             fontRenderMode = "msdf",
+      --             textOutlineColor = 0x000000ff,
+      --             textOutlineThickness = 1,
+      --           },
+      --         },
+      --         onMouseEnter = function()
+      --           selected_label(label)
+      --           menu_scale_target(1.13)
+      --         end,
+      --       }){ label }
+      --     end,
+      --   },
+      -- },
+      --
+      button({
+        class = "w-full h-12 px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 bg-neutral-700 hover:bg-neutral-800 cursor-pointer",
+        props = {
+          visual = {
+            fontRenderMode = "msdf",
+            textOutlineColor = 0x000000ff,
+            textOutlineThickness = 1,
           },
         },
+        onMouseEnter = function()
+          menu_scale_target(0.85)
+        end,
+      }){
+        "Here I am"
       },
-    },
+      button({
+        class = "w-full h-12 px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 bg-neutral-700 hover:bg-neutral-800 cursor-pointer",
+        props = {
+          visual = {
+            fontRenderMode = "msdf",
+            textOutlineColor = 0x000000ff,
+            textOutlineThickness = 1,
+          },
+        },
+        onMouseEnter = function()
+          menu_scale_target(1.13)
+        end,
+      }){
+        "Here I am"
+      },
+    }
   }
 end
 

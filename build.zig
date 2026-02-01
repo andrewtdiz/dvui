@@ -83,7 +83,7 @@ pub fn build(b: *Build) !void {
     });
 
     const native_module = b.createModule(.{
-        .root_source_file = b.path("src/integrations/native_renderer/mod.zig"),
+        .root_source_file = b.path("src/native_renderer/mod.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -108,7 +108,7 @@ pub fn build(b: *Build) !void {
     native_module.addImport("retained", retained_mod);
 
     const luau_ui_mod = b.createModule(.{
-        .root_source_file = b.path("src/integrations/luau_ui/mod.zig"),
+        .root_source_file = b.path("src/native_renderer/luau_ui.zig"),
         .target = target,
         .optimize = optimize,
     });

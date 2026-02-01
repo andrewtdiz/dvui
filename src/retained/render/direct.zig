@@ -22,6 +22,9 @@ pub fn rectToPhysical(rect: types.Rect) dvui.Rect.Physical {
 pub fn transformedRect(node: *const types.SolidNode, base: ?types.Rect) ?types.Rect {
     const rect = base orelse return null;
     const t = transitions.effectiveTransform(node);
+    if (t.rotation == 0 and t.translation[0] == 0 and t.translation[1] == 0 and t.scale[0] == 1 and t.scale[1] == 1) {
+        return rect;
+    }
     const ax = rect.x + rect.w * t.anchor[0];
     const ay = rect.y + rect.h * t.anchor[1];
     const cos_r = std.math.cos(t.rotation);

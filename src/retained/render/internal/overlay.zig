@@ -1,5 +1,4 @@
 const std = @import("std");
-const dvui = @import("dvui");
 
 const types = @import("../../core/types.zig");
 const events = @import("../../events/mod.zig");
@@ -8,45 +7,36 @@ const direct = @import("../direct.zig");
 const paint_cache = @import("../cache.zig");
 const renderers = @import("renderers.zig");
 const state = @import("state.zig");
-const visual_sync = @import("visual_sync.zig");
+const runtime_mod = @import("runtime.zig");
 
 const isPortalNode = state.isPortalNode;
 const appendRect = state.appendRect;
 const transformedRect = direct.transformedRect;
 const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 
-pub fn resetPortalCache() void {
-    if (state.portal_cache_allocator) |alloc| {
-        state.cached_portal_ids.deinit(alloc);
-    }
-    state.cached_portal_ids = .empty;
-    state.portal_cache_allocator = null;
-    state.portal_cache_version = 0;
-    state.overlay_cache_version = 0;
-    state.cached_overlay_state = .{};
-}
+const RenderRuntime = runtime_mod.RenderRuntime;
 
-pub fn ensurePortalCache(store: *types.NodeStore, root: *types.SolidNode) []const u32 {
-    if (state.portal_cache_allocator == null) {
-        state.portal_cache_allocator = store.allocator;
+pub fn ensurePortalCache(runtime: *RenderRuntime, store: *types.NodeStore, root: *types.SolidNode) []const u32 {
+    if (runtime.portal_cache_allocator == null) {
+        runtime.portal_cache_allocator = store.allocator;
     }
-    if (state.portal_cache_version != root.subtree_version) {
-        state.cached_portal_ids.clearRetainingCapacity();
-        if (state.portal_cache_allocator) |alloc| {
-            collectPortalNodes(alloc, store, root, &state.cached_portal_ids);
+    if (runtime.portal_cache_version != root.subtree_version) {
+        runtime.cached_portal_ids.clearRetainingCapacity();
+        if (runtime.portal_cache_allocator) |alloc| {
+            collectPortalNodes(alloc, store, root, &runtime.cached_portal_ids);
         }
-        state.portal_cache_version = root.subtree_version;
-        state.overlay_cache_version = 0;
+        runtime.portal_cache_version = root.subtree_version;
+        runtime.overlay_cache_version = 0;
     }
-    return state.cached_portal_ids.items;
+    return runtime.cached_portal_ids.items;
 }
 
-pub fn ensureOverlayState(store: *types.NodeStore, portal_ids: []const u32, version: u64) state.OverlayState {
-    if (state.overlay_cache_version != version) {
-        state.cached_overlay_state = computeOverlayState(store, portal_ids);
-        state.overlay_cache_version = version;
+pub fn ensureOverlayState(runtime: *RenderRuntime, store: *types.NodeStore, portal_ids: []const u32, version: u64) state.OverlayState {
+    if (runtime.overlay_cache_version != version) {
+        runtime.cached_overlay_state = computeOverlayState(store, portal_ids);
+        runtime.overlay_cache_version = version;
     }
-    return state.cached_overlay_state;
+    return runtime.cached_overlay_state;
 }
 
 fn collectPortalNodes(
@@ -118,34 +108,8 @@ fn computeOverlayState(store: *types.NodeStore, portal_ids: []const u32) state.O
     return state_value;
 }
 
-pub fn syncVisualLayer(
-    event_ring: ?*events.EventRing,
-    store: *types.NodeStore,
-    root: *types.SolidNode,
-    portal_ids: []const u32,
-    layer: state.RenderLayer,
-    mouse: dvui.Point.Physical,
-) void {
-    state.render_layer = layer;
-    const pointer_allowed = state.allowPointerInput();
-    switch (layer) {
-        .overlay => {
-            for (portal_ids) |portal_id| {
-                const portal = store.node(portal_id) orelse continue;
-                visual_sync.syncVisualsFromClasses(event_ring, store, portal, .{}, mouse, pointer_allowed);
-            }
-        },
-        .base => {
-            for (root.children.items) |child_id| {
-                const child = store.node(child_id) orelse continue;
-                if (isPortalNode(child)) continue;
-                visual_sync.syncVisualsFromClasses(event_ring, store, child, .{}, mouse, pointer_allowed);
-            }
-        },
-    }
-}
-
 pub fn renderPortalNodesOrdered(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     portal_ids: []const u32,
@@ -160,7 +124,9 @@ pub fn renderPortalNodesOrdered(
     var any_z = false;
     for (portal_ids, 0..) |portal_id, order_index| {
         const portal = store.node(portal_id) orelse continue;
-        const z_index = portal.visual.z_index;
+        var spec = portal.prepareClassSpec();
+        tailwind.applyHover(&spec, portal.hovered);
+        const z_index = spec.z_index;
         if (z_index != 0) {
             any_z = true;
         }
@@ -178,6 +144,6 @@ pub fn renderPortalNodesOrdered(
     }
 
     for (ordered.items) |entry| {
-        renderers.renderNode(event_ring, store, entry.id, allocator, tracker, ctx);
+        renderers.renderNode(runtime, event_ring, store, entry.id, allocator, tracker, ctx);
     }
 }

@@ -14,6 +14,8 @@ local ids = {
   inputEcho = 13,
 }
 
+DVUI_EMIT_LEGACY_EVENTS = false
+
 local ticks = 0
 local count = 0
 local last_down = false
@@ -52,7 +54,7 @@ local function build_ui()
   ui.create("button", ids.button, ids.header, nil)
   ui.set_class(ids.button, "px-6 py-3 bg-emerald-500 rounded-lg text-slate-900")
   ui.set_visual(ids.button, { background = 0x10b981ff, cornerRadius = 10 })
-  ui.listen(ids.button, "click")
+  ui.listen_kind(ids.button, ui.EventKind.click)
 
   ui.create("text", ids.buttonLabel, ids.button, nil)
   ui.set_text(ids.buttonLabel, "Click Me")
@@ -63,7 +65,7 @@ local function build_ui()
 
   ui.create("input", ids.inputField, ids.inputRow, nil)
   ui.set_class(ids.inputField, "w-72 h-10 px-4 rounded-lg bg-slate-700 border border-slate-600 text-base text-slate-50")
-  ui.listen(ids.inputField, "input")
+  ui.listen_kind(ids.inputField, ui.EventKind.input)
 
   ui.create("text", ids.inputEcho, ids.inputRow, nil)
   ui.set_text(ids.inputEcho, "Input: ")
@@ -92,12 +94,12 @@ function update(dt, input)
   last_down = input.mouseDown
 end
 
-function on_event(kind, id, detail)
-  if kind == "click" and id == ids.button then
+function on_event_v2(kind, id, payload)
+  if kind == ui.EventKind.click and id == ids.button then
     count = count + 1
     ui.set_text(ids.counter, string.format("Clicks: %d", count))
   end
-  if kind == "input" and id == ids.inputField then
-    ui.set_text(ids.inputEcho, string.format("Input: %s", detail))
+  if kind == ui.EventKind.input and id == ids.inputField then
+    ui.set_text(ids.inputEcho, string.format("Input: %s", payload))
   end
 end

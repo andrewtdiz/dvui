@@ -2,19 +2,18 @@ const std = @import("std");
 const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
 const webgpu = @import("webgpu");
-const retained = @import("retained");
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
 
 // ============================================================
-// FFI Callback Types
+// Callback Types
 // ============================================================
 
 pub const LogFn = fn (level: u8, msg_ptr: [*]const u8, msg_len: usize) callconv(.c) void;
 pub const EventFn = fn (name_ptr: [*]const u8, name_len: usize, data_ptr: [*]const u8, data_len: usize) callconv(.c) void;
 
 // ============================================================
-// Command Header (FFI struct)
+// Command Header
 // ============================================================
 
 pub const CommandHeader = extern struct {
@@ -79,26 +78,3 @@ pub const frame_event_interval: u64 = 6; // ~10fps when running at 60fps
 // Helper Functions
 // ============================================================
 
-pub fn asOpaquePtr(comptime T: type, raw: ?*anyopaque) ?*T {
-    if (raw) |ptr| {
-        return @ptrCast(@alignCast(ptr));
-    }
-    return null;
-}
-
-pub fn retainedStore(renderer: *Renderer) ?*retained.NodeStore {
-    return asOpaquePtr(retained.NodeStore, renderer.retained_store_ptr);
-}
-
-pub fn retainedEventRing(renderer: *Renderer) ?*retained.EventRing {
-    return asOpaquePtr(retained.EventRing, renderer.retained_event_ring_ptr);
-}
-
-pub fn colorFromPacked(value: u32) dvui.Color {
-    return .{
-        .r = @intCast((value >> 24) & 0xff),
-        .g = @intCast((value >> 16) & 0xff),
-        .b = @intCast((value >> 8) & 0xff),
-        .a = @intCast(value & 0xff),
-    };
-}

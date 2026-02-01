@@ -6,7 +6,7 @@ const measure = @import("measure.zig");
 const transitions = @import("../render/transitions.zig");
 const tailwind = @import("../style/tailwind.zig");
 
-const use_yoga_layout = true;
+const use_yoga_layout = false;
 
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
@@ -40,9 +40,6 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     const root = store.node(0) orelse return;
 
-    const missing_layout = hasMissingLayout(store, root);
-    const has_layout_animation = hasActiveLayoutAnimations(store, root);
-
     // If screen size changed, invalidate the entire layout tree so descendants recompute.
     const size_changed = last_screen_size.w != screen_w or last_screen_size.h != screen_h;
     const scale_changed = last_natural_scale != natural_scale;
@@ -53,9 +50,14 @@ pub fn updateLayouts(store: *types.NodeStore) void {
         last_natural_scale = natural_scale;
     }
 
-    // Skip work when nothing is dirty and the screen size is stable.
-    if (!size_changed and !scale_changed and !root.hasDirtySubtree() and !missing_layout and !has_layout_animation) {
-        return;
+    const tree_dirty = root.hasDirtySubtree();
+    const layout_dirty = root.needsLayoutUpdate();
+
+    if (!size_changed and !scale_changed and !layout_dirty) {
+        if (tree_dirty) return;
+        const missing_layout = hasMissingLayout(store, root);
+        const has_layout_animation = hasActiveLayoutAnimations(store, root);
+        if (!missing_layout and !has_layout_animation) return;
     }
 
     layout_updated = true;

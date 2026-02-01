@@ -10,6 +10,7 @@ const measure = @import("measure.zig");
 pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area: types.Rect, spec: tailwind.Spec) void {
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
+    const lifo = dvui.currentWindow().lifo();
     const root = yoga.Node.new();
     defer root.freeRecursive();
 
@@ -27,10 +28,10 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
     if (gap_row != 0) root.setGap(.Row, gap_row);
 
     var flex_child_ids: std.ArrayListUnmanaged(u32) = .{};
-    defer flex_child_ids.deinit(std.heap.page_allocator);
+    defer flex_child_ids.deinit(lifo);
 
     var absolute_child_ids: std.ArrayListUnmanaged(u32) = .{};
-    defer absolute_child_ids.deinit(std.heap.page_allocator);
+    defer absolute_child_ids.deinit(lifo);
 
     const available = types.Size{ .w = area.w, .h = area.h };
 
@@ -46,7 +47,7 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
         }
 
         if (child_spec.position != null and child_spec.position.? == .absolute) {
-            absolute_child_ids.append(std.heap.page_allocator, child_id) catch {};
+            absolute_child_ids.append(lifo, child_id) catch {};
             continue;
         }
 
@@ -61,7 +62,7 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
         yoga_child.setWidth(size.w);
         yoga_child.setHeight(size.h);
         root.insertChild(yoga_child, root.getChildCount());
-        flex_child_ids.append(std.heap.page_allocator, child_id) catch {};
+        flex_child_ids.append(lifo, child_id) catch {};
     }
 
     root.calculateLayout(area.w, area.h, null);

@@ -212,11 +212,11 @@ fn dispatchFocusEvent(event_ring: ?*events.EventRing, node: *types.SolidNode, fo
     if (event_ring == null) return;
     if (std.mem.eql(u8, node.tag, "input")) return;
     if (focused) {
-        if (node.hasListener("focus")) {
+        if (node.hasListenerKind(.focus)) {
             _ = event_ring.?.pushFocus(node.id);
         }
     } else {
-        if (node.hasListener("blur")) {
+        if (node.hasListenerKind(.blur)) {
             _ = event_ring.?.pushBlur(node.id);
         }
     }
@@ -277,7 +277,7 @@ fn handleKeyEvents(event_ring: ?*events.EventRing, store: *types.NodeStore, stat
         if (event_ring == null) continue;
         if (key_event.action == .down or key_event.action == .repeat) {
             if (store.node(entry.node_id)) |node| {
-                if (node.hasListener("keydown")) {
+                if (node.hasListenerKind(.keydown)) {
                     const payload = @tagName(key_event.code);
                     _ = event_ring.?.push(.keydown, entry.node_id, payload);
                     event.handle(@src(), entry.widget_data);
@@ -285,7 +285,7 @@ fn handleKeyEvents(event_ring: ?*events.EventRing, store: *types.NodeStore, stat
             }
         } else if (key_event.action == .up) {
             if (store.node(entry.node_id)) |node| {
-                if (node.hasListener("keyup")) {
+                if (node.hasListenerKind(.keyup)) {
                     const payload = @tagName(key_event.code);
                     _ = event_ring.?.push(.keyup, entry.node_id, payload);
                     event.handle(@src(), entry.widget_data);

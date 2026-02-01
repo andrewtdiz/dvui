@@ -17,7 +17,9 @@ const focus = @import("../../events/focus.zig");
 
 const interaction = @import("interaction.zig");
 const state = @import("state.zig");
+const derive = @import("derive.zig");
 const visual_sync = @import("visual_sync.zig");
+const runtime_mod = @import("runtime.zig");
 
 const applyVisualToOptions = style_apply.applyVisualToOptions;
 const applyVisualPropsToOptions = style_apply.applyVisualPropsToOptions;
@@ -40,14 +42,12 @@ const scrollContentId = state.scrollContentId;
 const isPortalNode = state.isPortalNode;
 const sortOrderedNodes = state.sortOrderedNodes;
 const OrderedNode = state.OrderedNode;
-const allowFocusRegistration = state.allowFocusRegistration;
 const RenderContext = state.RenderContext;
 const intersectRect = state.intersectRect;
 const contextPoint = state.contextPoint;
 const contextRect = state.contextRect;
 
 const applyLayoutScaleToOptions = visual_sync.applyLayoutScaleToOptions;
-const applyCursorHint = visual_sync.applyCursorHint;
 const nodeHasAccessibilityProps = visual_sync.nodeHasAccessibilityProps;
 const applyAccessibilityOptions = visual_sync.applyAccessibilityOptions;
 const applyAccessibilityState = visual_sync.applyAccessibilityState;
@@ -57,7 +57,13 @@ const clickedTopmost = interaction.clickedTopmost;
 const handleScrollInput = interaction.handleScrollInput;
 const renderScrollBars = interaction.renderScrollBars;
 
-const log = std.log.scoped(.solid_bridge);
+const log = std.log.scoped(.retained);
+
+const RenderRuntime = runtime_mod.RenderRuntime;
+
+fn rectsIntersect(a: types.Rect, b: types.Rect) bool {
+    return !(a.x + a.w < b.x or b.x + b.w < a.x or a.y + a.h < b.y or b.y + b.h < a.y);
+}
 
 fn applyBorderColorToOptions(node: *const types.SolidNode, visual: types.VisualProps, options: *dvui.Options) void {
     if (!node.transition_state.enabled) return;
@@ -127,6 +133,7 @@ fn ctxForChildren(parent_ctx: RenderContext, node: *types.SolidNode, use_origin:
 }
 
 pub fn renderNode(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -135,26 +142,36 @@ pub fn renderNode(
     ctx: RenderContext,
 ) void {
     const node = store.node(node_id) orelse return;
-    if (state.render_layer == .base and isPortalNode(node)) {
+    if (ctx.clip) |clip| {
+        if (node.layout.rect) |rect_base| {
+            const rect = contextRect(ctx, rect_base);
+            const bounds = transformedRect(node, rect) orelse rect;
+            if (!rectsIntersect(bounds, clip)) {
+                return;
+            }
+        }
+    }
+    if (runtime.render_layer == .base and isPortalNode(node)) {
         return;
     }
     switch (node.kind) {
         .root => {
             const child_ctx = ctxForChildren(ctx, node, false);
-            renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
+            renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
             node.markRendered();
         },
         .slot => {
             const child_ctx = ctxForChildren(ctx, node, false);
-            renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
+            renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
             node.markRendered();
         },
         .text => renderText(store, node, ctx),
-        .element => renderElement(event_ring, store, node_id, node, allocator, tracker, ctx),
+        .element => renderElement(runtime, event_ring, store, node_id, node, allocator, tracker, ctx),
     }
 }
 
 fn renderElement(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -163,8 +180,7 @@ fn renderElement(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    var class_spec = node.prepareClassSpec();
-    tailwind.applyHover(&class_spec, node.hovered);
+    var class_spec = derive.apply(node);
 
     // Skip rendering if element has 'hidden' class
     if (class_spec.hidden) {
@@ -172,28 +188,23 @@ fn renderElement(
         return;
     }
 
-    if (state.input_enabled_state) {
-        applyCursorHint(node, &class_spec);
+    if (class_spec.transition.enabled or node.transition_state.enabled) {
+        transitions.updateNode(node, &class_spec);
     }
-    applyClassSpecToVisual(node, &class_spec);
-    // DVUI path fallback: if class provided a background but visual is still null, copy it.
-    if (node.visual.background == null) {
-        if (class_spec.background) |bg| {
-            node.visual.background = dvuiColorToPacked(bg);
-        }
-    }
-    if (!state.logged_render_state) {
-        state.logged_render_state = true;
+
+    if (!runtime.logged_render_state) {
+        runtime.logged_render_state = true;
     }
 
     if (node.isInteractive() or nodeHasAccessibilityProps(node)) {
-        renderInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        renderInteractiveElement(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
     } else {
-        renderNonInteractiveElement(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        renderNonInteractiveElement(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
     }
 }
 
 fn renderElementBody(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -204,74 +215,75 @@ fn renderElementBody(
     ctx: RenderContext,
 ) void {
     if (node.scroll.isEnabled()) {
-        renderScrollFrame(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        renderScrollFrame(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
         return;
     }
     if (std.mem.eql(u8, node.tag, "div")) {
-        renderContainer(event_ring, store, node, allocator, class_spec, tracker, ctx);
+        renderContainer(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "button")) {
-        renderButton(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        renderButton(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "input")) {
-        renderInput(event_ring, store, node_id, node, class_spec, ctx);
+        renderInput(runtime, event_ring, store, node_id, node, class_spec, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "slider")) {
-        renderSlider(event_ring, store, node_id, node, class_spec, ctx);
+        renderSlider(runtime, event_ring, store, node_id, node, class_spec, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "image")) {
-        renderImage(event_ring, store, node_id, node, class_spec, allocator, tracker, ctx);
+        renderImage(runtime, event_ring, store, node_id, node, class_spec, allocator, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "icon")) {
-        renderIcon(event_ring, store, node_id, node, class_spec, allocator, tracker, ctx);
+        renderIcon(runtime, event_ring, store, node_id, node, class_spec, allocator, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "gizmo")) {
-        renderGizmo(event_ring, store, node_id, node, class_spec);
+        renderGizmo(runtime, event_ring, store, node_id, node, class_spec);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "triangle")) {
-        renderTriangle(event_ring, store, node, allocator, class_spec, tracker, ctx);
+        renderTriangle(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "p")) {
-        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, null, tracker, ctx);
+        renderParagraph(runtime, event_ring, store, node_id, node, allocator, class_spec, null, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h1")) {
-        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title, tracker, ctx);
+        renderParagraph(runtime, event_ring, store, node_id, node, allocator, class_spec, .title, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h2")) {
-        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title_1, tracker, ctx);
+        renderParagraph(runtime, event_ring, store, node_id, node, allocator, class_spec, .title_1, tracker, ctx);
         node.markRendered();
         return;
     }
     if (std.mem.eql(u8, node.tag, "h3")) {
-        renderParagraph(event_ring, store, node_id, node, allocator, class_spec, .title_2, tracker, ctx);
+        renderParagraph(runtime, event_ring, store, node_id, node, allocator, class_spec, .title_2, tracker, ctx);
         node.markRendered();
         return;
     }
-    renderGeneric(event_ring, store, node, allocator, tracker, ctx);
+    renderGeneric(runtime, event_ring, store, node, allocator, tracker, ctx);
     node.markRendered();
 }
 
 fn renderScrollFrame(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -303,6 +315,7 @@ fn renderScrollFrame(
     }
     const rect = rect_opt orelse return;
     const base_rect = contextRect(ctx, rect);
+    node.visual.clip_children = true;
 
     if (class_spec.background) |bg| {
         if (node.visual.background == null) {
@@ -335,12 +348,12 @@ fn renderScrollFrame(
     const prev_x = node.scroll.offset_x;
     const prev_y = node.scroll.offset_y;
 
-    _ = handleScrollInput(node, hit_rect, &scroll_info, scroll_id);
+    _ = handleScrollInput(runtime, node, hit_rect, &scroll_info, scroll_id);
 
     const child_ctx = ctxForChildren(ctx, node, false);
-    renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
 
-    _ = renderScrollBars(node, base_rect, &scroll_info, scroll_id, ctx.scale[0]);
+    _ = renderScrollBars(runtime, node, base_rect, &scroll_info, scroll_id, ctx.scale[0]);
 
     const x_changed = allow_h and scroll_info.viewport.x != prev_x * ctx.scale[0];
     const y_changed = allow_v and scroll_info.viewport.y != prev_y * ctx.scale[1];
@@ -351,21 +364,16 @@ fn renderScrollFrame(
         store.markNodeChanged(node.id);
 
         if (event_ring) |ring| {
-            if (node.hasListener("scroll")) {
-                var detail_buffer: [192]u8 = undefined;
-                const detail: []const u8 = std.fmt.bufPrint(
-                    &detail_buffer,
-                    "{{\"x\":{},\"y\":{},\"viewportW\":{},\"viewportH\":{},\"contentW\":{},\"contentH\":{}}}",
-                    .{
-                        scroll_info.viewport.x,
-                        scroll_info.viewport.y,
-                        scroll_info.viewport.w,
-                        scroll_info.viewport.h,
-                        scroll_info.virtual_size.w,
-                        scroll_info.virtual_size.h,
-                    },
-                ) catch "";
-                _ = ring.pushScroll(node.id, detail);
+            if (node.hasListenerKind(.scroll)) {
+                const payload = events.ScrollPayload{
+                    .x = scroll_info.viewport.x,
+                    .y = scroll_info.viewport.y,
+                    .viewport_w = scroll_info.viewport.w,
+                    .viewport_h = scroll_info.viewport.h,
+                    .content_w = scroll_info.virtual_size.w,
+                    .content_h = scroll_info.virtual_size.h,
+                };
+                _ = ring.pushScroll(node.id, std.mem.asBytes(&payload));
             }
         }
     }
@@ -374,6 +382,7 @@ fn renderScrollFrame(
 }
 
 fn renderParagraphDirect(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -397,8 +406,8 @@ fn renderParagraphDirect(
     if (text_buffer.items.len > 0) {
         const trimmed = std.mem.trim(u8, text_buffer.items, " \n\r\t");
         if (trimmed.len > 0) {
-            if (state.paragraph_log_count < 10) {
-                state.paragraph_log_count += 1;
+            if (runtime.paragraph_log_count < 10) {
+                runtime.paragraph_log_count += 1;
             }
             // Text rendering honors scale/translation via the transformed bounds; rotation is handled for backgrounds only.
             // Apply Tailwind padding and horizontal alignment manually for the direct draw path.
@@ -464,11 +473,12 @@ fn renderParagraphDirect(
 
     // Paragraph already draws its text nodes; render non-text children (z-index ordered).
     const child_ctx = ctxForChildren(ctx, node, false);
-    renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, true);
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, true);
     node.markRendered();
 }
 
 fn renderInteractiveElement(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -480,10 +490,11 @@ fn renderInteractiveElement(
 ) void {
     // Placeholder: today interactive and non-interactive elements use the same DVUI path.
     // This wrapper marks the split point for routing to DVUI widgets to preserve focus/input.
-    renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+    renderElementBody(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
 }
 
 fn renderNonInteractiveElement(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -495,10 +506,11 @@ fn renderNonInteractiveElement(
 ) void {
     // Always draw non-interactive elements directly so backgrounds are guaranteed,
     // then recurse into children. This bypasses DVUI background handling.
-    renderNonInteractiveDirect(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+    renderNonInteractiveDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
 }
 
 fn renderContainer(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -532,6 +544,8 @@ fn renderContainer(
     style_apply.resolveFont(&class_spec, &options);
     applyLayoutScaleToOptions(node, &options);
     applyContextScaleToOptions(ctx, &options);
+    options.background = false;
+    options.border = dvui.Rect{};
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
@@ -546,20 +560,21 @@ fn renderContainer(
     defer box.deinit();
     applyAccessibilityState(node, box.data());
 
-    if (tab_info.focusable and allowFocusRegistration()) {
+    if (tab_info.focusable and runtime.allowFocusRegistration()) {
         dvui.tabIndexSet(box.data().id, tab_info.tab_index);
         focus.registerFocusable(store, node, box.data());
     }
 
     const child_ctx = ctxForChildren(ctx, node, true);
-    renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
-    if (state.input_enabled_state) {
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
+    if (runtime.input_enabled_state) {
         drag_drop.handleDiv(event_ring, store, node, box.data());
     }
     node.markRendered();
 }
 
 fn renderFlexChildren(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -596,15 +611,16 @@ fn renderFlexChildren(
                 .scale = ctx.scale,
                 .offset = ctx.offset,
             };
-            renderNode(event_ring, store, child_id, allocator, tracker, spacer_ctx);
+            renderNode(runtime, event_ring, store, child_id, allocator, tracker, spacer_ctx);
         } else {
-            renderNode(event_ring, store, child_id, allocator, tracker, ctx);
+            renderNode(runtime, event_ring, store, child_id, allocator, tracker, ctx);
         }
         child_index += 1;
     }
 }
 
 fn renderGeneric(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -613,10 +629,11 @@ fn renderGeneric(
     ctx: RenderContext,
 ) void {
     const child_ctx = ctxForChildren(ctx, node, false);
-    renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
 }
 
 fn renderNonInteractiveDirect(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -648,7 +665,7 @@ fn renderNonInteractiveDirect(
     }
 
     const rect = rect_opt orelse {
-        renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        renderElementBody(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
         return;
     };
     const base_rect = contextRect(ctx, rect);
@@ -658,33 +675,34 @@ fn renderNonInteractiveDirect(
     if (std.mem.eql(u8, node.tag, "div")) {
         renderCachedOrDirectBackground(node, base_rect, allocator, class_spec.background);
         const child_ctx = ctxForChildren(ctx, node, false);
-        renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, false);
+        renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
         node.markRendered();
         return;
     }
 
     if (std.mem.eql(u8, node.tag, "p")) {
-        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, null, base_rect, tracker, ctx);
+        renderParagraphDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, null, base_rect, tracker, ctx);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h1")) {
-        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title, base_rect, tracker, ctx);
+        renderParagraphDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, .title, base_rect, tracker, ctx);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h2")) {
-        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title_1, base_rect, tracker, ctx);
+        renderParagraphDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, .title_1, base_rect, tracker, ctx);
         return;
     }
     if (std.mem.eql(u8, node.tag, "h3")) {
-        renderParagraphDirect(event_ring, store, node_id, node, allocator, class_spec, .title_2, base_rect, tracker, ctx);
+        renderParagraphDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, .title_2, base_rect, tracker, ctx);
         return;
     }
 
     // Fallback to DVUI path for tags without a direct draw handler.
-    renderElementBody(event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+    renderElementBody(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
 }
 
 fn renderGizmo(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -695,10 +713,11 @@ fn renderGizmo(
     _ = store;
     _ = node_id;
     _ = class_spec;
-    applyGizmoProp(node);
+    applyGizmoProp(runtime, node);
 }
 
 fn renderTriangle(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -729,10 +748,11 @@ fn renderTriangle(
     const rect = rect_opt orelse return;
     const base_rect = contextRect(ctx, rect);
     drawTriangleDirect(base_rect, transitions.effectiveVisual(node), transitions.effectiveTransform(node), allocator, class_spec.background);
-    renderChildElements(event_ring, store, node, allocator, tracker, ctx);
+    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
 fn renderParagraph(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -776,11 +796,11 @@ fn renderParagraph(
         }
     }
 
-    renderChildElements(event_ring, store, node, allocator, tracker, ctx);
+    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
-fn applyGizmoProp(node: *types.SolidNode) void {
-    const override = state.gizmo_override_rect;
+fn applyGizmoProp(runtime: *RenderRuntime, node: *types.SolidNode) void {
+    const override = runtime.gizmo_override_rect;
     const attr_rect = node.gizmoRect();
     const has_new_attr = attr_rect != null and node.lastAppliedGizmoRectSerial() != node.gizmoRectSerial();
 
@@ -793,11 +813,12 @@ fn applyGizmoProp(node: *types.SolidNode) void {
 
     if (has_new_attr) {
         node.markGizmoRectApplied();
-        state.gizmo_rect_pending = prop;
+        runtime.gizmo_rect_pending = prop;
     }
 }
 
 fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContext) void {
+    _ = derive.apply(node);
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
         var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
@@ -827,6 +848,7 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContex
 }
 
 fn renderButton(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -839,8 +861,8 @@ fn renderButton(
     const text = buildText(store, node, allocator);
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
     const caption = if (trimmed.len == 0) "Button" else trimmed;
-    if (!state.logged_button_render) {
-        state.logged_button_render = true;
+    if (!runtime.logged_button_render) {
+        runtime.logged_button_render = true;
     }
 
     // Ensure we have a concrete rect; if layout is missing, compute a fallback using the parent rect/screen.
@@ -872,7 +894,7 @@ fn renderButton(
         .margin = dvui.Rect{},
     };
     const tab_info = focus.tabIndexForNode(store, node);
-    const focus_allowed = allowFocusRegistration();
+    const focus_allowed = runtime.allowFocusRegistration();
     if (tab_info.focusable and focus_allowed) {
         options.tab_index = tab_info.tab_index;
     }
@@ -890,8 +912,8 @@ fn renderButton(
         options.expand = .none;
     }
 
-    if (state.button_debug_count < 5) {
-        state.button_debug_count += 1;
+    if (runtime.button_debug_count < 5) {
+        runtime.button_debug_count += 1;
     }
 
     // Use ButtonWidget directly instead of dvui.button() to ensure unique widget IDs.
@@ -906,9 +928,9 @@ fn renderButton(
     if (tab_info.focusable and focus_allowed) {
         focus.registerFocusable(store, node, bw.data());
     }
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         bw.hover = false;
-        bw.click = clickedTopmost(bw.data(), node_id, .{ .hovered = &bw.hover });
+        bw.click = clickedTopmost(runtime, bw.data(), node_id, .{ .hovered = &bw.hover });
     }
     bw.drawBackground();
 
@@ -939,19 +961,19 @@ fn renderButton(
         .outline_color = text_style.text_outline_color,
         .outline_thickness = text_style.text_outline_thickness,
     }) catch |err| {
-        if (state.button_text_error_log_count < 8) {
-            state.button_text_error_log_count += 1;
+        if (runtime.button_text_error_log_count < 8) {
+            runtime.button_text_error_log_count += 1;
             log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
         }
     };
 
     bw.drawFocus();
-    const pressed = if (state.input_enabled_state) bw.clicked() else false;
+    const pressed = if (runtime.input_enabled_state) bw.clicked() else false;
     bw.deinit();
 
     if (pressed) {
-        log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListener("click") });
-        if (node.hasListener("click")) {
+        log.info("button pressed node={d} has_listener={}", .{ node_id, node.hasListenerKind(.click) });
+        if (node.hasListenerKind(.click)) {
             if (event_ring) |ring| {
                 const ok = ring.pushClick(node_id);
                 log.info("button dispatched via ring node={d} ok={}", .{ node_id, ok });
@@ -959,10 +981,11 @@ fn renderButton(
         }
     }
 
-    renderChildElements(event_ring, store, node, allocator, tracker, ctx);
+    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
 fn renderIcon(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -1050,10 +1073,11 @@ fn renderIcon(
         .none, .failed => return,
     }
 
-    renderChildElements(event_ring, store, node, allocator, tracker, ctx);
+    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
 fn renderImage(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -1175,10 +1199,11 @@ fn renderImage(
     wd.minSizeSetAndRefresh();
     wd.minSizeReportToParent();
 
-    renderChildElements(event_ring, store, node, allocator, tracker, ctx);
+    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
 fn renderSlider(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -1207,7 +1232,7 @@ fn renderSlider(
     }
 
     const tab_info = focus.tabIndexForNode(store, node);
-    const focus_allowed = allowFocusRegistration();
+    const focus_allowed = runtime.allowFocusRegistration();
     if (tab_info.focusable and focus_allowed) {
         options.tab_index = tab_info.tab_index;
     }
@@ -1261,7 +1286,7 @@ fn renderSlider(
     var prev_focused = input_state.focused;
     var focused_now = false;
 
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         if (tab_info.focusable and focus_allowed) {
             dvui.tabIndexSet(slider_box.data().id, tab_info.tab_index);
         }
@@ -1347,11 +1372,11 @@ fn renderSlider(
         prev_focused = false;
     }
 
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         if (event_ring) |ring| {
-            if (!prev_focused and focused_now and node.hasListener("focus")) {
+            if (!prev_focused and focused_now and node.hasListenerKind(.focus)) {
                 _ = ring.pushFocus(node_id);
-            } else if (prev_focused and !focused_now and node.hasListener("blur")) {
+            } else if (prev_focused and !focused_now and node.hasListenerKind(.blur)) {
                 _ = ring.pushBlur(node_id);
             }
         }
@@ -1436,7 +1461,7 @@ fn renderSlider(
         };
         store.markNodeChanged(node_id);
         if (event_ring) |ring| {
-            if (node.hasListener("input")) {
+            if (node.hasListenerKind(.input)) {
                 _ = ring.pushInput(node_id, value_str);
             }
         }
@@ -1456,6 +1481,7 @@ fn findUtf8Next(text: []const u8, pos: usize) usize {
 }
 
 fn renderInput(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node_id: u32,
@@ -1480,7 +1506,7 @@ fn renderInput(
     applyAccessibilityOptions(node, &options, .text_input);
 
     const tab_info = focus.tabIndexForNode(store, node);
-    const focus_allowed = allowFocusRegistration();
+    const focus_allowed = runtime.allowFocusRegistration();
 
     var input_state = node.ensureInputState(store.allocator) catch |err| {
         log.err("Solid input state init failed for node {d}: {s}", .{ node_id, @errorName(err) });
@@ -1514,13 +1540,13 @@ fn renderInput(
     var caret_changed = false;
     var enter_pressed = false;
 
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         if (tab_info.focusable and focus_allowed) {
             dvui.tabIndexSet(wd.id, tab_info.tab_index);
         }
 
         var hovered = false;
-        _ = clickedExTopmost(wd, node_id, .{ .hovered = &hovered, .hover_cursor = class_spec.cursor orelse .ibeam });
+        _ = clickedExTopmost(runtime, wd, node_id, .{ .hovered = &hovered, .hover_cursor = class_spec.cursor orelse .ibeam });
 
         focused_now = dvui.focusedWidgetId() == wd.id;
         input_state.focused = focused_now;
@@ -1696,19 +1722,19 @@ fn renderInput(
         }
     }
 
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         if (event_ring) |ring| {
-            if (!prev_focused and focused_now and node.hasListener("focus")) {
+            if (!prev_focused and focused_now and node.hasListenerKind(.focus)) {
                 _ = ring.pushFocus(node_id);
-            } else if (prev_focused and !focused_now and node.hasListener("blur")) {
+            } else if (prev_focused and !focused_now and node.hasListenerKind(.blur)) {
                 _ = ring.pushBlur(node_id);
             }
 
-            if (text_changed and node.hasListener("input")) {
+            if (text_changed and node.hasListenerKind(.input)) {
                 const payload = input_state.currentText();
                 _ = ring.pushInput(node_id, payload);
             }
-            if (enter_pressed and node.hasListener("enter")) {
+            if (enter_pressed and node.hasListenerKind(.enter)) {
                 const payload = input_state.currentText();
                 _ = ring.push(.enter, node_id, payload);
             }
@@ -1717,6 +1743,7 @@ fn renderInput(
 }
 
 fn renderChildElements(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -1725,10 +1752,11 @@ fn renderChildElements(
     ctx: RenderContext,
 ) void {
     const child_ctx = ctxForChildren(ctx, node, false);
-    renderChildrenOrdered(event_ring, store, node, allocator, tracker, child_ctx, true);
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, true);
 }
 
 pub fn renderChildrenOrdered(
+    runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,
     node: *types.SolidNode,
@@ -1759,14 +1787,16 @@ pub fn renderChildrenOrdered(
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;
         if (skip_text and child.kind == .text) continue;
-        if (child.visual.z_index != 0) any_z = true;
+        var child_spec = child.prepareClassSpec();
+        tailwind.applyHover(&child_spec, child.hovered);
+        if (child_spec.z_index != 0) any_z = true;
     }
 
     if (!any_z) {
         for (node.children.items) |child_id| {
             const child = store.node(child_id) orelse continue;
             if (skip_text and child.kind == .text) continue;
-            renderNode(event_ring, store, child_id, allocator, tracker, ctx);
+            renderNode(runtime, event_ring, store, child_id, allocator, tracker, ctx);
         }
         return;
     }
@@ -1777,7 +1807,9 @@ pub fn renderChildrenOrdered(
     for (node.children.items, 0..) |child_id, order_index| {
         const child = store.node(child_id) orelse continue;
         if (skip_text and child.kind == .text) continue;
-        const z_index = child.visual.z_index;
+        var child_spec = child.prepareClassSpec();
+        tailwind.applyHover(&child_spec, child.hovered);
+        const z_index = child_spec.z_index;
         ordered.append(allocator, .{
             .id = child_id,
             .z_index = z_index,
@@ -1789,7 +1821,7 @@ pub fn renderChildrenOrdered(
     sortOrderedNodes(ordered.items);
 
     for (ordered.items) |entry| {
-        renderNode(event_ring, store, entry.id, allocator, tracker, ctx);
+        renderNode(runtime, event_ring, store, entry.id, allocator, tracker, ctx);
     }
 }
 

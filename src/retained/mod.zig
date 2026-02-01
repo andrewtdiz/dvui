@@ -108,6 +108,8 @@ fn scanPickNodeRange(
     if (node.kind == .element) {
         const spec = node.prepareClassSpec();
         if (spec.hidden) return;
+        const opacity = spec.opacity orelse node.visual_props.opacity;
+        if (opacity <= 0) return;
         if (node.layout.rect) |base_rect| {
             node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
         }
@@ -116,7 +118,7 @@ fn scanPickNodeRange(
                 order.* += 1;
                 const ignored = node.id >= ignore_min and node.id <= ignore_max;
                 if (!ignored) {
-                    const z_index = node.visual.z_index;
+                    const z_index = spec.z_index;
                     if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
                         result.* = .{
                             .id = node.id,
@@ -127,7 +129,9 @@ fn scanPickNodeRange(
                     }
                 }
             }
-            if (spec.clip_children orelse false) {
+            const clip_children = spec.clip_children orelse node.visual_props.clip_children;
+            const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
+            if (clip_children or scroll_enabled) {
                 if (next_clip) |clip| {
                     next_clip = intersectRect(clip, rect);
                     if (next_clip == null) return;
@@ -165,6 +169,8 @@ fn scanPickFrameNodeRange(
     if (node.kind == .element) {
         const spec = node.prepareClassSpec();
         if (spec.hidden) return;
+        const opacity = spec.opacity orelse node.visual_props.opacity;
+        if (opacity <= 0) return;
         if (node.layout.rect) |base_rect| {
             node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
         }
@@ -173,7 +179,7 @@ fn scanPickFrameNodeRange(
                 order.* += 1;
                 const ignored = node.id >= ignore_min and node.id <= ignore_max;
                 if (!ignored and isFrameNode(node)) {
-                    const z_index = node.visual.z_index;
+                    const z_index = spec.z_index;
                     if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
                         result.* = .{
                             .id = node.id,
@@ -184,7 +190,9 @@ fn scanPickFrameNodeRange(
                     }
                 }
             }
-            if (spec.clip_children orelse false) {
+            const clip_children = spec.clip_children orelse node.visual_props.clip_children;
+            const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
+            if (clip_children or scroll_enabled) {
                 if (next_clip) |clip| {
                     next_clip = intersectRect(clip, rect);
                     if (next_clip == null) return;
@@ -244,14 +252,15 @@ fn scanPickNode(
     if (node.kind == .element) {
         const spec = node.prepareClassSpec();
         if (spec.hidden) return;
-        if (node.visual.opacity <= 0) return;
+        const opacity = spec.opacity orelse node.visual_props.opacity;
+        if (opacity <= 0) return;
         if (node.layout.rect) |base_rect| {
             node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
         }
         if (node_rect) |rect| {
             if (rectContainsPoint(rect, x_pos, y_pos)) {
                 order.* += 1;
-                const z_index = node.visual.z_index;
+                const z_index = spec.z_index;
                 if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
                     result.* = .{
                         .id = node.id,
@@ -261,7 +270,9 @@ fn scanPickNode(
                     };
                 }
             }
-            if (spec.clip_children orelse false) {
+            const clip_children = spec.clip_children orelse node.visual_props.clip_children;
+            const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
+            if (clip_children or scroll_enabled) {
                 if (next_clip) |clip| {
                     next_clip = intersectRect(clip, rect);
                     if (next_clip == null) return;
@@ -297,7 +308,8 @@ fn scanPickFrameNode(
     if (node.kind == .element) {
         const spec = node.prepareClassSpec();
         if (spec.hidden) return;
-        if (node.visual.opacity <= 0) return;
+        const opacity = spec.opacity orelse node.visual_props.opacity;
+        if (opacity <= 0) return;
         if (node.layout.rect) |base_rect| {
             node_rect = direct.transformedRect(node, base_rect) orelse base_rect;
         }
@@ -305,7 +317,7 @@ fn scanPickFrameNode(
             if (rectContainsPoint(rect, x_pos, y_pos)) {
                 order.* += 1;
                 if (isFrameNode(node)) {
-                    const z_index = node.visual.z_index;
+                    const z_index = spec.z_index;
                     if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
                         result.* = .{
                             .id = node.id,
@@ -316,7 +328,9 @@ fn scanPickFrameNode(
                     }
                 }
             }
-            if (spec.clip_children orelse false) {
+            const clip_children = spec.clip_children orelse node.visual_props.clip_children;
+            const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
+            if (clip_children or scroll_enabled) {
                 if (next_clip) |clip| {
                     next_clip = intersectRect(clip, rect);
                     if (next_clip == null) return;

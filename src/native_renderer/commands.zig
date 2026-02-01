@@ -5,52 +5,8 @@ const dvui = @import("dvui");
 const lifecycle = @import("lifecycle.zig");
 const logMessage = lifecycle.logMessage;
 const types = @import("types.zig");
+const utils = @import("utils.zig");
 const Renderer = types.Renderer;
-
-// ============================================================
-// Command Buffer Update
-// ============================================================
-
-pub fn updateCommands(
-    renderer: *Renderer,
-    headers_ptr: [*]const u8,
-    headers_len: usize,
-    payload_ptr: [*]const u8,
-    payload_len: usize,
-    command_count: u32,
-) void {
-    if (command_count == 0) {
-        renderer.headers.resize(renderer.allocator, 0) catch {};
-        renderer.payload.resize(renderer.allocator, 0) catch {};
-        return;
-    }
-
-    const header_size = @sizeOf(types.CommandHeader);
-    const count: usize = @as(usize, @intCast(command_count));
-    const expected_header_bytes: usize = header_size * count;
-    if (headers_len < expected_header_bytes) {
-        logMessage(renderer, 2, "commit ignored: header bytes short ({d} < {d})", .{ headers_len, expected_header_bytes });
-        return;
-    }
-
-    renderer.headers.resize(renderer.allocator, count) catch {
-        logMessage(renderer, 3, "commit ignored: unable to resize header buffer", .{});
-        return;
-    };
-    const header_bytes = headers_ptr[0..expected_header_bytes];
-    for (renderer.headers.items, 0..) |*dst, i| {
-        const base = i * header_size;
-        dst.* = std.mem.bytesToValue(types.CommandHeader, header_bytes[base .. base + header_size]);
-    }
-
-    renderer.payload.resize(renderer.allocator, payload_len) catch {
-        logMessage(renderer, 3, "commit ignored: unable to resize payload buffer", .{});
-        return;
-    };
-    if (payload_len > 0) {
-        std.mem.copyForwards(u8, renderer.payload.items, payload_ptr[0..payload_len]);
-    }
-}
 
 // ============================================================
 // DVUI Command Rendering
@@ -181,7 +137,7 @@ pub fn renderCommandsDvui(renderer: *Renderer, win: *dvui.Window) void {
                 var builder = dvui.Triangles.Builder.init(renderer.frame_arena.allocator(), 4, 6) catch continue;
                 defer builder.deinit(renderer.frame_arena.allocator());
 
-                const color = types.colorFromPacked(cmd.extra).opacity(win.alpha);
+                const color = utils.colorFromPacked(cmd.extra).opacity(win.alpha);
                 const pma = dvui.Color.PMA.fromColor(color);
                 builder.appendVertex(.{ .pos = .{ .x = phys.x, .y = phys.y }, .col = pma });
                 builder.appendVertex(.{ .pos = .{ .x = phys.x + phys.w, .y = phys.y }, .col = pma });
@@ -214,7 +170,7 @@ pub fn renderCommandsDvui(renderer: *Renderer, win: *dvui.Window) void {
                     .font = font,
                     .text = text_slice,
                     .rs = rs,
-                    .color = types.colorFromPacked(cmd.extra),
+                    .color = utils.colorFromPacked(cmd.extra),
                 };
                 dvui.renderText(opts) catch |err| {
                     logMessage(renderer, 2, "renderText failed: {s}", .{@errorName(err)});

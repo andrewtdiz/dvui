@@ -3,35 +3,12 @@ const dvui = @import("dvui");
 
 const types = @import("../../core/types.zig");
 
-pub var gizmo_override_rect: ?types.GizmoRect = null;
-pub var gizmo_rect_pending: ?types.GizmoRect = null;
-pub var logged_tree_dump: bool = false;
-pub var logged_render_state: bool = false;
-pub var logged_button_render: bool = false;
-pub var button_debug_count: usize = 0;
-pub var button_text_error_log_count: usize = 0;
-pub var paragraph_log_count: usize = 0;
-pub var input_enabled_state: bool = true;
-
 pub const RenderLayer = enum {
     base,
     overlay,
 };
 
 pub const overlay_subwindow_seed: u32 = 0x4f564c59;
-
-pub var render_layer: RenderLayer = .base;
-pub var hover_layer: RenderLayer = .base;
-pub var pointer_top_base_id: u32 = 0;
-pub var pointer_top_overlay_id: u32 = 0;
-pub var modal_overlay_active: bool = false;
-pub var last_mouse_pt: ?dvui.Point.Physical = null;
-pub var last_input_enabled: ?bool = null;
-pub var last_hover_layer: RenderLayer = .base;
-pub var portal_cache_allocator: ?std.mem.Allocator = null;
-pub var portal_cache_version: u64 = 0;
-pub var cached_portal_ids: std.ArrayList(u32) = .empty;
-pub var hover_layout_invalidated: bool = false;
 
 pub const OverlayState = struct {
     modal: bool = false,
@@ -60,9 +37,6 @@ pub fn contextRect(ctx: RenderContext, rect: types.Rect) types.Rect {
         .h = rect.h * ctx.scale[1],
     };
 }
-
-pub var cached_overlay_state: OverlayState = .{};
-pub var overlay_cache_version: u64 = 0;
 
 pub const ClipState = struct {
     active: bool = false,
@@ -148,20 +122,6 @@ pub fn rectContains(rect: types.Rect, point: dvui.Point.Physical) bool {
 
 pub fn isPortalNode(node: *const types.SolidNode) bool {
     return node.kind == .element and std.mem.eql(u8, node.tag, "portal");
-}
-
-pub fn allowPointerInput() bool {
-    return input_enabled_state and render_layer == hover_layer;
-}
-
-pub fn pointerTargetId() u32 {
-    return if (render_layer == .overlay) pointer_top_overlay_id else pointer_top_base_id;
-}
-
-pub fn allowFocusRegistration() bool {
-    if (!input_enabled_state) return false;
-    if (!modal_overlay_active) return true;
-    return render_layer == .overlay;
 }
 
 pub fn overlaySubwindowId() dvui.Id {

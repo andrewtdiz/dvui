@@ -6,8 +6,9 @@ const types = @import("../core/types.zig");
 const tailwind = @import("../style/tailwind.zig");
 const draw = @import("direct.zig");
 const transitions = @import("transitions.zig");
+const derive = @import("internal/derive.zig");
 
-const log = std.log.scoped(.solid_bridge);
+const log = std.log.scoped(.retained);
 
 var paint_clip_debug_count: usize = 0;
 
@@ -67,6 +68,7 @@ fn rectUnion(a: types.Rect, b: types.Rect) types.Rect {
 }
 
 pub fn renderPaintCache(node: *types.SolidNode) bool {
+    if (node.needsPaintUpdate()) return false;
     if (node.paint.vertices.items.len == 0 or node.paint.indices.items.len == 0) return false;
     const rect = node.paint.painted_rect orelse return false;
     const tris = dvui.Triangles{
@@ -103,7 +105,8 @@ pub fn renderCachedOrDirectBackground(
 
     if (renderPaintCache(node)) return;
 
-    const spec = node.prepareClassSpec();
+    var spec = node.prepareClassSpec();
+    tailwind.applyHover(&spec, node.hovered);
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
     const border_left = (spec.border.left orelse 0) * scale;
@@ -227,60 +230,50 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const old_rect = node.paint.painted_rect;
 
-    node.paint.vertices.deinit(allocator);
-    node.paint.indices.deinit(allocator);
-    node.paint.vertices = .empty;
-    node.paint.indices = .empty;
+    node.paint.vertices.clearRetainingCapacity();
+    node.paint.indices.clearRetainingCapacity();
 
     const rect = node.layout.rect;
 
-    const spec = node.prepareClassSpec();
+    const spec = derive.apply(node);
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
-
-    // Ensure a background is available even if visual.background was not set before caching.
-    var visual = node.visual;
-    if (visual.background == null) {
-        if (spec.background) |bg| {
-            visual.background = draw.dvuiColorToPacked(bg);
-            node.visual.background = visual.background;
-        }
-    }
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
     const border_color_packed = transitions.effectiveBorderColor(node);
+    const version = @max(node.version, node.layout.version);
 
-    if (!shouldCachePaint(node) or rect == null) {
+    if (!shouldCachePaint(node, spec) or rect == null) {
         const bounds = if (rect) |r| draw.transformedRect(node, r) orelse r else null;
         node.paint.painted_rect = bounds;
         if (bounds) |r| tracker.add(r);
         if (old_rect) |r| tracker.add(r);
-        node.paint.version = node.subtree_version;
+        node.paint.version = version;
         node.paint.paint_dirty = false;
         return;
     }
 
-    const geom = buildRectGeometry(rect.?, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, null) catch {
+    const bounds = buildRectGeometryInto(&node.paint.vertices, &node.paint.indices, rect.?, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, null) catch {
         const bounds = draw.transformedRect(node, rect.?) orelse rect.?;
         node.paint.painted_rect = bounds;
         tracker.add(bounds);
         if (old_rect) |r| tracker.add(r);
-        node.paint.version = node.subtree_version;
+        node.paint.version = version;
         node.paint.paint_dirty = false;
         return;
     };
 
-    node.paint.vertices = std.ArrayList(dvui.Vertex).fromOwnedSlice(geom.vertices);
-    node.paint.indices = std.ArrayList(u16).fromOwnedSlice(geom.indices);
-    node.paint.painted_rect = .{ .x = geom.bounds.x, .y = geom.bounds.y, .w = geom.bounds.w, .h = geom.bounds.h };
-    node.paint.version = node.subtree_version;
+    node.paint.painted_rect = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = bounds.h };
+    node.paint.version = version;
     node.paint.paint_dirty = false;
     tracker.add(node.paint.painted_rect.?);
     if (old_rect) |r| tracker.add(r);
 }
 
-fn buildRectGeometry(
+fn buildRectGeometryInto(
+    vertices: *std.ArrayList(dvui.Vertex),
+    indices: *std.ArrayList(u16),
     rect: types.Rect,
     scale: f32,
     visual: types.VisualProps,
@@ -289,11 +282,9 @@ fn buildRectGeometry(
     border_color_packed: types.PackedColor,
     spec: tailwind.Spec,
     fallback_bg: ?dvui.Color,
-) !struct { vertices: []dvui.Vertex, indices: []u16, bounds: dvui.Rect.Physical } {
-    var vertices: std.ArrayList(dvui.Vertex) = .empty;
-    errdefer vertices.deinit(allocator);
-    var indices: std.ArrayList(u16) = .empty;
-    errdefer indices.deinit(allocator);
+) !dvui.Rect.Physical {
+    vertices.clearRetainingCapacity();
+    indices.clearRetainingCapacity();
 
     const border_left = (spec.border.left orelse 0) * scale;
     const border_right = (spec.border.right orelse 0) * scale;
@@ -376,12 +367,27 @@ fn buildRectGeometry(
         }
     }
 
+    const fill_pos = if (has_border) inner_pos else outer_pos;
+    const has_fill_area = if (has_border) (inner_rect.w > 0 and inner_rect.h > 0) else (rect.w > 0 and rect.h > 0);
+
+    const fill_needed: usize = if (bg_color_opt != null and has_fill_area) @as(usize, 4) else 0;
+    const border_needed: usize = if (has_border) @as(usize, 8) else 0;
+    const vertices_needed = border_needed + fill_needed;
+
+    const indices_needed: usize = (if (has_border) @as(usize, 24) else 0) + (if (fill_needed != 0) @as(usize, 6) else 0);
+    if (vertices_needed == 0 or indices_needed == 0) {
+        return dvui.Rect.Physical{};
+    }
+
+    try vertices.ensureTotalCapacity(allocator, vertices_needed);
+    try indices.ensureTotalCapacity(allocator, indices_needed);
+
     if (has_border) {
         for (outer_pos) |p| {
-            try vertices.append(allocator, .{ .pos = .{ .x = p[0], .y = p[1] }, .col = border_pma });
+            vertices.appendAssumeCapacity(.{ .pos = .{ .x = p[0], .y = p[1] }, .col = border_pma });
         }
         for (inner_pos) |p| {
-            try vertices.append(allocator, .{ .pos = .{ .x = p[0], .y = p[1] }, .col = border_pma });
+            vertices.appendAssumeCapacity(.{ .pos = .{ .x = p[0], .y = p[1] }, .col = border_pma });
         }
 
         var i: usize = 0;
@@ -390,33 +396,48 @@ fn buildRectGeometry(
             const o1: u16 = @intCast((i + 1) % 4);
             const in0: u16 = 4 + @as(u16, @intCast(i));
             const in1: u16 = 4 + @as(u16, @intCast((i + 1) % 4));
-            try indices.appendSlice(allocator, &.{ o0, o1, in1, o0, in1, in0 });
+            indices.appendSliceAssumeCapacity(&.{ o0, o1, in1, o0, in1, in0 });
         }
     }
 
-    if (bg_color_opt) |bg_color| {
+    if (fill_needed != 0 and bg_color_opt != null) {
+        const bg_color = bg_color_opt.?;
         const bg_pma = dvui.Color.PMA.fromColor(bg_color);
         const fill_base: u16 = @intCast(vertices.items.len);
-        const fill_pos = if (has_border) inner_pos else outer_pos;
-        const has_fill_area = if (has_border) (inner_rect.w > 0 and inner_rect.h > 0) else (rect.w > 0 and rect.h > 0);
-        if (has_fill_area) {
-            for (fill_pos) |p| {
-                try vertices.append(allocator, .{ .pos = .{ .x = p[0], .y = p[1] }, .col = bg_pma });
-            }
-            try indices.appendSlice(allocator, &.{ fill_base, fill_base + 1, fill_base + 2, fill_base, fill_base + 2, fill_base + 3 });
+        for (fill_pos) |p| {
+            vertices.appendAssumeCapacity(.{ .pos = .{ .x = p[0], .y = p[1] }, .col = bg_pma });
         }
+        indices.appendSliceAssumeCapacity(&.{ fill_base, fill_base + 1, fill_base + 2, fill_base, fill_base + 2, fill_base + 3 });
     }
 
     if (vertices.items.len == 0 or indices.items.len == 0) {
-        return .{
-            .vertices = &.{},
-            .indices = &.{},
-            .bounds = dvui.Rect.Physical{},
-        };
+        vertices.clearRetainingCapacity();
+        indices.clearRetainingCapacity();
+        return dvui.Rect.Physical{};
     }
 
     bounds.w = bounds.w - bounds.x;
     bounds.h = bounds.h - bounds.y;
+
+    return bounds;
+}
+
+fn buildRectGeometry(
+    rect: types.Rect,
+    scale: f32,
+    visual: types.VisualProps,
+    transform: types.Transform,
+    allocator: std.mem.Allocator,
+    border_color_packed: types.PackedColor,
+    spec: tailwind.Spec,
+    fallback_bg: ?dvui.Color,
+) !struct { vertices: []dvui.Vertex, indices: []u16, bounds: dvui.Rect.Physical } {
+    var vertices: std.ArrayList(dvui.Vertex) = .empty;
+    errdefer vertices.deinit(allocator);
+    var indices: std.ArrayList(u16) = .empty;
+    errdefer indices.deinit(allocator);
+
+    const bounds = try buildRectGeometryInto(&vertices, &indices, rect, scale, visual, transform, allocator, border_color_packed, spec, fallback_bg);
 
     return .{
         .vertices = try vertices.toOwnedSlice(allocator),
@@ -425,11 +446,11 @@ fn buildRectGeometry(
     };
 }
 
-pub fn shouldCachePaint(node: *types.SolidNode) bool {
+pub fn shouldCachePaint(node: *types.SolidNode, spec: tailwind.Spec) bool {
     if (node.kind != .element) return false;
     if (node.isInteractive()) return false;
     if (node.interactiveChildCount() > 0) return false;
-    const spec = node.prepareClassSpec();
+    if (spec.transition.enabled) return false;
     if (spec.corner_radius != null and spec.corner_radius.? != 0) return false;
     return draw.shouldDirectDraw(node);
 }

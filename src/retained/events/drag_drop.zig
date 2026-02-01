@@ -4,14 +4,6 @@ const dvui = @import("dvui");
 const events = @import("mod.zig");
 const types = @import("../core/types.zig");
 
-const PointerPayload = extern struct {
-    x: f32,
-    y: f32,
-    button: u8,
-    modifiers: u8,
-    pad: u16,
-};
-
 const DragState = struct {
     active: bool = false,
     source_id: u32 = 0,
@@ -48,8 +40,8 @@ pub fn handleDiv(
     wd: *dvui.WidgetData,
 ) void {
     if (event_ring == null) return;
-    const wants_pointer = node.hasListener("pointerdown") or node.hasListener("pointermove") or node.hasListener("pointerup") or node.hasListener("pointercancel");
-    const wants_drag = node.hasListener("dragstart") or node.hasListener("drag") or node.hasListener("dragend");
+    const wants_pointer = node.hasListenerKind(.pointerdown) or node.hasListenerKind(.pointermove) or node.hasListenerKind(.pointerup) or node.hasListenerKind(.pointercancel);
+    const wants_drag = node.hasListenerKind(.dragstart) or node.hasListenerKind(.drag) or node.hasListenerKind(.dragend);
     if (!wants_pointer and !wants_drag) return;
 
     const rect = wd.borderRectScale().r;
@@ -77,13 +69,13 @@ fn handleMouse(
         .press => {
             if (!mouse.button.pointer()) return;
             var handled = false;
-            if (wants_pointer and node.hasListener("pointerdown")) {
+            if (wants_pointer and node.hasListenerKind(.pointerdown)) {
                 pushPointerEvent(event_ring, .pointerdown, node.id, mouse);
                 handled = true;
             }
             if (!drag_state.active and wants_drag) {
                 startDrag(node.id, mouse, wd, event.num);
-                if (node.hasListener("dragstart")) {
+                if (node.hasListenerKind(.dragstart)) {
                     pushPointerEvent(event_ring, .dragstart, node.id, mouse);
                 }
                 updateHoverTarget(event_ring, store, mouse.p);
@@ -96,7 +88,7 @@ fn handleMouse(
         .release => {
             if (!mouse.button.pointer()) return;
             var handled = false;
-            if (wants_pointer and node.hasListener("pointerup")) {
+            if (wants_pointer and node.hasListenerKind(.pointerup)) {
                 pushPointerEvent(event_ring, .pointerup, node.id, mouse);
                 handled = true;
             }
@@ -105,7 +97,7 @@ fn handleMouse(
                 if (drag_state.hover_target) |target_id| {
                     dispatchDrop(event_ring, store, target_id, mouse);
                 }
-                if (node.hasListener("dragend")) {
+                if (node.hasListenerKind(.dragend)) {
                     pushPointerEvent(event_ring, .dragend, node.id, mouse);
                 }
                 clearHover(event_ring, store, mouse.p);
@@ -121,15 +113,15 @@ fn handleMouse(
             var handled = false;
             if (is_source) {
                 drag_state.last = mouse.p;
-                if (node.hasListener("pointermove")) {
+                if (node.hasListenerKind(.pointermove)) {
                     pushPointerEvent(event_ring, .pointermove, node.id, mouse);
                 }
-                if (node.hasListener("drag")) {
+                if (node.hasListenerKind(.drag)) {
                     pushPointerEvent(event_ring, .drag, node.id, mouse);
                 }
                 updateHoverTarget(event_ring, store, mouse.p);
                 handled = true;
-            } else if (wants_pointer and node.hasListener("pointermove")) {
+            } else if (wants_pointer and node.hasListenerKind(.pointermove)) {
                 pushPointerEvent(event_ring, .pointermove, node.id, mouse);
                 handled = true;
             }
@@ -163,13 +155,12 @@ fn pushPointerEvent(
     }
 }
 
-fn pointerPayload(mouse: dvui.Event.Mouse) PointerPayload {
+fn pointerPayload(mouse: dvui.Event.Mouse) events.PointerPayload {
     return .{
         .x = mouse.p.x,
         .y = mouse.p.y,
         .button = mapButton(mouse.button),
         .modifiers = modMask(mouse.mod),
-        .pad = 0,
     };
 }
 
@@ -215,7 +206,7 @@ fn clearHover(event_ring: ?*events.EventRing, store: *types.NodeStore, point: dv
 fn dispatchDragEnter(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, point: dvui.Point.Physical) void {
     if (event_ring == null) return;
     const target = store.node(target_id) orelse return;
-    if (!target.hasListener("dragenter")) return;
+    if (!target.hasListenerKind(.dragenter)) return;
     const mouse = dvui.Event.Mouse{
         .action = .position,
         .button = .none,
@@ -229,7 +220,7 @@ fn dispatchDragEnter(event_ring: ?*events.EventRing, store: *types.NodeStore, ta
 fn dispatchDragLeave(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, point: dvui.Point.Physical) void {
     if (event_ring == null) return;
     const target = store.node(target_id) orelse return;
-    if (!target.hasListener("dragleave")) return;
+    if (!target.hasListenerKind(.dragleave)) return;
     const mouse = dvui.Event.Mouse{
         .action = .position,
         .button = .none,
@@ -243,7 +234,7 @@ fn dispatchDragLeave(event_ring: ?*events.EventRing, store: *types.NodeStore, ta
 fn dispatchDrop(event_ring: ?*events.EventRing, store: *types.NodeStore, target_id: u32, mouse: dvui.Event.Mouse) void {
     if (event_ring == null) return;
     const target = store.node(target_id) orelse return;
-    if (!target.hasListener("drop")) return;
+    if (!target.hasListenerKind(.drop)) return;
     pushPointerEvent(event_ring, .drop, target_id, mouse);
 }
 
@@ -268,7 +259,7 @@ fn scanNode(
     order: *u32,
 ) void {
     if (node.kind == .element and node.id != source_id and std.mem.eql(u8, node.tag, "div")) {
-        const wants_drop = node.hasListener("dragenter") or node.hasListener("dragleave") or node.hasListener("drop");
+        const wants_drop = node.hasListenerKind(.dragenter) or node.hasListenerKind(.dragleave) or node.hasListenerKind(.drop);
         if (wants_drop) {
             const spec = node.prepareClassSpec();
             if (!spec.hidden) {

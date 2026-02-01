@@ -378,8 +378,19 @@ pub const Cache = struct {
         }
     }
 
+    fn cacheKey(self: *Cache, font: Font) u64 {
+        if (self.msdf_fonts.getPtr(font.id) != null) {
+            var h = dvui.fnv.init();
+            h.update(std.mem.asBytes(&font.id));
+            const tag: u8 = 0x6d;
+            h.update(std.mem.asBytes(&tag));
+            return h.final();
+        }
+        return font.hash();
+    }
+
     pub fn getOrCreate(self: *Cache, gpa: std.mem.Allocator, font: Font) std.mem.Allocator.Error!*Entry {
-        const entry = try self.cache.getOrPut(gpa, font.hash());
+        const entry = try self.cache.getOrPut(gpa, self.cacheKey(font));
         if (entry.found_existing) return entry.value_ptr;
 
         if (self.msdf_fonts.getPtr(font.id)) |msdf_res| {

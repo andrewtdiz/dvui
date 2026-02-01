@@ -11,36 +11,25 @@ const icon_registry = @import("icon_registry.zig");
 const paint_cache = @import("cache.zig");
 const drag_drop = @import("../events/drag_drop.zig");
 const focus = @import("../events/focus.zig");
+const tailwind = @import("../style/tailwind.zig");
 
 const interaction = @import("internal/interaction.zig");
+const hover = @import("internal/hover.zig");
 const overlay = @import("internal/overlay.zig");
 const renderers = @import("internal/renderers.zig");
 const state = @import("internal/state.zig");
+const runtime_mod = @import("internal/runtime.zig");
 
 const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 const physicalToDvuiRect = state.physicalToDvuiRect;
 const rectContains = state.rectContains;
 
+const RenderRuntime = runtime_mod.RenderRuntime;
+
+var runtime: RenderRuntime = .{};
+
 pub fn init() void {
-    state.gizmo_override_rect = null;
-    state.gizmo_rect_pending = null;
-    state.logged_tree_dump = false;
-    state.logged_render_state = false;
-    state.logged_button_render = false;
-    state.button_debug_count = 0;
-    state.button_text_error_log_count = 0;
-    state.paragraph_log_count = 0;
-    state.input_enabled_state = true;
-    state.render_layer = .base;
-    state.hover_layer = .base;
-    state.pointer_top_base_id = 0;
-    state.pointer_top_overlay_id = 0;
-    state.modal_overlay_active = false;
-    state.last_mouse_pt = null;
-    state.last_input_enabled = null;
-    state.last_hover_layer = .base;
-    state.hover_layout_invalidated = false;
-    overlay.resetPortalCache();
+    runtime.reset();
     drag_drop.init();
     focus.init();
     paint_cache.init();
@@ -54,52 +43,33 @@ pub fn deinit() void {
     image_loader.deinit();
     icon_registry.deinit();
     paint_cache.deinit();
-    overlay.resetPortalCache();
-    state.last_mouse_pt = null;
-    state.last_input_enabled = null;
-    state.last_hover_layer = .base;
-    state.hover_layout_invalidated = false;
-    state.gizmo_override_rect = null;
-    state.gizmo_rect_pending = null;
-    state.logged_tree_dump = false;
-    state.logged_render_state = false;
-    state.logged_button_render = false;
-    state.button_debug_count = 0;
-    state.button_text_error_log_count = 0;
-    state.paragraph_log_count = 0;
-    state.input_enabled_state = true;
-    state.render_layer = .base;
-    state.hover_layer = .base;
-    state.pointer_top_base_id = 0;
-    state.pointer_top_overlay_id = 0;
-    state.modal_overlay_active = false;
+    runtime.reset();
 }
 
 pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
-    state.gizmo_override_rect = rect;
+    runtime.gizmo_override_rect = rect;
 }
 
 pub fn takeGizmoRectUpdate() ?types.GizmoRect {
-    const next = state.gizmo_rect_pending;
-    state.gizmo_rect_pending = null;
+    const next = runtime.gizmo_rect_pending;
+    runtime.gizmo_rect_pending = null;
     return next;
 }
 
-fn updateFrameState(mouse: dvui.Point.Physical, input_enabled: bool, layer: state.RenderLayer) void {
-    state.last_mouse_pt = mouse;
-    state.last_input_enabled = input_enabled;
-    state.last_hover_layer = layer;
+fn updateFrameState(runtime_ptr: *RenderRuntime, mouse: dvui.Point.Physical, input_enabled: bool, layer: state.RenderLayer) void {
+    runtime_ptr.last_mouse_pt = mouse;
+    runtime_ptr.last_input_enabled = input_enabled;
+    runtime_ptr.last_hover_layer = layer;
 }
 
 pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_enabled: bool) bool {
     const root = store.node(0) orelse return false;
 
-    state.input_enabled_state = input_enabled;
+    runtime.input_enabled_state = input_enabled;
     focus.beginFrame(store);
-    state.hover_layout_invalidated = false;
     layout.updateLayouts(store);
     var layout_did_update = layout.didUpdateLayouts();
-    if (state.input_enabled_state) {
+    if (runtime.input_enabled_state) {
         drag_drop.cancelIfMissing(event_ring, store);
     }
 
@@ -107,89 +77,88 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     defer arena.deinit();
     const scratch = arena.allocator();
 
-    const portal_ids = overlay.ensurePortalCache(store, root);
-    const overlay_state = overlay.ensureOverlayState(store, portal_ids, root.subtree_version);
-    state.modal_overlay_active = overlay_state.modal;
+    const portal_ids = overlay.ensurePortalCache(&runtime, store, root);
+    const overlay_state = overlay.ensureOverlayState(&runtime, store, portal_ids, root.subtree_version);
+    runtime.modal_overlay_active = overlay_state.modal;
 
     const current_mouse = dvui.currentWindow().mouse_pt;
     const root_ctx = state.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
 
-    state.hover_layer = .base;
+    runtime.hover_layer = .base;
     if (portal_ids.len > 0) {
         if (overlay_state.modal) {
-            state.hover_layer = .overlay;
+            runtime.hover_layer = .overlay;
         } else if (overlay_state.hit_rect) |hit_rect| {
             if (rectContains(hit_rect, current_mouse)) {
-                state.hover_layer = .overlay;
+                runtime.hover_layer = .overlay;
             }
         }
     }
 
-    const tree_dirty = root.hasDirtySubtree();
-    const pointer_changed = if (state.input_enabled_state) blk: {
-        if (state.last_mouse_pt) |prev_mouse| {
-            break :blk prev_mouse.x != current_mouse.x or prev_mouse.y != current_mouse.y;
-        }
-        break :blk true;
-    } else false;
-    const input_changed = if (state.last_input_enabled) |prev| prev != input_enabled else true;
-    const layer_changed = state.hover_layer != state.last_hover_layer;
-    const needs_visual_sync = tree_dirty or layout_did_update or pointer_changed or input_changed or layer_changed;
+    runtime.render_layer = .base;
 
-    if (needs_visual_sync) {
-        overlay.syncVisualLayer(event_ring, store, root, portal_ids, .base, current_mouse);
-        if (portal_ids.len > 0) {
-            overlay.syncVisualLayer(event_ring, store, root, portal_ids, .overlay, current_mouse);
-        } else {
-            state.render_layer = .base;
-        }
-        if (state.hover_layout_invalidated) {
-            state.hover_layout_invalidated = false;
-            layout.updateLayouts(store);
-            if (layout.didUpdateLayouts()) {
-                layout_did_update = true;
-            }
-            overlay.syncVisualLayer(event_ring, store, root, portal_ids, .base, current_mouse);
-            if (portal_ids.len > 0) {
-                overlay.syncVisualLayer(event_ring, store, root, portal_ids, .overlay, current_mouse);
-            } else {
-                state.render_layer = .base;
-            }
-        }
-    } else {
-        state.render_layer = .base;
-    }
+    if (runtime.input_enabled_state) {
+        var base_pair: interaction.PickPair = .{};
+        var base_order: u32 = 0;
+        interaction.scanPickPair(store, root, current_mouse, root_ctx, &base_pair, &base_order, true);
+        runtime.pointer_top_base_id = base_pair.interactive.id;
 
-    if (state.input_enabled_state) {
-        state.pointer_top_base_id = interaction.pickInteractiveId(store, root, current_mouse, true, root_ctx);
-        var overlay_pick: state.PointerPick = .{};
+        var overlay_pair: interaction.PickPair = .{};
         var overlay_order: u32 = 0;
         if (portal_ids.len > 0) {
             for (portal_ids) |portal_id| {
                 const portal = store.node(portal_id) orelse continue;
-                interaction.scanPickInteractive(store, portal, current_mouse, root_ctx, &overlay_pick, &overlay_order, false);
+                interaction.scanPickPair(store, portal, current_mouse, root_ctx, &overlay_pair, &overlay_order, false);
             }
         }
-        state.pointer_top_overlay_id = overlay_pick.id;
+        runtime.pointer_top_overlay_id = overlay_pair.interactive.id;
+        const hovered_id = if (runtime.hover_layer == .overlay) overlay_pair.hover.id else base_pair.hover.id;
+        const hover_layout_invalidated = hover.syncHoverPath(&runtime, event_ring, store, scratch, hovered_id);
+        if (hover_layout_invalidated) {
+            layout.updateLayouts(store);
+            if (layout.didUpdateLayouts()) {
+                layout_did_update = true;
+            }
+
+            base_pair = .{};
+            base_order = 0;
+            interaction.scanPickPair(store, root, current_mouse, root_ctx, &base_pair, &base_order, true);
+            runtime.pointer_top_base_id = base_pair.interactive.id;
+
+            overlay_pair = .{};
+            overlay_order = 0;
+            if (portal_ids.len > 0) {
+                for (portal_ids) |portal_id| {
+                    const portal = store.node(portal_id) orelse continue;
+                    interaction.scanPickPair(store, portal, current_mouse, root_ctx, &overlay_pair, &overlay_order, false);
+                }
+            }
+            runtime.pointer_top_overlay_id = overlay_pair.interactive.id;
+            const hovered_id2 = if (runtime.hover_layer == .overlay) overlay_pair.hover.id else base_pair.hover.id;
+            _ = hover.syncHoverPath(&runtime, event_ring, store, scratch, hovered_id2);
+        }
     } else {
-        state.pointer_top_base_id = 0;
-        state.pointer_top_overlay_id = 0;
+        runtime.pointer_top_base_id = 0;
+        runtime.pointer_top_overlay_id = 0;
+        _ = hover.syncHoverPath(&runtime, event_ring, store, scratch, 0);
     }
 
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
 
-    const needs_paint_cache = needs_visual_sync or layout_did_update or root.needsPaintUpdate();
+    const current_version = store.currentVersion();
+    const needs_paint_cache = layout_did_update or current_version != runtime.last_paint_cache_version;
     if (needs_paint_cache) {
         paint_cache.updatePaintCache(store, &dirty_tracker);
+        runtime.last_paint_cache_version = current_version;
     }
 
-    if (!state.logged_tree_dump) {
-        state.logged_tree_dump = true;
+    if (!runtime.logged_tree_dump) {
+        runtime.logged_tree_dump = true;
     }
 
     if (root.children.items.len == 0) {
-        updateFrameState(current_mouse, state.input_enabled_state, state.hover_layer);
+        updateFrameState(&runtime, current_mouse, runtime.input_enabled_state, runtime.hover_layer);
         return false;
     }
 
@@ -205,8 +174,8 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         dirty_tracker.add(screen_rect);
     }
 
-    state.render_layer = .base;
-    renderers.renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, root_ctx, false);
+    runtime.render_layer = .base;
+    renderers.renderChildrenOrdered(&runtime, event_ring, store, root, scratch, &dirty_tracker, root_ctx, false);
 
     if (portal_ids.len > 0) {
         const overlay_id = state.overlaySubwindowId();
@@ -226,12 +195,12 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_natural);
         defer _ = dvui.subwindowCurrentSet(prev.id, prev.rect);
 
-        state.render_layer = .overlay;
-        overlay.renderPortalNodesOrdered(event_ring, store, portal_ids, scratch, &dirty_tracker, overlay_ctx);
+        runtime.render_layer = .overlay;
+        overlay.renderPortalNodesOrdered(&runtime, event_ring, store, portal_ids, scratch, &dirty_tracker, overlay_ctx);
     }
 
-    focus.endFrame(event_ring, store, state.input_enabled_state);
-    state.render_layer = .base;
-    updateFrameState(current_mouse, state.input_enabled_state, state.hover_layer);
+    focus.endFrame(event_ring, store, runtime.input_enabled_state);
+    runtime.render_layer = .base;
+    updateFrameState(&runtime, current_mouse, runtime.input_enabled_state, runtime.hover_layer);
     return true;
 }

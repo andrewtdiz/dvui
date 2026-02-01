@@ -10,6 +10,31 @@ local function Create(tag)
   end
 end
 
+local function tag_builder(tag)
+  return function(props)
+    return function(children)
+      local node = { tag = tag }
+      if props ~= nil then
+        for k, v in pairs(props) do
+          node[k] = v
+        end
+      end
+      if children ~= nil then
+        node.children = children
+      end
+      return node
+    end
+  end
+end
+
+local Tag = setmetatable({}, {
+  __index = function(self, tag)
+    local fn = tag_builder(tag)
+    rawset(self, tag, fn)
+    return fn
+  end,
+})
+
 local function For(spec)
   return {
     __kind = "For",
@@ -30,6 +55,7 @@ end
 
 return {
   Create = Create,
+  Tag = Tag,
   For = For,
   Show = Show,
 }

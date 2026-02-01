@@ -38,8 +38,8 @@ pub const ImageError = error{
 const max_image_bytes: usize = 16 * 1024 * 1024;
 const image_search_roots = [_][]const u8{
     "examples/resources/assets",
-    "examples/resources/js/assets",
-    "examples/resources/js",
+    "examples/resources/assets",
+    "examples/resources",
     "examples",
     "src",
     "",

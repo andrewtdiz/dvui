@@ -22,21 +22,6 @@ You won't be able to start the runtime or test with `zig build run` or `zig test
 
 ---
 
-Research codebase via `deepwiki` CLI
-
-- Useful deepwiki for implementation discovery across many files.
-- Semantic “how is this implemented?” questions—e.g., identifying core files, entry points, or code paths related to a feature.
-- It’s best for wide discovery; once you have paths, open files locally for details.
-Note: Slow, it takes ~20 seconds to return.
-
-Usage
-- deepwiki "<query>"
-
-Example
-- deepwiki "how does Zig bind functions to Luau?"
-
----
-
 ## Critical Zig APIs
 
 ### Use `const` for immutabile variables

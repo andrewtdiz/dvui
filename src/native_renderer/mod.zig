@@ -7,14 +7,10 @@
 // - lifecycle.zig: Renderer creation, destruction, logging
 // - window.zig: Window lifecycle and frame rendering
 // - commands.zig: Command buffer handling
-// - events.zig: Event ring buffer helpers
 // - exports.zig: All FFI export functions
 //
 
 pub const commands = @import("commands.zig");
-pub const events = @import("events.zig");
-pub const pushEvent = events.pushEvent;
-const exports = @import("exports.zig");
 
 pub const lifecycle = @import("lifecycle.zig");
 pub const logMessage = lifecycle.logMessage;
@@ -25,10 +21,3 @@ pub const CommandHeader = types.CommandHeader;
 pub const window = @import("window.zig");
 pub const renderFrame = window.renderFrame;
 
-comptime {
-    _ = exports.createRenderer;
-    _ = exports.destroyRenderer;
-    _ = exports.resizeRenderer;
-    _ = exports.presentRenderer;
-    _ = exports.commitCommands;
-}

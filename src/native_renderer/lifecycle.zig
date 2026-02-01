@@ -3,9 +3,9 @@ const std = @import("std");
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
 
-const retained_sync = @import("retained_sync.zig");
 const retained = @import("retained");
 const types = @import("types.zig");
+const utils = @import("utils.zig");
 const Renderer = types.Renderer;
 
 const lua_script_paths = [_][]const u8{
@@ -291,10 +291,39 @@ pub fn teardownLua(renderer: *Renderer) void {
     }
 }
 
+pub fn ensureRetainedStore(renderer: *Renderer) !*retained.NodeStore {
+    if (renderer.retained_store_ready) {
+        if (utils.retainedStore(renderer)) |store| {
+            return store;
+        }
+        renderer.retained_store_ready = false;
+    }
+
+    const store = blk: {
+        if (utils.retainedStore(renderer)) |existing| {
+            break :blk existing;
+        }
+        const allocated = renderer.allocator.create(retained.NodeStore) catch {
+            logMessage(renderer, 3, "retained store alloc failed", .{});
+            return error.OutOfMemory;
+        };
+        renderer.retained_store_ptr = allocated;
+        break :blk allocated;
+    };
+
+    store.init(renderer.allocator) catch |err| {
+        logMessage(renderer, 3, "retained store init failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    renderer.retained_store_ready = true;
+    return store;
+}
+
+
 fn initLua(renderer: *Renderer) void {
     if (renderer.lua_ready) return;
 
-    const store = retained_sync.ensureRetainedStore(renderer, logMessage) catch |err| {
+    const store = ensureRetainedStore(renderer) catch |err| {
         logLuaError(renderer, "retained store", err);
         return;
     };
@@ -389,22 +418,22 @@ pub fn deinitRenderer(renderer: *Renderer) void {
     renderer.frame_arena.deinit();
     teardownLua(renderer);
     if (renderer.retained_store_ready) {
-        if (types.retainedStore(renderer)) |store| {
+        if (utils.retainedStore(renderer)) |store| {
             store.deinit();
         }
         renderer.retained_store_ready = false;
     }
-    if (types.retainedStore(renderer)) |store| {
+    if (utils.retainedStore(renderer)) |store| {
         renderer.allocator.destroy(store);
         renderer.retained_store_ptr = null;
     }
     if (renderer.retained_event_ring_ready) {
-        if (types.retainedEventRing(renderer)) |ring| {
+        if (utils.retainedEventRing(renderer)) |ring| {
             ring.deinit();
         }
         renderer.retained_event_ring_ready = false;
     }
-    if (types.retainedEventRing(renderer)) |ring| {
+    if (utils.retainedEventRing(renderer)) |ring| {
         renderer.allocator.destroy(ring);
         renderer.retained_event_ring_ptr = null;
     }

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Event types that can be dispatched from Zig to JS
+/// Event types that can be dispatched
 pub const EventKind = enum(u8) {
     click = 0,
     input = 1,
@@ -36,9 +36,26 @@ pub const EventEntry = extern struct {
     _pad2: u16 = 0,
 };
 
+pub const ScrollPayload = extern struct {
+    x: f32,
+    y: f32,
+    viewport_w: f32,
+    viewport_h: f32,
+    content_w: f32,
+    content_h: f32,
+};
+
+pub const PointerPayload = extern struct {
+    x: f32,
+    y: f32,
+    button: u8,
+    modifiers: u8,
+    pad: u16 = 0,
+};
+
 const log = std.log.scoped(.event_ring);
 
-/// Ring buffer for events that JS will poll after each frame
+/// Ring buffer for events to poll after each frame
 pub const EventRing = struct {
     allocator: std.mem.Allocator,
     buffer: []EventEntry,
@@ -50,14 +67,6 @@ pub const EventRing = struct {
     dropped_details: u32 = 0,
     capacity: u32,
     detail_capacity: u32,
-    header_cache: Header = .{
-        .read_head = 0,
-        .write_head = 0,
-        .capacity = 0,
-        .detail_capacity = 0,
-        .dropped_events = 0,
-        .dropped_details = 0,
-    },
 
     const DEFAULT_CAPACITY: u32 = 256;
     const DEFAULT_DETAIL_CAPACITY: u32 = 4096;
@@ -162,22 +171,12 @@ pub const EventRing = struct {
         return self.write_head != self.read_head;
     }
 
-    /// Reset after JS has consumed all events
+    /// Reset after consumed all events
     pub fn reset(self: *EventRing) void {
         self.read_head = self.write_head;
         self.detail_write = 0;
     }
 
-    /// Get raw pointers for FFI access
-    pub fn getBufferPtr(self: *EventRing) [*]EventEntry {
-        return self.buffer.ptr;
-    }
-
-    pub fn getDetailPtr(self: *EventRing) [*]u8 {
-        return self.detail_buffer.ptr;
-    }
-
-    /// Get header info for JS to read
     pub const Header = extern struct {
         read_head: u32,
         write_head: u32,
@@ -198,12 +197,6 @@ pub const EventRing = struct {
         };
     }
 
-    pub fn snapshotHeader(self: *EventRing) Header {
-        self.header_cache = self.getHeader();
-        return self.header_cache;
-    }
-
-    /// Update read head after JS has consumed events
     pub fn setReadHead(self: *EventRing, new_read_head: u32) void {
         self.read_head = new_read_head;
         // Reset detail buffer when all events consumed
@@ -215,31 +208,11 @@ pub const EventRing = struct {
 
 /// Map event name string to EventKind
 pub fn eventKindFromName(name: []const u8) ?EventKind {
-    const map = std.StaticStringMap(EventKind).initComptime(.{
-        .{ "click", .click },
-        .{ "input", .input },
-        .{ "focus", .focus },
-        .{ "blur", .blur },
-        .{ "mouseenter", .mouseenter },
-        .{ "mouseleave", .mouseleave },
-        .{ "keydown", .keydown },
-        .{ "keyup", .keyup },
-        .{ "change", .change },
-        .{ "submit", .submit },
-        .{ "pointerdown", .pointerdown },
-        .{ "pointermove", .pointermove },
-        .{ "pointerup", .pointerup },
-        .{ "pointercancel", .pointercancel },
-        .{ "dragstart", .dragstart },
-        .{ "drag", .drag },
-        .{ "dragend", .dragend },
-        .{ "dragenter", .dragenter },
-        .{ "dragleave", .dragleave },
-        .{ "drop", .drop },
-        .{ "scroll", .scroll },
-        .{ "enter", .enter },
-    });
-    return map.get(name);
+    return std.meta.stringToEnum(EventKind, name);
+}
+
+pub fn eventKindFromInt(value: u32) ?EventKind {
+    return std.enums.fromInt(EventKind, value);
 }
 
 test "EventRing basic operations" {
