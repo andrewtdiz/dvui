@@ -26,15 +26,43 @@ pub fn build(b: *Build) !void {
     const linux_display_backend = detectLinuxDisplayBackend(b, target);
 
     const build_options = initBuildOptions(b);
+    const msdf_mod = b.createModule(.{
+        .root_source_file = b.path("deps/msdf_zig/msdf_zig.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const dvui_mod = addDvuiModule(b, target, optimize, build_options, StbOptions{
         .image = false,
         .image_write = false,
-    });
+    }, msdf_mod);
     const dvui_lib = addDvuiLibrary(b, target, optimize, build_options, StbOptions{
         .image = false,
         .image_write = false,
+    }, msdf_mod);
+    const wgpu_dep = b.dependency("wgpu_native_zig", .{
+        .target = target,
+        .optimize = optimize,
     });
-    const retained_mod = addRetainedModule(b, target, optimize, dvui_mod);
+    const wgpu_mod = wgpu_dep.module("wgpu");
+    const dvui_wgpu_mod = b.createModule(.{
+        .root_source_file = b.path("src/dvui.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    configureDvuiModule(b, dvui_wgpu_mod, target, optimize, build_options, StbOptions{
+        .image = false,
+        .image_write = false,
+    }, msdf_mod);
+    const wgpu_backend_mod = b.createModule(.{
+        .root_source_file = b.path("src/backends/wgpu.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    wgpu_backend_mod.addImport("wgpu", wgpu_mod);
+    wgpu_backend_mod.addImport("dvui", dvui_wgpu_mod);
+    wgpu_backend_mod.addImport("msdf_zig", msdf_mod);
+    dvui_wgpu_mod.addImport("backend", wgpu_backend_mod);
+    const retained_mod = addRetainedModule(b, target, optimize, dvui_wgpu_mod);
     const raylib_mod = addRaylibBackend(b, target, optimize, linux_display_backend);
 
     raylib_mod.addImport("dvui", dvui_mod);
@@ -60,8 +88,23 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
         .link_libc = true,
     });
-    native_module.addImport("dvui", dvui_mod);
-    native_module.addImport("raylib-backend", raylib_mod);
+    const raylib_input_mod = createRaylibBackendModule(b, target, optimize, linux_display_backend);
+    raylib_input_mod.addImport("dvui", dvui_wgpu_mod);
+    const webgpu_mod = b.createModule(.{
+        .root_source_file = b.path("src/backends/webgpu-zig.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    webgpu_mod.addImport("dvui", dvui_wgpu_mod);
+    webgpu_mod.addImport("wgpu", wgpu_mod);
+    webgpu_mod.addImport("wgpu-backend", wgpu_backend_mod);
+    webgpu_mod.addImport("raylib-backend", raylib_input_mod);
+
+    native_module.addImport("dvui", dvui_wgpu_mod);
+    native_module.addImport("raylib-backend", raylib_input_mod);
+    native_module.addImport("webgpu", webgpu_mod);
+    native_module.addImport("wgpu", wgpu_mod);
+    native_module.addImport("wgpu-backend", wgpu_backend_mod);
     native_module.addImport("retained", retained_mod);
 
     const luau_ui_mod = b.createModule(.{
@@ -169,6 +212,7 @@ fn configureDvuiModule(
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
     stb: StbOptions,
+    msdf_mod: *Build.Module,
 ) void {
     module.addOptions("build_options", build_options);
     module.addImport("dvui_assets", b.createModule(.{
@@ -180,6 +224,7 @@ fn configureDvuiModule(
         .target = target,
         .optimize = optimize,
     }).module("svg2tvg"));
+    module.addImport("msdf_zig", msdf_mod);
 
     if (target.result.os.tag == .windows) {
         module.linkSystemLibrary("comdlg32", .{});
@@ -235,13 +280,14 @@ fn addDvuiModule(
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
     stb: StbOptions,
+    msdf_mod: *Build.Module,
 ) *Build.Module {
     const dvui_mod = b.addModule("dvui", .{
         .root_source_file = b.path("src/dvui.zig"),
         .target = target,
         .optimize = optimize,
     });
-    configureDvuiModule(b, dvui_mod, target, optimize, build_options, stb);
+    configureDvuiModule(b, dvui_mod, target, optimize, build_options, stb, msdf_mod);
     return dvui_mod;
 }
 
@@ -271,6 +317,7 @@ fn addDvuiLibrary(
     optimize: std.builtin.OptimizeMode,
     build_options: *Build.Step.Options,
     stb: StbOptions,
+    msdf_mod: *Build.Module,
 ) *std.Build.Step.Compile {
     const dvui_module = b.createModule(.{
         .root_source_file = b.path("src/dvui.zig"),
@@ -283,7 +330,7 @@ fn addDvuiLibrary(
         .linkage = .static,
         .root_module = dvui_module,
     });
-    configureDvuiModule(b, dvui_lib.root_module, target, optimize, build_options, stb);
+    configureDvuiModule(b, dvui_lib.root_module, target, optimize, build_options, stb, msdf_mod);
     return dvui_lib;
 }
 
@@ -294,6 +341,47 @@ fn addRaylibBackend(
     linux_display_backend: LinuxDisplayBackend,
 ) *Build.Module {
     const raylib_backend_mod = b.addModule("raylib_zig", .{
+        .root_source_file = b.path("src/backends/raylib-zig.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+
+    const maybe_ray = b.lazyDependency(
+        "raylib_zig",
+        .{
+            .target = target,
+            .optimize = optimize,
+            .linux_display_backend = linux_display_backend,
+        },
+    );
+    if (maybe_ray) |ray| {
+        raylib_backend_mod.linkLibrary(ray.artifact("raylib"));
+        raylib_backend_mod.addImport("raylib", ray.module("raylib"));
+        raylib_backend_mod.addImport("raygui", ray.module("raygui"));
+    }
+
+    const maybe_glfw = b.lazyDependency(
+        "zglfw",
+        .{
+            .target = target,
+            .optimize = optimize,
+        },
+    );
+    if (maybe_glfw) |glfw| {
+        raylib_backend_mod.addImport("zglfw", glfw.module("root"));
+    }
+
+    return raylib_backend_mod;
+}
+
+fn createRaylibBackendModule(
+    b: *Build,
+    target: Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    linux_display_backend: LinuxDisplayBackend,
+) *Build.Module {
+    const raylib_backend_mod = b.createModule(.{
         .root_source_file = b.path("src/backends/raylib-zig.zig"),
         .target = target,
         .optimize = optimize,

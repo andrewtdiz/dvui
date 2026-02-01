@@ -69,9 +69,22 @@ pub fn drawClippedTriangles(self: Backend, texture: ?dvui.Texture, vtx: []const 
     return self.impl.drawClippedTriangles(texture, vtx, idx, clipr);
 }
 
+pub fn setMsdfParams(self: Backend, fill_color: dvui.Color, outline_color: dvui.Color, px_range: f32, outline_width_px: f32) void {
+    if (comptime @hasDecl(Implementation, "setMsdfParams")) {
+        self.impl.setMsdfParams(fill_color, outline_color, px_range, outline_width_px);
+    }
+}
+
 /// Create a `dvui.Texture` from premultiplied alpha `pixels` in RGBA.  The
 /// returned pointer is what will later be passed to `drawClippedTriangles`.
 pub fn textureCreate(self: Backend, pixels: [*]const u8, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) TextureError!dvui.Texture {
+    return self.impl.textureCreate(pixels, width, height, interpolation);
+}
+
+pub fn textureCreateMsdf(self: Backend, pixels: [*]const u8, width: u32, height: u32, interpolation: dvui.enums.TextureInterpolation) TextureError!dvui.Texture {
+    if (comptime @hasDecl(Implementation, "textureCreateMsdf")) {
+        return self.impl.textureCreateMsdf(pixels, width, height, interpolation);
+    }
     return self.impl.textureCreate(pixels, width, height, interpolation);
 }
 

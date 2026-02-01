@@ -154,9 +154,10 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
 
     // might get a slightly smaller font
     var fce = try cw.fonts.getOrCreate(cw.gpa, sized_font);
+    const is_msdf = fce.kind == .msdf;
 
     // this must be synced with Font.textSizeEx()
-    const target_fraction = if (cw.snap_to_pixels) 1.0 else target_size / fce.height;
+    const target_fraction = if (cw.snap_to_pixels and !is_msdf) 1.0 else target_size / fce.height;
 
     // make sure the cache has all the glyphs we need
     if (opts.kern_in == null) {
@@ -181,7 +182,7 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
     var builder = try dvui.Triangles.Builder.init(cw.lifo(), 4 * utf8_text.len, 6 * utf8_text.len);
     defer builder.deinit(cw.lifo());
 
-    const col: Color.PMA = .fromColor(opts.color.opacity(cw.alpha));
+    const col: Color.PMA = if (is_msdf) Color.PMA.white else .fromColor(opts.color.opacity(cw.alpha));
 
     const x_start: f32 = if (cw.snap_to_pixels) @round(opts.rs.r.x) else opts.rs.r.x;
     var x = x_start;
@@ -224,7 +225,7 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
 
         if (kerning and last_codepoint != 0 and i >= next_kern_byte) {
             const kk = fce.kern(last_codepoint, codepoint);
-            x += kk;
+            x += if (is_msdf) kk * target_fraction else kk;
 
             if (opts.kern_in) |ki| {
                 if (next_kern_idx < ki.len) {
@@ -329,6 +330,27 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
     }
 
     const base_tri = builder.build_unowned();
+
+    if (is_msdf) {
+        const fill_color = opts.color.opacity(cw.alpha);
+        var outline_color: Color = .transparent;
+        var outline_width_px: f32 = 0;
+        if (opts.outline_color) |oc| {
+            var thickness = opts.outline_thickness orelse 1.0;
+            if (cw.snap_to_pixels) {
+                thickness = @round(thickness * opts.rs.s);
+            } else {
+                thickness = thickness * opts.rs.s;
+            }
+            if (thickness > 0) {
+                outline_color = oc.opacity(cw.alpha);
+                outline_width_px = thickness;
+            }
+        }
+        cw.backend.setMsdfParams(fill_color, outline_color, fce.msdfPxRange(), outline_width_px);
+        try renderTriangles(base_tri, texture_atlas);
+        return;
+    }
 
     const outline_col = opts.outline_color;
     const outline_thickness = opts.outline_thickness orelse 1.0;

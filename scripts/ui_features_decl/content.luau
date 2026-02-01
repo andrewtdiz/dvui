@@ -22,13 +22,16 @@ local function UiFeatures()
     children = {
       Create("div"){
         class = "w-[320px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-xl p-6",
-        scale = menu_scale,
-        onMouseLeave = function()
-          menu_scale_target(1)
-        end,
         children = {
           Create("h1"){
-            class = "text-4xl text-neutral-50 text-outline-black text-outline-[1px] text-center text-nowrap",
+            class = "text-4xl text-neutral-50 text-center text-nowrap",
+            props = {
+              visual = {
+                fontRenderMode = "msdf",
+                textOutlineColor = 0x000000ff,
+                textOutlineThickness = 1,
+              },
+            },
             children = { "Main Menu" },
           },
           Create("div"){
@@ -53,7 +56,14 @@ local function UiFeatures()
               end,
               children = function(label)
                 return Create("button"){
-                  class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] cursor-pointer",
+                  class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 cursor-pointer",
+                  props = {
+                    visual = {
+                      fontRenderMode = "msdf",
+                      textOutlineColor = 0x000000ff,
+                      textOutlineThickness = 1,
+                    },
+                  },
                   onMouseEnter = function()
                     selected_label(label)
                     menu_scale_target(1.13)

@@ -9,6 +9,7 @@ pub const Rect = types.Rect;
 pub const GizmoRect = types.GizmoRect;
 pub const AnchorSide = types.AnchorSide;
 pub const AnchorAlign = types.AnchorAlign;
+pub const FontRenderMode = tailwind.FontRenderMode;
 const events_mod = @import("events/mod.zig");
 pub const events = events_mod;
 pub const EventRing = events_mod.EventRing;

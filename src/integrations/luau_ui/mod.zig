@@ -78,6 +78,12 @@ pub const LuaUi = struct {
         return null;
     }
 
+    fn parseFontRenderMode(value: []const u8) ?retained.FontRenderMode {
+        if (std.mem.eql(u8, value, "msdf")) return .msdf;
+        if (std.mem.eql(u8, value, "raster")) return .raster;
+        return null;
+    }
+
     fn luaCreate(upv: luaz.Lua.Upvalues(*LuaUi), tag: []const u8, id: u32, parent: ?u32, before: ?u32) !void {
         try upv.value.createNode(tag, id, parent, before);
     }
@@ -244,6 +250,21 @@ pub const LuaUi = struct {
         if (try readOptionalField(u32, props, "textColor")) |value| {
             target.visual.text_color = .{ .value = value };
             changed = true;
+        }
+        if (try readOptionalField(u32, props, "textOutlineColor")) |value| {
+            target.visual.text_outline_color = .{ .value = value };
+            changed = true;
+        }
+        if (try readOptionalField(f32, props, "textOutlineThickness")) |value| {
+            target.visual.text_outline_thickness = value;
+            changed = true;
+        }
+        if (try readOptionalField([]const u8, props, "fontRenderMode")) |value| {
+            if (std.mem.eql(u8, value, "auto")) {
+                self.store.setFontRenderMode(id, null);
+            } else if (parseFontRenderMode(value)) |mode| {
+                self.store.setFontRenderMode(id, mode);
+            }
         }
         if (try readOptionalField(bool, props, "clipChildren")) |value| {
             target.visual.clip_children = value;

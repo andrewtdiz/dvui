@@ -1,6 +1,7 @@
 const std = @import("std");
 const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
+const webgpu = @import("webgpu");
 const retained = @import("retained");
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
@@ -40,6 +41,7 @@ pub const Renderer = struct {
     allocator: std.mem.Allocator,
     backend: ?RaylibBackend.RaylibBackend = null,
     window: ?dvui.Window = null,
+    webgpu: ?webgpu.Renderer = null,
     log_cb: ?*const LogFn = null,
     event_cb: ?*const EventFn = null,
     headers: std.ArrayListUnmanaged(CommandHeader) = .{},

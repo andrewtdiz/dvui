@@ -2,6 +2,7 @@ const std = @import("std");
 
 const dvui = @import("../dvui.zig");
 const dvui_assets = @import("dvui_assets");
+const msdf_zig = @import("msdf_zig");
 const c = dvui.c;
 const Rect = dvui.Rect;
 const Size = dvui.Size;
@@ -22,6 +23,7 @@ pub const Error = error{FontError};
 pub const default_ttf_bytes = builtin.Inter;
 // NOTE: This font name should match the name in the font data base
 pub const default_font_id = FontId.Inter;
+pub const msdf_placeholder_font_id: ?FontId = if (dvui.backend.kind == .wgpu) .MsdfPlaceholder else null;
 
 pub fn hash(font: Font) u64 {
     var h = dvui.fnv.init();
@@ -115,7 +117,8 @@ pub fn textSizeEx(self: Font, text: []const u8, opts: TextSizeOptions) Size {
     const fce = dvui.fontCacheGet(sized_font) catch return .{ .w = 10, .h = 10 };
 
     // this must be synced with dvui.renderText()
-    const target_fraction = if (cw.snap_to_pixels) 1.0 / ss else self.size / fce.height;
+    const is_msdf = fce.kind == .msdf;
+    const target_fraction = if (cw.snap_to_pixels and !is_msdf) 1.0 / ss else self.size / fce.height;
 
     var options = opts;
     if (opts.max_width) |mwidth| {
@@ -169,6 +172,7 @@ pub const FontId = enum(u64) {
     SegoeUILt = dvui.fnv.hash("SegoeUILt"),
     Inter = dvui.fnv.hash("Inter"),
     InterBd = dvui.fnv.hash("InterBd"),
+    MsdfPlaceholder = dvui.fnv.hash("MsdfPlaceholder"),
     // Not included in TTFBytes but should still be named
     Noto = dvui.fnv.hash("Noto"),
     _,
@@ -225,6 +229,7 @@ pub const builtin = struct {
 
 pub const Cache = struct {
     database: std.AutoHashMapUnmanaged(FontId, TTFEntry) = .empty,
+    msdf_fonts: std.AutoHashMapUnmanaged(FontId, MsdfFontResource) = .empty,
     cache: dvui.TrackingAutoHashMap(u64, Entry, .get_and_put) = .empty,
 
     pub const TTFEntry = struct {
@@ -239,6 +244,28 @@ pub const Cache = struct {
                 alloc.free(self.bytes);
                 alloc.free(self.name);
             }
+        }
+    };
+
+    const MsdfGlyph = msdf_zig.types.MsdfChar;
+
+    const MsdfFontResource = struct {
+        parsed: std.json.Parsed(msdf_zig.types.Font),
+        glyphs: std.AutoHashMapUnmanaged(u32, MsdfGlyph) = .empty,
+        kernings: std.AutoHashMapUnmanaged(msdf_zig.types.KerningKey, f32) = .empty,
+        atlas_png: []const u8,
+        atlas_width: f32,
+        atlas_height: f32,
+        line_height: f32,
+        base: f32,
+        px_range: f32,
+        name: []const u8,
+
+        pub fn deinit(self: *MsdfFontResource, gpa: std.mem.Allocator) void {
+            self.kernings.deinit(gpa);
+            self.glyphs.deinit(gpa);
+            self.parsed.deinit();
+            self.* = undefined;
         }
     };
 
@@ -258,6 +285,65 @@ pub const Cache = struct {
                 .allocator = null,
             });
         }
+        if (dvui.backend.kind == .wgpu) {
+            const parsed = std.json.parseFromSlice(msdf_zig.types.Font, allocator, msdf_zig.placeholder_font_json, .{ .allocate = .alloc_always }) catch |err| {
+                dvui.log.err("msdf placeholder font parse error {any}", .{err});
+                return self;
+            };
+            var glyphs: std.AutoHashMapUnmanaged(u32, MsdfGlyph) = .empty;
+            var kernings: std.AutoHashMapUnmanaged(msdf_zig.types.KerningKey, f32) = .empty;
+            errdefer {
+                kernings.deinit(allocator);
+                glyphs.deinit(allocator);
+                parsed.deinit();
+            }
+
+            const glyph_count = parsed.value.chars.len;
+            try glyphs.ensureTotalCapacity(allocator, @intCast(glyph_count + 1));
+            for (parsed.value.chars) |ch| {
+                glyphs.putAssumeCapacity(@intCast(ch.id), .{
+                    .codepoint = @intCast(ch.id),
+                    .advance = @floatFromInt(ch.xadvance),
+                    .size = .{ @floatFromInt(ch.width), @floatFromInt(ch.height) },
+                    .offset = .{ @floatFromInt(ch.xoffset), @floatFromInt(ch.yoffset) },
+                    .tex_offset = .{ @floatFromInt(ch.x), @floatFromInt(ch.y) },
+                    .tex_extent = .{ @floatFromInt(ch.width), @floatFromInt(ch.height) },
+                });
+            }
+
+            const replacement_codepoint: u32 = @intCast(std.unicode.replacement_character);
+            if (glyphs.get(replacement_codepoint) == null) {
+                const question_codepoint: u32 = '?';
+                if (glyphs.get(question_codepoint)) |g| {
+                    glyphs.putAssumeCapacity(replacement_codepoint, g);
+                }
+            }
+
+            const kerning_count = parsed.value.kernings.len;
+            try kernings.ensureTotalCapacity(allocator, @intCast(kerning_count));
+            for (parsed.value.kernings) |k| {
+                const key = msdf_zig.types.KerningKey{
+                    .first = @intCast(k.first),
+                    .second = @intCast(k.second),
+                };
+                kernings.putAssumeCapacity(key, @floatFromInt(k.amount));
+            }
+
+            const resource = MsdfFontResource{
+                .parsed = parsed,
+                .glyphs = glyphs,
+                .kernings = kernings,
+                .atlas_png = msdf_zig.placeholder_atlas_png,
+                .atlas_width = @floatFromInt(parsed.value.common.scaleW),
+                .atlas_height = @floatFromInt(parsed.value.common.scaleH),
+                .line_height = @floatFromInt(parsed.value.common.lineHeight),
+                .base = @floatFromInt(parsed.value.common.base),
+                .px_range = @floatFromInt(parsed.value.distanceField.distanceRange),
+                .name = parsed.value.info.face,
+            };
+
+            try self.msdf_fonts.putNoClobber(allocator, .MsdfPlaceholder, resource);
+        }
         return self;
     }
 
@@ -268,6 +354,12 @@ pub const Cache = struct {
             item.value_ptr.deinit(gpa, backend);
         }
         self.cache.deinit(gpa);
+
+        var msdf_it = self.msdf_fonts.valueIterator();
+        while (msdf_it.next()) |res| {
+            res.deinit(gpa);
+        }
+        self.msdf_fonts.deinit(gpa);
 
         var db_it = self.database.valueIterator();
         while (db_it.next()) |ttf| {
@@ -290,6 +382,14 @@ pub const Cache = struct {
         const entry = try self.cache.getOrPut(gpa, font.hash());
         if (entry.found_existing) return entry.value_ptr;
 
+        if (self.msdf_fonts.getPtr(font.id)) |msdf_res| {
+            entry.value_ptr.* = Entry.initMsdf(msdf_res) catch {
+                self.cache.map.removeByPtr(entry.key_ptr);
+                return self.getOrCreate(gpa, font.switchFont(Font.default_font_id));
+            };
+            return entry.value_ptr;
+        }
+
         const ttf_bytes, const name = if (self.database.get(font.id)) |fbe|
             .{ fbe.bytes, fbe.name }
         else blk: {
@@ -311,18 +411,22 @@ pub const Cache = struct {
     }
 
     pub const Entry = struct {
+        kind: EntryKind,
         face: if (impl == .FreeType) c.FT_Face else c.stbtt_fontinfo,
         // This name should come from `Font.Cache.database` and lives as long as it does
         name: []const u8,
         scaleFactor: f32,
         height: f32,
         ascent: f32,
+        msdf_res: ?*const MsdfFontResource = null,
         glyph_info: std.AutoHashMapUnmanaged(u32, GlyphInfo) = .empty,
         glyph_info_ascii: [ascii_size - ascii_start]GlyphInfo,
         texture_atlas_cache: ?Texture = null,
 
         const ascii_size = 127;
         const ascii_start = 32;
+
+        const EntryKind = enum { raster, msdf };
 
         const GlyphInfo = struct {
             advance: f32, // horizontal distance to move the pen
@@ -367,12 +471,14 @@ pub const Cache = struct {
 
                     if (height <= font.size or pixel_size == min_pixel_size) {
                         break :blk .{
+                            .kind = .raster,
                             .face = face,
                             .name = name,
                             .scaleFactor = 1.0, // not used with freetype
                             .height = @ceil(height),
                             .ascent = @floor(ascent),
                             .glyph_info_ascii = undefined,
+                            .msdf_res = null,
                         };
                     }
                 }
@@ -399,12 +505,14 @@ pub const Cache = struct {
                 const height = ascent - f2_descent + f2_linegap;
 
                 break :blk .{
+                    .kind = .raster,
                     .face = face,
                     .name = name,
                     .scaleFactor = SF,
                     .height = @ceil(height),
                     .ascent = @floor(ascent),
                     .glyph_info_ascii = undefined,
+                    .msdf_res = null,
                 };
             };
 
@@ -416,10 +524,29 @@ pub const Cache = struct {
             return self;
         }
 
+        pub fn initMsdf(res: *const MsdfFontResource) Error!Entry {
+            var self: Entry = .{
+                .kind = .msdf,
+                .face = undefined,
+                .name = res.name,
+                .scaleFactor = 1.0,
+                .height = res.line_height,
+                .ascent = res.base,
+                .glyph_info_ascii = undefined,
+                .msdf_res = res,
+            };
+
+            for (0..self.glyph_info_ascii.len) |i| {
+                self.glyph_info_ascii[i] = try self.glyphInfoGenerate(@intCast(i + ascii_start));
+            }
+
+            return self;
+        }
+
         pub fn deinit(self: *Entry, gpa: std.mem.Allocator, backend: Backend) void {
             defer self.* = undefined;
             self.glyph_info.deinit(gpa);
-            if (impl == .FreeType) {
+            if (self.kind == .raster and impl == .FreeType) {
                 _ = c.FT_Done_Face(self.face);
             }
             if (self.texture_atlas_cache) |tex| backend.textureDestroy(tex);
@@ -436,6 +563,22 @@ pub const Cache = struct {
         /// of the glyphs will not be correct if the atlas needs to be generated.
         pub fn getTextureAtlas(self: *Entry, gpa: std.mem.Allocator, backend: Backend) Backend.TextureError!Texture {
             if (self.texture_atlas_cache) |tex| return tex;
+
+            if (self.kind == .msdf) {
+                const res = self.msdf_res.?;
+                var w: c_int = undefined;
+                var h: c_int = undefined;
+                var channels_in_file: c_int = undefined;
+                const data = dvui.c.stbi_load_from_memory(res.atlas_png.ptr, @as(c_int, @intCast(res.atlas_png.len)), &w, &h, &channels_in_file, 4);
+                if (data == null) {
+                    dvui.log.warn("msdf atlas stbi_load error on font \"{s}\": {s}\n", .{ self.name, dvui.c.stbi_failure_reason() });
+                    return Backend.TextureError.TextureCreate;
+                }
+                defer dvui.c.stbi_image_free(data);
+
+                self.texture_atlas_cache = try backend.textureCreateMsdf(@ptrCast(data), @intCast(w), @intCast(h), .linear);
+                return self.texture_atlas_cache.?;
+            }
 
             // number of extra pixels to add on each side of each glyph
             const pad = 1;
@@ -594,6 +737,19 @@ pub const Cache = struct {
         }
 
         pub fn glyphInfoGenerate(self: *Entry, codepoint: u32) Error!GlyphInfo {
+            if (self.kind == .msdf) {
+                const res = self.msdf_res.?;
+                const glyph = res.glyphs.get(codepoint) orelse return Error.FontError;
+                return .{
+                    .advance = glyph.advance,
+                    .leftBearing = glyph.offset[0],
+                    .topBearing = glyph.offset[1],
+                    .w = glyph.size[0],
+                    .h = glyph.size[1],
+                    .uv = .{ glyph.tex_offset[0] / res.atlas_width, glyph.tex_offset[1] / res.atlas_height },
+                };
+            }
+
             const gi: GlyphInfo = if (impl == .FreeType) blk: {
                 FreeType.intToError(c.FT_Load_Char(self.face, codepoint, @as(i32, @bitCast(FreeType.LoadFlags{ .render = false })))) catch |err| {
                     dvui.log.warn("glyphInfoGet freetype error {any} font {s} codepoint {d}\n", .{ err, self.name, codepoint });
@@ -642,6 +798,14 @@ pub const Cache = struct {
         }
 
         pub fn kern(fce: *Entry, codepoint1: u32, codepoint2: u32) f32 {
+            if (fce.kind == .msdf) {
+                const res = fce.msdf_res.?;
+                const key = msdf_zig.types.KerningKey{
+                    .first = @intCast(codepoint1),
+                    .second = @intCast(codepoint2),
+                };
+                return res.kernings.get(key) orelse 0;
+            }
             if (impl == .FreeType) {
                 const index1 = c.FT_Get_Char_Index(fce.face, codepoint1);
                 const index2 = c.FT_Get_Char_Index(fce.face, codepoint2);
@@ -657,6 +821,10 @@ pub const Cache = struct {
                 const kern_adv: c_int = c.stbtt_GetCodepointKernAdvance(&fce.face, @as(c_int, @intCast(codepoint1)), @as(c_int, @intCast(codepoint2)));
                 return fce.scaleFactor * @as(f32, @floatFromInt(kern_adv));
             }
+        }
+
+        pub fn msdfPxRange(self: *Entry) f32 {
+            return self.msdf_res.?.px_range;
         }
 
         /// Doesn't scale the font or max_width, always stops at newlines

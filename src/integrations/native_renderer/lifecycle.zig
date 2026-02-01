@@ -431,6 +431,7 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .allocator = undefined,
         .backend = null,
         .window = null,
+        .webgpu = null,
         .log_cb = log_cb,
         .event_cb = event_cb,
         .headers = .{},

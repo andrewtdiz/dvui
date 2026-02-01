@@ -363,6 +363,7 @@ pub const SolidNode = struct {
     access_modal: ?bool = null,
     class_spec: tailwind.Spec = .{},
     class_spec_dirty: bool = true,
+    font_render_mode_override: ?tailwind.FontRenderMode = null,
     input_state: ?InputState = null,
     gizmo_rect: ?GizmoRect = null,
     gizmo_rect_serial: u64 = 0,
@@ -448,6 +449,13 @@ pub const SolidNode = struct {
         const copy = try allocator.dupe(u8, value);
         if (self.class_name.len > 0) allocator.free(self.class_name);
         self.class_name = copy;
+        self.class_spec_dirty = true;
+        self.invalidatePaint();
+    }
+
+    pub fn setFontRenderMode(self: *SolidNode, mode: ?tailwind.FontRenderMode) void {
+        if (self.font_render_mode_override == mode) return;
+        self.font_render_mode_override = mode;
         self.class_spec_dirty = true;
         self.invalidatePaint();
     }
@@ -618,6 +626,9 @@ pub const SolidNode = struct {
             self.class_spec = tailwind.parse(self.className());
             self.class_spec_dirty = false;
         }
+        if (self.font_render_mode_override) |mode| {
+            self.class_spec.font_render_mode = mode;
+        }
         return self.class_spec;
     }
 
@@ -762,6 +773,13 @@ pub const NodeStore = struct {
     pub fn setClassName(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
         try target.setClassName(self.allocator, value);
+        self.markNodeChanged(id);
+    }
+
+    pub fn setFontRenderMode(self: *NodeStore, id: u32, mode: ?tailwind.FontRenderMode) void {
+        const target = self.nodes.getPtr(id) orelse return;
+        if (target.font_render_mode_override == mode) return;
+        target.setFontRenderMode(mode);
         self.markNodeChanged(id);
     }
 

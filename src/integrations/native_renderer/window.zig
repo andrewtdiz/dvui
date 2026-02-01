@@ -5,6 +5,7 @@ const dvui = @import("dvui");
 const RaylibBackend = @import("raylib-backend");
 const ray = RaylibBackend.raylib;
 const raygui = RaylibBackend.raygui;
+const webgpu = @import("webgpu");
 const retained = @import("retained");
 const luaz = @import("luaz");
 
@@ -52,12 +53,24 @@ pub fn ensureWindow(renderer: *Renderer) !void {
         renderer.backend = null;
     }
 
-    var win = blk: {
-        if (renderer.backend) |*backend| {
-            break :blk try dvui.Window.init(@src(), renderer.allocator, backend.backend(), .{});
+    renderer.size = .{ @intCast(ray.getScreenWidth()), @intCast(ray.getScreenHeight()) };
+    renderer.pixel_size = .{ @intCast(ray.getRenderWidth()), @intCast(ray.getRenderHeight()) };
+
+    renderer.webgpu = try webgpu.Renderer.init(renderer.allocator, .{
+        .width = renderer.size[0],
+        .height = renderer.size[1],
+    }, .{
+        .width = renderer.pixel_size[0],
+        .height = renderer.pixel_size[1],
+    });
+    errdefer {
+        if (renderer.webgpu) |*wgpu_renderer| {
+            wgpu_renderer.deinit();
         }
-        unreachable;
-    };
+        renderer.webgpu = null;
+    }
+
+    var win = try dvui.Window.init(@src(), renderer.allocator, renderer.webgpu.?.dvuiBackend(), .{});
     errdefer win.deinit();
     win.theme = dvui.Theme.builtin.shadcn;
     renderer.window = win;
@@ -73,6 +86,10 @@ pub fn teardownWindow(renderer: *Renderer) void {
     if (renderer.window) |*win| {
         win.deinit();
         renderer.window = null;
+    }
+    if (renderer.webgpu) |*wgpu_renderer| {
+        wgpu_renderer.deinit();
+        renderer.webgpu = null;
     }
     if (renderer.backend) |*backend| {
         backend.deinit();
@@ -98,6 +115,9 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     renderer.size = .{ screen_w, screen_h };
     renderer.pixel_size = .{ pixel_w, pixel_h };
     lifecycle.sendWindowResizeEvent(renderer, screen_w, screen_h, pixel_w, pixel_h);
+    if (renderer.webgpu) |*wgpu_renderer| {
+        wgpu_renderer.resize(.{ .width = screen_w, .height = screen_h }, .{ .width = pixel_w, .height = pixel_h });
+    }
 }
 
 fn saveScreenshotPng(renderer: *Renderer, picture: *dvui.Picture) void {
@@ -176,6 +196,8 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
 pub fn renderFrame(renderer: *Renderer) void {
     if (!renderer.window_ready) return;
 
+    ray.pollInputEvents();
+
     if (ray.windowShouldClose()) {
         teardownWindow(renderer);
         renderer.pending_destroy = true;
@@ -187,17 +209,18 @@ pub fn renderFrame(renderer: *Renderer) void {
 
     _ = renderer.frame_arena.reset(.retain_capacity);
 
-    ray.beginDrawing();
-    defer ray.endDrawing();
-
-    // Clear to neutral black; retained UI draws its own backgrounds.
-    ray.clearBackground(RaylibBackend.dvuiColorToRaylib(dvui.Color.black));
-
     if (renderer.window) |*win| {
         win.begin(std.time.nanoTimestamp()) catch |err| {
             logMessage(renderer, 3, "window begin failed: {s}", .{@errorName(err)});
             return;
         };
+        defer {
+            if (renderer.webgpu) |*wgpu_renderer| {
+                wgpu_renderer.render() catch |err| {
+                    logMessage(renderer, 3, "webgpu render failed: {s}", .{@errorName(err)});
+                };
+            }
+        }
         defer {
             _ = win.end(.{}) catch |err| {
                 logMessage(renderer, 3, "window end failed: {s}", .{@errorName(err)});

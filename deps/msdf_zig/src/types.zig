@@ -119,6 +119,11 @@ pub const GpuChar = extern struct {
     offset: [2]f32,
 };
 
+pub const CameraUniform = extern struct {
+    projection: [4][4]f32,
+    view: [4][4]f32,
+};
+
 pub const GpuTextHeader = extern struct {
     transform: [4][4]f32,
     fill_color: [4]f32,
@@ -126,7 +131,7 @@ pub const GpuTextHeader = extern struct {
     scale: f32,
     px_range: f32,
     outline_width_px: f32,
-    _padding: f32,
+    _padding: f32 = 0.0,
 };
 
 pub const GpuTextInstance = extern struct {
