@@ -3,6 +3,7 @@ const dvui = @import("dvui");
 const types = @import("../../core/types.zig");
 const direct = @import("../direct.zig");
 const state = @import("state.zig");
+const transitions = @import("../transitions.zig");
 
 const rectContains = state.rectContains;
 const intersectRect = state.intersectRect;
@@ -11,6 +12,8 @@ const nodeIdExtra = state.nodeIdExtra;
 const physicalToDvuiRect = state.physicalToDvuiRect;
 const transformedRect = direct.transformedRect;
 const PointerPick = state.PointerPick;
+const RenderContext = state.RenderContext;
+const contextRect = state.contextRect;
 
 fn pointerEventAllowed(node_id: u32, widget_id: dvui.Id, e: *dvui.Event) bool {
     switch (e.evt) {
@@ -28,23 +31,24 @@ pub fn scanPickInteractive(
     store: *types.NodeStore,
     node: *types.SolidNode,
     point: dvui.Point.Physical,
-    clip_rect: ?types.Rect,
+    ctx: RenderContext,
     result: *PointerPick,
     order: *u32,
     skip_portals: bool,
 ) void {
     if (skip_portals and isPortalNode(node)) return;
-    if (clip_rect) |clip| {
+    if (ctx.clip) |clip| {
         if (!rectContains(clip, point)) return;
     }
 
-    var next_clip = clip_rect;
+    var next_ctx = ctx;
     var node_rect: ?types.Rect = null;
     if (node.kind == .element) {
         const spec = node.prepareClassSpec();
         if (!spec.hidden and node.visual.opacity > 0) {
             if (node.layout.rect) |base_rect| {
-                node_rect = transformedRect(node, base_rect) orelse base_rect;
+                const rect = contextRect(ctx, base_rect);
+                node_rect = transformedRect(node, rect) orelse rect;
             }
             if (node_rect) |rect| {
                 if (rectContains(rect, point)) {
@@ -61,28 +65,43 @@ pub fn scanPickInteractive(
                     }
                 }
                 if ((spec.clip_children orelse false) or node.visual.clip_children) {
-                    if (next_clip) |clip| {
-                        next_clip = intersectRect(clip, rect);
-                        if (next_clip == null) return;
+                    if (next_ctx.clip) |clip| {
+                        next_ctx.clip = intersectRect(clip, rect);
                     } else {
-                        next_clip = rect;
+                        next_ctx.clip = rect;
                     }
                 }
             }
+        }
+        if (node.layout.rect) |rect| {
+            const t = transitions.effectiveTransform(node);
+            const anchor = dvui.Point.Physical{
+                .x = rect.x + rect.w * t.anchor[0],
+                .y = rect.y + rect.h * t.anchor[1],
+            };
+            const offset = dvui.Point.Physical{
+                .x = anchor.x + t.translation[0] - t.scale[0] * anchor.x,
+                .y = anchor.y + t.translation[1] - t.scale[1] * anchor.y,
+            };
+            next_ctx.scale = .{ ctx.scale[0] * t.scale[0], ctx.scale[1] * t.scale[1] };
+            next_ctx.offset = .{
+                ctx.scale[0] * offset.x + ctx.offset[0],
+                ctx.scale[1] * offset.y + ctx.offset[1],
+            };
         }
     }
 
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
-            scanPickInteractive(store, child, point, next_clip, result, order, skip_portals);
+            scanPickInteractive(store, child, point, next_ctx, result, order, skip_portals);
         }
     }
 }
 
-pub fn pickInteractiveId(store: *types.NodeStore, root: *types.SolidNode, point: dvui.Point.Physical, skip_portals: bool) u32 {
+pub fn pickInteractiveId(store: *types.NodeStore, root: *types.SolidNode, point: dvui.Point.Physical, skip_portals: bool, ctx: RenderContext) u32 {
     var result: PointerPick = .{};
     var order: u32 = 0;
-    scanPickInteractive(store, root, point, null, &result, &order, skip_portals);
+    scanPickInteractive(store, root, point, ctx, &result, &order, skip_portals);
     return result.id;
 }
 
@@ -254,8 +273,9 @@ pub fn renderScrollBars(
     viewport: types.Rect,
     scroll_info: *dvui.ScrollInfo,
     scroll_id: dvui.Id,
+    scale: f32,
 ) bool {
-    const thickness = node.scroll.scrollbar_thickness;
+    const thickness = node.scroll.scrollbar_thickness * scale;
     if (thickness <= 0) return false;
 
     const show_v = scroll_info.scrollMax(.vertical) > 0;

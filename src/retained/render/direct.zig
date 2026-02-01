@@ -64,22 +64,27 @@ pub fn transformedRect(node: *const types.SolidNode, base: ?types.Rect) ?types.R
     };
 }
 
-pub fn applyTransformToOptions(node: *const types.SolidNode, options: *dvui.Options) void {
-    if (node.layout.rect) |rect| {
+pub fn applyTransformToOptions(node: *const types.SolidNode, options: *dvui.Options, parent_origin: dvui.Point.Physical, base_rect: ?types.Rect) void {
+    const rect = base_rect orelse node.layout.rect orelse return;
         const t = transitions.effectiveTransform(node);
         const bounds = transformedRect(node, rect) orelse rect;
+        const local = types.Rect{
+            .x = bounds.x - parent_origin.x,
+            .y = bounds.y - parent_origin.y,
+            .w = bounds.w,
+            .h = bounds.h,
+        };
         const scale = dvui.windowNaturalScale();
         const inv_scale: f32 = if (scale != 0) 1.0 / scale else 1.0;
         options.rect = dvui.Rect{
-            .x = bounds.x * inv_scale,
-            .y = bounds.y * inv_scale,
-            .w = bounds.w * inv_scale,
-            .h = bounds.h * inv_scale,
+            .x = local.x * inv_scale,
+            .y = local.y * inv_scale,
+            .w = local.w * inv_scale,
+            .h = local.h * inv_scale,
         };
         if (options.rotation == null) {
             options.rotation = t.rotation;
         }
-    }
 }
 
 pub fn drawRectDirect(

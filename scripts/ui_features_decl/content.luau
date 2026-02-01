@@ -22,6 +22,10 @@ local function UiFeatures()
     children = {
       Create("div"){
         class = "w-[320px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-xl p-6",
+        scale = menu_scale,
+        onMouseLeave = function()
+            menu_scale_target(1)
+        end,
         children = {
           Create("h1"){
             class = "text-4xl text-neutral-50 text-center text-nowrap",

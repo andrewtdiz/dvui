@@ -38,6 +38,29 @@ pub const OverlayState = struct {
     hit_rect: ?types.Rect = null,
 };
 
+pub const RenderContext = struct {
+    origin: dvui.Point.Physical,
+    clip: ?types.Rect = null,
+    scale: [2]f32 = .{ 1, 1 },
+    offset: [2]f32 = .{ 0, 0 },
+};
+
+pub fn contextPoint(ctx: RenderContext, point: dvui.Point.Physical) dvui.Point.Physical {
+    return .{
+        .x = ctx.scale[0] * point.x + ctx.offset[0],
+        .y = ctx.scale[1] * point.y + ctx.offset[1],
+    };
+}
+
+pub fn contextRect(ctx: RenderContext, rect: types.Rect) types.Rect {
+    return .{
+        .x = ctx.scale[0] * rect.x + ctx.offset[0],
+        .y = ctx.scale[1] * rect.y + ctx.offset[1],
+        .w = rect.w * ctx.scale[0],
+        .h = rect.h * ctx.scale[1],
+    };
+}
+
 pub var cached_overlay_state: OverlayState = .{};
 pub var overlay_cache_version: u64 = 0;
 

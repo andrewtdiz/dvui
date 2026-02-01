@@ -112,6 +112,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     state.modal_overlay_active = overlay_state.modal;
 
     const current_mouse = dvui.currentWindow().mouse_pt;
+    const root_ctx = state.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
 
     state.hover_layer = .base;
     if (portal_ids.len > 0) {
@@ -160,13 +161,13 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     }
 
     if (state.input_enabled_state) {
-        state.pointer_top_base_id = interaction.pickInteractiveId(store, root, current_mouse, true);
+        state.pointer_top_base_id = interaction.pickInteractiveId(store, root, current_mouse, true, root_ctx);
         var overlay_pick: state.PointerPick = .{};
         var overlay_order: u32 = 0;
         if (portal_ids.len > 0) {
             for (portal_ids) |portal_id| {
                 const portal = store.node(portal_id) orelse continue;
-                interaction.scanPickInteractive(store, portal, current_mouse, null, &overlay_pick, &overlay_order, false);
+                interaction.scanPickInteractive(store, portal, current_mouse, root_ctx, &overlay_pick, &overlay_order, false);
             }
         }
         state.pointer_top_overlay_id = overlay_pick.id;
@@ -205,7 +206,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     }
 
     state.render_layer = .base;
-    renderers.renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, false);
+    renderers.renderChildrenOrdered(event_ring, store, root, scratch, &dirty_tracker, root_ctx, false);
 
     if (portal_ids.len > 0) {
         const overlay_id = state.overlaySubwindowId();
@@ -214,13 +215,19 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         const overlay_rect_nat = physicalToDvuiRect(overlay_rect);
         const overlay_rect_natural = dvui.Rect.Natural.cast(overlay_rect_nat);
         const overlay_mouse_events = overlay_state.modal or overlay_state.hit_rect != null;
+        const overlay_ctx = state.RenderContext{
+            .origin = .{ .x = overlay_rect.x, .y = overlay_rect.y },
+            .clip = null,
+            .scale = .{ 1, 1 },
+            .offset = .{ 0, 0 },
+        };
 
         dvui.subwindowAdd(overlay_id, overlay_rect_nat, overlay_rect_phys, overlay_state.modal, null, overlay_mouse_events);
         const prev = dvui.subwindowCurrentSet(overlay_id, overlay_rect_natural);
         defer _ = dvui.subwindowCurrentSet(prev.id, prev.rect);
 
         state.render_layer = .overlay;
-        overlay.renderPortalNodesOrdered(event_ring, store, portal_ids, scratch, &dirty_tracker);
+        overlay.renderPortalNodesOrdered(event_ring, store, portal_ids, scratch, &dirty_tracker, overlay_ctx);
     }
 
     focus.endFrame(event_ring, store, state.input_enabled_state);

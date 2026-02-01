@@ -151,6 +151,7 @@ pub fn renderPortalNodesOrdered(
     portal_ids: []const u32,
     allocator: std.mem.Allocator,
     tracker: *DirtyRegionTracker,
+    ctx: state.RenderContext,
 ) void {
     if (portal_ids.len == 0) return;
     var ordered: std.ArrayList(state.OrderedNode) = .empty;
@@ -177,6 +178,6 @@ pub fn renderPortalNodesOrdered(
     }
 
     for (ordered.items) |entry| {
-        renderers.renderNode(event_ring, store, entry.id, allocator, tracker);
+        renderers.renderNode(event_ring, store, entry.id, allocator, tracker, ctx);
     }
 }
