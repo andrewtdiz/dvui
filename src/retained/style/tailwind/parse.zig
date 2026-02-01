@@ -25,6 +25,9 @@ const LiteralKind = enum {
     align_content_end,
     hidden,
     overflow_hidden,
+    overflow_scroll,
+    overflow_x_scroll,
+    overflow_y_scroll,
     text_left,
     text_center,
     text_right,
@@ -55,6 +58,9 @@ const literal_rules = [_]LiteralRule{
     .{ .token = "content-end", .kind = .align_content_end },
     .{ .token = "hidden", .kind = .hidden },
     .{ .token = "overflow-hidden", .kind = .overflow_hidden },
+    .{ .token = "overflow-scroll", .kind = .overflow_scroll },
+    .{ .token = "overflow-x-scroll", .kind = .overflow_x_scroll },
+    .{ .token = "overflow-y-scroll", .kind = .overflow_y_scroll },
     .{ .token = "text-left", .kind = .text_left },
     .{ .token = "text-center", .kind = .text_center },
     .{ .token = "text-right", .kind = .text_right },
@@ -194,6 +200,12 @@ fn applyLiteral(spec: *types.Spec, kind: LiteralKind) void {
         .align_content_end => spec.align_content = .end,
         .hidden => spec.hidden = true,
         .overflow_hidden => spec.clip_children = true,
+        .overflow_scroll => {
+            spec.scroll_x = true;
+            spec.scroll_y = true;
+        },
+        .overflow_x_scroll => spec.scroll_x = true,
+        .overflow_y_scroll => spec.scroll_y = true,
         .text_left => spec.text_align = .left,
         .text_center => spec.text_align = .center,
         .text_right => spec.text_align = .right,

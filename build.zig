@@ -76,7 +76,7 @@ pub fn build(b: *Build) !void {
     native_module.addImport("luau_ui", luau_ui_mod);
 
     const luau_runner_mod = b.createModule(.{
-        .root_source_file = b.path("src/luau-native-runner.zig"),
+        .root_source_file = b.path("examples/luau-native-runner.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -171,6 +171,11 @@ fn configureDvuiModule(
     stb: StbOptions,
 ) void {
     module.addOptions("build_options", build_options);
+    module.addImport("dvui_assets", b.createModule(.{
+        .root_source_file = b.path("assets/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
     module.addImport("svg2tvg", b.dependency("svg2tvg", .{
         .target = target,
         .optimize = optimize,

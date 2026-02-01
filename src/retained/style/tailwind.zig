@@ -229,3 +229,17 @@ test "tailwind transition parsing" {
     try std.testing.expectEqual(c1.transition.easing_style, c2.transition.easing_style);
     try std.testing.expectEqual(c1.transition.easing_dir, c2.transition.easing_dir);
 }
+
+test "tailwind overflow scroll parsing" {
+    const a = parse("overflow-scroll");
+    try std.testing.expect(a.scroll_x);
+    try std.testing.expect(a.scroll_y);
+
+    const b = parse("overflow-y-scroll");
+    try std.testing.expect(!b.scroll_x);
+    try std.testing.expect(b.scroll_y);
+
+    const c = parse("overflow-x-scroll");
+    try std.testing.expect(c.scroll_x);
+    try std.testing.expect(!c.scroll_y);
+}

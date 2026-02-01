@@ -1,4 +1,4 @@
-local IMAGE_SRC = "src/sprite.png"
+local IMAGE_SRC = "assets/sprite.png"
 
 local ids = {
   root = 1,

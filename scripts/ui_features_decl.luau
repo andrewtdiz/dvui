@@ -1,194 +1,41 @@
-local function Create(tag)
-  return function(spec)
-    return {
-      tag = tag,
-      id = spec.id,
-      class = spec.class,
-      props = spec.props,
-      children = spec.children,
-    }
+local module_cache = {}
+
+function require(path)
+  if type(path) ~= "string" then
+    error("require path must be string", 0)
   end
+
+  local key = path
+  if string.sub(key, -5) ~= ".luau" then
+    key = key .. ".luau"
+  end
+
+  local cached = module_cache[key]
+  if cached ~= nil then
+    return cached
+  end
+
+  local result, err = dvui_dofile(key)
+  if err ~= nil then
+    error(err, 0)
+  end
+  if result == nil then
+    result = true
+  end
+  module_cache[key] = result
+  return result
 end
 
-local function For(spec)
-  local out = {}
-  for i, item in ipairs(spec.each) do
-    out[i] = spec.children(item, i)
-  end
-  return out
-end
-
-local menuOptions = { "Play Game", "Load Game", "Settings", "Quit" }
-local count = 0
-local rerender_requested = false
-local inc_button_id = 100
-
-local function UiFeatures()
-  return Create("div"){
-    class = "w-full h-full flex flex-col justify-center items-center bg-neutral-950",
-    children = {
-      Create("div"){
-        class = "w-[420px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-3xl p-10",
-        children = {
-          Create("h1"){
-            class = "text-4xl text-neutral-50 text-outline-black text-outline-[1px] text-center text-nowrap",
-            children = { "Main Menu" },
-          },
-          Create("div"){
-            class = "w-full h-px bg-neutral-700 opacity-60",
-          },
-          Create("div"){
-            class = "w-full flex flex-col gap-4 items-center",
-            children = For{
-              each = menuOptions,
-              children = function(label)
-                return Create("button"){
-                  class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] cursor-pointer",
-                  props = { type = "button" },
-                  children = { label },
-                }
-              end,
-            },
-          },
-          Create("div"){
-            class = "w-full flex flex-col gap-3 items-center",
-            children = {
-              Create("p"){
-                class = "text-lg text-neutral-300 text-outline-black text-outline-[1px]",
-                children = { string.format("Count: %d", count) },
-              },
-              Create("button"){
-                id = inc_button_id,
-                class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] cursor-pointer",
-                props = { type = "button" },
-                children = { "Increment" },
-              },
-            },
-          },
-        },
-      },
-    },
-  }
-end
-
-local next_id = 1
-
-local function alloc_id()
-  local id = next_id
-  next_id = next_id + 1
-  return id
-end
-
-local function apply_props(id, props)
-  if props == nil then
-    return
-  end
-
-  if props.visual ~= nil then
-    ui.set_visual(id, props.visual)
-  end
-  if props.transform ~= nil then
-    ui.set_transform(id, props.transform)
-  end
-  if props.scroll ~= nil then
-    ui.set_scroll(id, props.scroll)
-  end
-  if props.anchor ~= nil then
-    ui.set_anchor(id, props.anchor)
-  end
-  if props.image ~= nil then
-    ui.set_image(id, props.image)
-  end
-  if props.src ~= nil then
-    ui.set_src(id, props.src)
-  end
-
-  local listen = props.listen
-  if listen ~= nil then
-    for _, event_name in ipairs(listen) do
-      ui.listen(id, event_name)
-    end
-  end
-end
-
-local function listen_defaults(id, tag)
-  if tag == "button" then
-    ui.listen(id, "click")
-    ui.listen(id, "mouseenter")
-    ui.listen(id, "mouseleave")
-    return
-  end
-
-  if tag == "input" then
-    ui.listen(id, "input")
-    ui.listen(id, "focus")
-    ui.listen(id, "blur")
-    ui.listen(id, "enter")
-  end
-end
-
-local function mount(node, parent_id)
-  local node_type = type(node)
-  if node_type == "string" then
-    local id = alloc_id()
-    ui.create("text", id, parent_id, nil)
-    ui.set_text(id, node)
-    return id
-  end
-
-  if node_type ~= "table" then
-    return nil
-  end
-
-  local tag = node.tag
-  if tag == nil then
-    for _, child in ipairs(node) do
-      mount(child, parent_id)
-    end
-    return nil
-  end
-
-  local id = node.id
-  if id == nil then
-    id = alloc_id()
-  else
-    if id >= next_id then
-      next_id = id + 1
-    end
-  end
-  ui.create(tag, id, parent_id, nil)
-  if node.class ~= nil then
-    ui.set_class(id, node.class)
-  end
-  apply_props(id, node.props)
-  listen_defaults(id, tag)
-  if node.children ~= nil then
-    mount(node.children, id)
-  end
-  return id
-end
-
-local function render()
-  ui.reset()
-  next_id = 1
-  mount(UiFeatures(), nil)
-end
+local content = require("scripts/ui_features_decl/content")
+local renderer = require("scripts/ui_features_decl/renderer")
 
 function init()
-  rerender_requested = false
-  render()
+  renderer.init(content)
 end
 
 function update(dt, input)
-  if rerender_requested then
-    rerender_requested = false
-    render()
-  end
 end
 
 function on_event(kind, id, detail)
-  if kind == "click" and id == inc_button_id then
-    count = count + 1
-    rerender_requested = true
-  end
+  renderer.dispatch_event(kind, id, detail)
 end

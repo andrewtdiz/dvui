@@ -72,6 +72,131 @@ pub fn logLuaError(renderer: *Renderer, label: []const u8, err: anyerror) void {
     logMessage(renderer, 3, "lua {s} failed: {s}", .{ label, err_msg });
 }
 
+fn dvuiDofile(state_opt: ?luaz.State.LuaState) callconv(.c) c_int {
+    const lua = luaz.Lua.fromState(state_opt.?);
+    const base_top = lua.state.getTop();
+
+    const renderer_ptr = lua.state.toLightUserdata(luaz.State.upvalueIndex(1)) orelse {
+        lua.state.setTop(base_top);
+        lua.state.pushNil();
+        lua.state.pushString("dvui_dofile missing renderer");
+        return 2;
+    };
+    const renderer: *Renderer = @ptrCast(@alignCast(renderer_ptr));
+
+    const path_z = lua.state.checkString(1);
+    const path: []const u8 = path_z;
+
+    var file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |err| {
+        lua.state.setTop(base_top);
+        lua.state.pushNil();
+        lua.state.pushString("dofile(");
+        lua.state.pushLString(path);
+        lua.state.pushString(") open failed: ");
+        lua.state.pushLString(@errorName(err));
+        lua.state.concat(4);
+        return 2;
+    };
+    defer file.close();
+
+    const script_bytes = file.readToEndAlloc(renderer.allocator, max_lua_script_bytes) catch |err| {
+        lua.state.setTop(base_top);
+        lua.state.pushNil();
+        lua.state.pushString("dofile(");
+        lua.state.pushLString(path);
+        lua.state.pushString(") read failed: ");
+        lua.state.pushLString(@errorName(err));
+        lua.state.concat(4);
+        return 2;
+    };
+    defer renderer.allocator.free(script_bytes);
+
+    const compile_result = luaz.Compiler.compile(script_bytes, .{}) catch |err| {
+        lua.state.setTop(base_top);
+        lua.state.pushNil();
+        lua.state.pushString("dofile(");
+        lua.state.pushLString(path);
+        lua.state.pushString(") compile failed: ");
+        lua.state.pushLString(@errorName(err));
+        lua.state.concat(4);
+        return 2;
+    };
+    defer compile_result.deinit();
+
+    if (compile_result == .err) {
+        const message = compile_result.err;
+        const trimmed = if (message.len > max_lua_error_len) message[0..max_lua_error_len] else message;
+
+        lua.state.setTop(base_top);
+        lua.state.pushNil();
+        lua.state.pushString("dofile(");
+        lua.state.pushLString(path);
+        lua.state.pushString(") compile error: ");
+        lua.state.pushLString(trimmed);
+        lua.state.concat(4);
+        return 2;
+    }
+
+    const load_status = lua.state.load(path_z, compile_result.ok, 0);
+    switch (load_status) {
+        .ok => {},
+        .errmem => {
+            lua.state.setTop(base_top);
+            lua.state.pushNil();
+            lua.state.pushString("dofile(");
+            lua.state.pushLString(path);
+            lua.state.pushString(") load out of memory");
+            lua.state.concat(3);
+            return 2;
+        },
+        else => {
+            lua.state.setTop(base_top);
+            lua.state.pushNil();
+            lua.state.pushString("dofile(");
+            lua.state.pushLString(path);
+            lua.state.pushString(") load failed");
+            lua.state.concat(3);
+            return 2;
+        },
+    }
+
+    const call_status = lua.state.pcall(0, 1, 0);
+    switch (call_status) {
+        .ok => {
+            const new_top = lua.state.getTop();
+            return @intCast(new_top - base_top);
+        },
+        else => {
+            var err_message_buf: [max_lua_error_len]u8 = undefined;
+            var err_message: []const u8 = @tagName(call_status);
+
+            if (lua.state.getTop() > base_top) {
+                if (lua.state.toString(-1)) |err_z| {
+                    const err_raw: []const u8 = err_z;
+                    const n: usize = @min(err_raw.len, max_lua_error_len);
+                    std.mem.copyForwards(u8, err_message_buf[0..n], err_raw[0..n]);
+                    err_message = err_message_buf[0..n];
+                }
+            }
+
+            lua.state.setTop(base_top);
+            lua.state.pushNil();
+            lua.state.pushString("dofile(");
+            lua.state.pushLString(path);
+            lua.state.pushString(") runtime error: ");
+            lua.state.pushLString(err_message);
+            lua.state.concat(4);
+            return 2;
+        },
+    }
+}
+
+fn registerLuaFileLoader(renderer: *Renderer, lua: *luaz.Lua) void {
+    lua.state.pushLightUserdata(@ptrCast(renderer));
+    lua.state.pushCClosureK(dvuiDofile, "dvui_dofile", 1, null);
+    lua.state.setGlobal("dvui_dofile");
+}
+
 fn loadLuaScript(renderer: *Renderer) bool {
     var file_opt: ?std.fs.File = null;
     var chosen_path: []const u8 = "";
@@ -184,6 +309,7 @@ fn initLua(renderer: *Renderer) void {
         return;
     };
     lua_ptr.openLibs();
+    registerLuaFileLoader(renderer, lua_ptr);
 
     const lua_ui_ptr = renderer.allocator.create(luau_ui.LuaUi) catch |err| {
         lua_ptr.deinit();

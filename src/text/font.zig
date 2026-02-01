@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const dvui = @import("../dvui.zig");
+const dvui_assets = @import("dvui_assets");
 const c = dvui.c;
 const Rect = dvui.Rect;
 const Size = dvui.Size;
@@ -203,39 +204,23 @@ pub const FontId = enum(u64) {
 };
 
 pub const builtin = struct {
-    pub const InvalidFontFile = "This is a very invalid font file";
-    pub const Aleo = @embedFile("../fonts/Aleo/static/Aleo-Regular.ttf");
-    pub const AleoBd = @embedFile("../fonts/Aleo/static/Aleo-Bold.ttf");
-    pub const Vera = @embedFile("../fonts/bitstream-vera/Vera.ttf");
-    //pub const VeraBI = @embedFile("../fonts/bitstream-vera/VeraBI.ttf");
-    pub const VeraBd = @embedFile("../fonts/bitstream-vera/VeraBd.ttf");
-    //pub const VeraIt = @embedFile("../fonts/bitstream-vera/VeraIt.ttf");
-    //pub const VeraMoBI = @embedFile("../fonts/bitstream-vera/VeraMoBI.ttf");
-    //pub const VeraMoBd = @embedFile("../fonts/bitstream-vera/VeraMoBd.ttf");
-    //pub const VeraMoIt = @embedFile("../fonts/bitstream-vera/VeraMoIt.ttf");
-    pub const VeraMono = @embedFile("../fonts/bitstream-vera/VeraMono.ttf");
-    //pub const VeraSe = @embedFile("../fonts/bitstream-vera/VeraSe.ttf");
-    //pub const VeraSeBd = @embedFile("../fonts/bitstream-vera/VeraSeBd.ttf");
-    pub const Pixelify = @embedFile("../fonts/Pixelify_Sans/static/PixelifySans-Regular.ttf");
-    pub const PixelOperator = @embedFile("../fonts/PixelOperator/PixelOperator.ttf");
-    pub const PixelOperatorBd = @embedFile("../fonts/PixelOperator/PixelOperator-Bold.ttf");
-    //pub const PixelifyBd = @embedFile("../fonts/Pixelify_Sans/static/PixelifySans-Bold.ttf");
-    //pub const PixelifyMe = @embedFile("../fonts/Pixelify_Sans/static/PixelifySans-Medium.ttf");
-    //pub const PixelifySeBd = @embedFile("../fonts/Pixelify_Sans/static/PixelifySans-SemiBold.ttf");
-    //pub const Hack = @embedFile("../fonts/hack/Hack-Regular.ttf");
-    //pub const HackBd = @embedFile("../fonts/hack/Hack-Bold.ttf");
-    //pub const HackIt = @embedFile("../fonts/hack/Hack-Italic.ttf");
-    //pub const HackBdIt = @embedFile("../fonts/hack/Hack-BoldItalic.ttf");
-    pub const OpenDyslexic = @embedFile("../fonts/OpenDyslexic/compiled/OpenDyslexic-Regular.otf");
-    pub const OpenDyslexicBd = @embedFile("../fonts/OpenDyslexic/compiled/OpenDyslexic-Bold.otf");
-    //pub const OpenDyslexicIt = @embedFile("../fonts/OpenDyslexic/compiled/OpenDyslexic-Italic.otf");
-    //pub const OpenDyslexicBdIt = @embedFile("../fonts/OpenDyslexic/compiled/OpenDyslexic-Bold-Italic.otf");
-    pub const SegoeUI = @embedFile("../fonts/Segoe/Segoe-UI.TTF");
-    pub const SegoeUIBd = @embedFile("../fonts/Segoe/Segoe-UI-Bold.TTF");
-    pub const SegoeUIIl = @embedFile("../fonts/Segoe/Segoe-UI-Italic.TTF");
-    pub const SegoeUILt = @embedFile("../fonts/Segoe/Segoe-UI-Light.TTF");
-    pub const Inter = @embedFile("../fonts/Inter/Inter-Regular.ttf");
-    pub const InterBd = @embedFile("../fonts/Inter/Inter-Bold.ttf");
+    pub const InvalidFontFile = dvui_assets.fonts.InvalidFontFile;
+    pub const Aleo = dvui_assets.fonts.Aleo;
+    pub const AleoBd = dvui_assets.fonts.AleoBd;
+    pub const Vera = dvui_assets.fonts.Vera;
+    pub const VeraBd = dvui_assets.fonts.VeraBd;
+    pub const VeraMono = dvui_assets.fonts.VeraMono;
+    pub const Pixelify = dvui_assets.fonts.Pixelify;
+    pub const PixelOperator = dvui_assets.fonts.PixelOperator;
+    pub const PixelOperatorBd = dvui_assets.fonts.PixelOperatorBd;
+    pub const OpenDyslexic = dvui_assets.fonts.OpenDyslexic;
+    pub const OpenDyslexicBd = dvui_assets.fonts.OpenDyslexicBd;
+    pub const SegoeUI = dvui_assets.fonts.SegoeUI;
+    pub const SegoeUIBd = dvui_assets.fonts.SegoeUIBd;
+    pub const SegoeUIIl = dvui_assets.fonts.SegoeUIIl;
+    pub const SegoeUILt = dvui_assets.fonts.SegoeUILt;
+    pub const Inter = dvui_assets.fonts.Inter;
+    pub const InterBd = dvui_assets.fonts.InterBd;
 };
 
 pub const Cache = struct {
@@ -268,7 +253,7 @@ pub const Cache = struct {
         }
         if (!dvui.wasm) {
             try self.database.putNoClobber(allocator, .Noto, dvui.FontBytesEntry{
-                .bytes = @embedFile("../fonts/NotoSansKR-Regular.ttf"),
+                .bytes = dvui_assets.fonts.NotoSansKrRegular,
                 .name = @tagName(FontId.Noto),
                 .allocator = null,
             });

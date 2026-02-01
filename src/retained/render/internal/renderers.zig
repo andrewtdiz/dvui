@@ -134,7 +134,7 @@ fn renderElementBody(
     class_spec: tailwind.ClassSpec,
     tracker: *DirtyRegionTracker,
 ) void {
-    if (node.scroll.enabled) {
+    if (node.scroll.isEnabled()) {
         renderScrollFrame(event_ring, store, node_id, node, allocator, class_spec, tracker);
         return;
     }
@@ -243,11 +243,18 @@ fn renderScrollFrame(
     const content_w = if (node.scroll.content_width > 0) node.scroll.content_width else rect.w;
     const content_h = if (node.scroll.content_height > 0) node.scroll.content_height else rect.h;
 
+    const allow_v = node.scroll.allowY();
+    const allow_h = node.scroll.allowX();
+    const virtual_w = if (allow_h) content_w else rect.w;
+    const virtual_h = if (allow_v) content_h else rect.h;
+    const offset_x = if (allow_h) node.scroll.offset_x else 0;
+    const offset_y = if (allow_v) node.scroll.offset_y else 0;
+
     var scroll_info = dvui.ScrollInfo{
-        .vertical = if (content_h > rect.h) .auto else .none,
-        .horizontal = if (content_w > rect.w) .auto else .none,
-        .virtual_size = .{ .w = content_w, .h = content_h },
-        .viewport = .{ .x = node.scroll.offset_x, .y = node.scroll.offset_y, .w = rect.w, .h = rect.h },
+        .vertical = if (allow_v and virtual_h > rect.h) .auto else .none,
+        .horizontal = if (allow_h and virtual_w > rect.w) .auto else .none,
+        .virtual_size = .{ .w = virtual_w, .h = virtual_h },
+        .viewport = .{ .x = offset_x, .y = offset_y, .w = rect.w, .h = rect.h },
     };
     scroll_info.scrollToOffset(.vertical, scroll_info.viewport.y);
     scroll_info.scrollToOffset(.horizontal, scroll_info.viewport.x);
@@ -263,9 +270,11 @@ fn renderScrollFrame(
 
     _ = renderScrollBars(node, rect, &scroll_info, scroll_id);
 
-    if (scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y) {
-        node.scroll.offset_x = scroll_info.viewport.x;
-        node.scroll.offset_y = scroll_info.viewport.y;
+    const x_changed = allow_h and scroll_info.viewport.x != prev_x;
+    const y_changed = allow_v and scroll_info.viewport.y != prev_y;
+    if (x_changed or y_changed) {
+        if (allow_h) node.scroll.offset_x = scroll_info.viewport.x;
+        if (allow_v) node.scroll.offset_y = scroll_info.viewport.y;
         layout.invalidateLayoutSubtree(store, node);
         store.markNodeChanged(node.id);
 

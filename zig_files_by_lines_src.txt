@@ -16,7 +16,6 @@
      17 src/window/mod.zig
      18 src/render/mod.zig
      23 src/core/mod.zig
-     24 src/luau-native-runner.zig
      26 src/utils/alloc.zig
      30 src/widgets/mod.zig
      31 src/retained/render/transitions_test.zig

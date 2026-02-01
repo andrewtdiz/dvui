@@ -16,11 +16,11 @@ local ids = {
 }
 
 local ROOT_CLASS = "w-full h-full flex flex-col justify-center items-center bg-neutral-950"
-local PANEL_CLASS = "w-[520px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-3xl p-10"
+local PANEL_CLASS = "w-[320px] flex flex-col items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-3xl p-10"
 local TITLE_CLASS = "text-4xl text-neutral-50 text-outline-black text-outline-[1px] font-game text-center text-nowrap"
 local DIVIDER_CLASS = "w-full h-px bg-neutral-700 opacity-60"
 local OPTIONS_CLASS = "w-full flex flex-col gap-4 items-center"
-local OPTION_CLASS = "w-full px-6 py-3 rounded-lg flex items-center justify-center text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] text-center font-game cursor-pointer transition duration-100 ease-out"
+local OPTION_CLASS = "w-full px-6 py-3 rounded-lg flex items-center justify-center text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 text-outline-black text-outline-[1px] text-center font-game cursor-pointer transition duration"
 
 local function create_menu_option(button_id, text_id, parent_id, label)
   ui.create("button", button_id, parent_id, nil)

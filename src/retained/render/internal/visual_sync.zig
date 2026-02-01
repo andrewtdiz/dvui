@@ -203,8 +203,13 @@ pub fn syncVisualsFromClasses(
     var class_spec = class_spec_base;
     tailwind.applyHover(&class_spec, hovered);
 
+    const class_scroll_enabled = class_spec.scroll_x or class_spec.scroll_y;
+    node.scroll.class_enabled = class_scroll_enabled;
+    node.scroll.class_x = class_spec.scroll_x;
+    node.scroll.class_y = class_spec.scroll_y;
+
     applyClassSpecToVisual(node, &class_spec);
-    if (node.scroll.enabled) {
+    if (node.scroll.isEnabled()) {
         node.visual.clip_children = true;
     }
     if (node.visual.background == null) {

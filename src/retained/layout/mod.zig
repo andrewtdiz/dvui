@@ -109,6 +109,10 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     const prev_scale = node.layout.layout_scale;
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
+    const class_scroll_enabled = spec.scroll_x or spec.scroll_y;
+    node.scroll.class_enabled = class_scroll_enabled;
+    node.scroll.class_x = spec.scroll_x;
+    node.scroll.class_y = spec.scroll_y;
     const base_scale = dvui.windowNaturalScale();
     var parent_scale = base_scale;
     if (node.parent) |pid| {
@@ -289,20 +293,26 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     }
 
     var layout_rect = child_rect;
-    const scroll_enabled = node.scroll.enabled;
+    const scroll_enabled = node.scroll.isEnabled();
     if (scroll_enabled) {
-        var content_w = child_rect.w;
-        var content_h = child_rect.h;
-        if (node.scroll.canvas_width > 0) {
-            content_w = @max(content_w, node.scroll.canvas_width);
+        const allow_x = node.scroll.allowX();
+        const allow_y = node.scroll.allowY();
+        if (allow_x) {
+            var content_w = child_rect.w;
+            if (node.scroll.canvas_width > 0) {
+                content_w = @max(content_w, node.scroll.canvas_width);
+            }
+            layout_rect.w = content_w;
+            layout_rect.x -= node.scroll.offset_x;
         }
-        if (node.scroll.canvas_height > 0) {
-            content_h = @max(content_h, node.scroll.canvas_height);
+        if (allow_y) {
+            var content_h = child_rect.h;
+            if (node.scroll.canvas_height > 0) {
+                content_h = @max(content_h, node.scroll.canvas_height);
+            }
+            layout_rect.h = content_h;
+            layout_rect.y -= node.scroll.offset_y;
         }
-        layout_rect.w = content_w;
-        layout_rect.h = content_h;
-        layout_rect.x -= node.scroll.offset_x;
-        layout_rect.y -= node.scroll.offset_y;
     }
 
     if (spec.is_flex) {
@@ -395,16 +405,18 @@ fn applyAnchoredPlacement(store: *types.NodeStore, node: *types.SolidNode, scree
 fn updateScrollContentSize(store: *types.NodeStore, node: *types.SolidNode, viewport: types.Rect) void {
     var content_w = viewport.w;
     var content_h = viewport.h;
-    if (node.scroll.canvas_width > 0) {
+    const allow_x = node.scroll.allowX();
+    const allow_y = node.scroll.allowY();
+    if (allow_x and node.scroll.canvas_width > 0) {
         content_w = @max(content_w, node.scroll.canvas_width);
     }
-    if (node.scroll.canvas_height > 0) {
+    if (allow_y and node.scroll.canvas_height > 0) {
         content_h = @max(content_h, node.scroll.canvas_height);
     }
-    if (node.scroll.auto_canvas) {
+    if (node.scroll.isAutoCanvas()) {
         const auto_size = computeScrollAutoSize(store, node, viewport);
-        content_w = @max(content_w, auto_size.w);
-        content_h = @max(content_h, auto_size.h);
+        if (allow_x) content_w = @max(content_w, auto_size.w);
+        if (allow_y) content_h = @max(content_h, auto_size.h);
     }
     node.scroll.content_width = content_w;
     node.scroll.content_height = content_h;
@@ -422,8 +434,10 @@ fn computeScrollAutoSize(store: *types.NodeStore, node: *types.SolidNode, viewpo
         const rect_opt = child.layout.rect;
         if (rect_opt) |rect| {
             if (rect.w == 0 and rect.h == 0) continue;
-            const x = rect.x + node.scroll.offset_x;
-            const y = rect.y + node.scroll.offset_y;
+            const dx = if (node.scroll.allowX()) node.scroll.offset_x else 0;
+            const dy = if (node.scroll.allowY()) node.scroll.offset_y else 0;
+            const x = rect.x + dx;
+            const y = rect.y + dy;
             min_x = @min(min_x, x);
             min_y = @min(min_y, y);
             max_x = @max(max_x, x + rect.w);

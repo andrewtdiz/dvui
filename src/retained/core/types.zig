@@ -207,6 +207,9 @@ pub const VisualProps = struct {
 
 pub const ScrollState = struct {
     enabled: bool = false,
+    class_enabled: bool = false,
+    class_x: bool = false,
+    class_y: bool = false,
     offset_x: f32 = 0,
     offset_y: f32 = 0,
     canvas_width: f32 = 0,
@@ -215,6 +218,24 @@ pub const ScrollState = struct {
     content_width: f32 = 0,
     content_height: f32 = 0,
     scrollbar_thickness: f32 = 10,
+
+    pub fn isEnabled(self: *const ScrollState) bool {
+        return self.enabled or self.class_enabled;
+    }
+
+    pub fn allowX(self: *const ScrollState) bool {
+        if (self.class_enabled) return self.class_x;
+        return true;
+    }
+
+    pub fn allowY(self: *const ScrollState) bool {
+        if (self.class_enabled) return self.class_y;
+        return true;
+    }
+
+    pub fn isAutoCanvas(self: *const ScrollState) bool {
+        return self.auto_canvas or self.class_enabled;
+    }
 };
 
 pub const TransitionState = struct {
