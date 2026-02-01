@@ -23,6 +23,42 @@ const types = @import("tailwind/types.zig");
 const parser = @import("tailwind/parse.zig");
 const color_typography = @import("tailwind/parse_color_typography.zig");
 
+const spec_cache_allocator = std.heap.c_allocator;
+const SpecCache = std.StringHashMap(types.Spec);
+var spec_cache: SpecCache = undefined;
+var spec_cache_ready: bool = false;
+
+fn ensureSpecCacheReady() void {
+    if (spec_cache_ready) return;
+    spec_cache = SpecCache.init(spec_cache_allocator);
+    spec_cache_ready = true;
+}
+
+fn releaseSpecCache() void {
+    if (!spec_cache_ready) return;
+    var iter = spec_cache.iterator();
+    while (iter.next()) |entry| {
+        spec_cache_allocator.free(entry.key_ptr.*);
+    }
+    spec_cache.deinit();
+    spec_cache_ready = false;
+}
+
+fn cacheSpec(classes: []const u8, spec: types.Spec) void {
+    if (!spec_cache_ready or classes.len == 0) return;
+    const key = spec_cache_allocator.dupe(u8, classes) catch return;
+    const gop = spec_cache.getOrPut(key) catch {
+        spec_cache_allocator.free(key);
+        return;
+    };
+    if (gop.found_existing) {
+        spec_cache_allocator.free(key);
+        return;
+    }
+    gop.key_ptr.* = key;
+    gop.value_ptr.* = spec;
+}
+
 pub const TextAlign = types.TextAlign;
 pub const FontRenderMode = types.FontRenderMode;
 pub const FontFamily = types.FontFamily;
@@ -38,8 +74,23 @@ pub const Width = types.Width;
 pub const Height = types.Height;
 pub const Position = types.Position;
 
-pub const parse = parser.parse;
 pub const resolveFont = color_typography.resolveFont;
+
+pub fn init() void {
+    ensureSpecCacheReady();
+}
+
+pub fn deinit() void {
+    releaseSpecCache();
+}
+
+pub fn parse(classes: []const u8) types.Spec {
+    ensureSpecCacheReady();
+    if (spec_cache.get(classes)) |cached| return cached;
+    const spec = parser.parse(classes);
+    cacheSpec(classes, spec);
+    return spec;
+}
 
 pub fn applyHover(spec: *Spec, hovered: bool) void {
     if (!hovered) return;
@@ -127,19 +178,19 @@ pub fn applyToOptions(spec: *const Spec, options: *dvui.Options) void {
 }
 
 pub fn buildFlexOptions(spec: *const Spec) dvui.FlexBoxWidget.InitOptions {
-    var init: dvui.FlexBoxWidget.InitOptions = .{
+    var options: dvui.FlexBoxWidget.InitOptions = .{
         .direction = .horizontal,
         .justify_content = .start,
         .align_items = .start,
         .align_content = .start,
     };
 
-    if (spec.direction) |dir| init.direction = dir;
-    if (spec.justify) |value| init.justify_content = value;
-    if (spec.align_items) |value| init.align_items = value;
-    if (spec.align_content) |value| init.align_content = value;
+    if (spec.direction) |dir| options.direction = dir;
+    if (spec.justify) |value| options.justify_content = value;
+    if (spec.align_items) |value| options.align_items = value;
+    if (spec.align_content) |value| options.align_content = value;
 
-    return init;
+    return options;
 }
 
 fn applySideValues(values: *const types.SideValues, current: ?dvui.Rect) ?dvui.Rect {

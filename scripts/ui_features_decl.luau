@@ -28,12 +28,14 @@ end
 
 local content = require("scripts/ui_features_decl/content")
 local renderer = require("scripts/ui_features_decl/renderer")
+local animation = require("scripts/ui_features_decl/animation")
 
 function init()
   renderer.init(content)
 end
 
 function update(dt, input)
+  animation.step(dt)
 end
 
 function on_event(kind, id, detail)

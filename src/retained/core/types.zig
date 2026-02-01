@@ -444,6 +444,7 @@ pub const SolidNode = struct {
     }
 
     pub fn setClassName(self: *SolidNode, allocator: std.mem.Allocator, value: []const u8) !void {
+        if (std.mem.eql(u8, self.class_name, value)) return;
         const copy = try allocator.dupe(u8, value);
         if (self.class_name.len > 0) allocator.free(self.class_name);
         self.class_name = copy;

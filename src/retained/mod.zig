@@ -2,6 +2,7 @@ const std = @import("std");
 const dvui = @import("dvui");
 const types = @import("core/types.zig");
 const direct = @import("render/direct.zig");
+const tailwind = @import("style/tailwind.zig");
 pub const NodeStore = types.NodeStore;
 pub const SolidNode = types.SolidNode;
 pub const Rect = types.Rect;
@@ -17,6 +18,7 @@ const layout = @import("layout/mod.zig");
 const render_mod = @import("render/mod.zig");
 
 pub fn init() void {
+    tailwind.init();
     layout.init();
     render_mod.init();
 }
@@ -24,6 +26,7 @@ pub fn init() void {
 pub fn deinit() void {
     render_mod.deinit();
     layout.deinit();
+    tailwind.deinit();
 }
 
 pub const PickResult = struct {

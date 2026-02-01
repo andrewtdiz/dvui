@@ -6,6 +6,8 @@ local new_scope = reactivity.new_scope
 local destroy_scope = reactivity.destroy_scope
 local get_owner = reactivity.get_owner
 local set_owner = reactivity.set_owner
+local untrack = reactivity.untrack
+local scoped = reactivity.scoped
 
 local next_id = 1
 local listened_by_id = {}
@@ -56,6 +58,26 @@ local function normalize_text(v)
   return tostring(v)
 end
 
+local function mount_class(id, class_value)
+  if class_value == nil then
+    return
+  end
+
+  if type(class_value) == "function" then
+    local last = nil
+    effect(function()
+      local v = normalize_text(class_value())
+      if v ~= last then
+        last = v
+        ui.set_class(id, v)
+      end
+    end)
+    return
+  end
+
+  ui.set_class(id, normalize_text(class_value))
+end
+
 local function mount_value(id, setter, value)
   if value == nil then
     return
@@ -91,13 +113,53 @@ local function mount_value(id, setter, value)
   setter(id, value)
 end
 
-local function mount_props(id, props)
+local function mount_transform(id, transform_value, scale_value)
+  if transform_value == nil then
+    if scale_value == nil then
+      return
+    end
+    mount_value(id, ui.set_transform, { scale = scale_value })
+    return
+  end
+
+  if scale_value == nil then
+    mount_value(id, ui.set_transform, transform_value)
+    return
+  end
+
+  mount_value(id, ui.set_transform, function()
+    local base = transform_value
+    if type(base) == "function" then
+      base = base()
+    end
+    if base ~= nil and type(base) ~= "table" then
+      error("transform must be table", 0)
+    end
+
+    local out = {}
+    if base ~= nil then
+      for k, v in pairs(base) do
+        out[k] = if type(v) == "function" then v() else v
+      end
+    end
+
+    local scale = scale_value
+    if type(scale) == "function" then
+      scale = scale()
+    end
+    out.scale = scale
+    return out
+  end)
+end
+
+local function mount_props(id, props, scale_value)
   if props == nil then
+    mount_transform(id, nil, scale_value)
     return
   end
 
   mount_value(id, ui.set_visual, props.visual)
-  mount_value(id, ui.set_transform, props.transform)
+  mount_transform(id, props.transform, scale_value)
   mount_value(id, ui.set_scroll, props.scroll)
   mount_value(id, ui.set_anchor, props.anchor)
   mount_value(id, ui.set_image, props.image)
@@ -142,11 +204,11 @@ end
 
 local destroy_record = nil
 
-local function mount_any(node, parent_id, before_id)
+local function mount_any(node, parent_id, before_id, forced_scope)
   local node_type = type(node)
   if node_type == "string" or node_type == "number" or node_type == "boolean" then
     local prev_owner = get_owner()
-    local scope = new_scope(prev_owner)
+    local scope = forced_scope or new_scope(prev_owner)
     set_owner(scope)
 
     local id = alloc_id()
@@ -164,7 +226,7 @@ local function mount_any(node, parent_id, before_id)
 
   if node_type == "function" then
     local prev_owner = get_owner()
-    local scope = new_scope(prev_owner)
+    local scope = forced_scope or new_scope(prev_owner)
     set_owner(scope)
 
     local id = alloc_id()
@@ -194,7 +256,7 @@ local function mount_any(node, parent_id, before_id)
   local kind = node.__kind
   if kind == "For" then
     local prev_owner = get_owner()
-    local scope = new_scope(prev_owner)
+    local scope = forced_scope or new_scope(prev_owner)
     set_owner(scope)
 
     local slot_id = alloc_id()
@@ -228,6 +290,8 @@ local function mount_any(node, parent_id, before_id)
       key_fn = key_fn,
       child_fn = child_fn,
       by_key = {},
+      value_by_key = {},
+      index_by_key = {},
       order = {},
     }
 
@@ -251,13 +315,35 @@ local function mount_any(node, parent_id, before_id)
         seen[key] = true
         next_order[#next_order + 1] = key
 
-        if record.by_key[key] == nil then
-          local child_node = child_fn(item, i)
-          local child_record = mount_any(child_node, parent_id, slot_id)
-          if child_record == nil or child_record.id == nil then
+        local mounted = record.by_key[key]
+        if mounted == nil then
+          local value = reactivity.source(item)
+          local index = reactivity.source(i)
+          record.value_by_key[key] = value
+          record.index_by_key[key] = index
+
+          local parent_owner = get_owner()
+          local child_scope = new_scope(parent_owner)
+          local child_node = scoped(child_scope, function()
+            return untrack(function()
+              return child_fn(item, i, value, index, key)
+            end)
+          end)
+          mounted = mount_any(child_node, parent_id, slot_id, child_scope)
+          if mounted == nil or mounted.id == nil then
+            destroy_scope(child_scope)
             error("For child must mount to a node id", 0)
           end
-          record.by_key[key] = child_record
+          record.by_key[key] = mounted
+        else
+          local value = record.value_by_key[key]
+          if value ~= nil then
+            value(item)
+          end
+          local index = record.index_by_key[key]
+          if index ~= nil then
+            index(i)
+          end
         end
       end
 
@@ -270,6 +356,8 @@ local function mount_any(node, parent_id, before_id)
       for _, key in ipairs(remove_keys) do
         destroy_record(record.by_key[key])
         record.by_key[key] = nil
+        record.value_by_key[key] = nil
+        record.index_by_key[key] = nil
       end
 
       local before = slot_id
@@ -294,7 +382,7 @@ local function mount_any(node, parent_id, before_id)
 
   if kind == "Show" then
     local prev_owner = get_owner()
-    local scope = new_scope(prev_owner)
+    local scope = forced_scope or new_scope(prev_owner)
     set_owner(scope)
 
     local slot_id = alloc_id()
@@ -324,11 +412,24 @@ local function mount_any(node, parent_id, before_id)
     }
 
     local function mount_branch(value)
-      local v = value
-      if type(v) == "function" then
-        v = v()
+      local parent_owner = get_owner()
+      local branch_scope = new_scope(parent_owner)
+
+      local v = scoped(branch_scope, function()
+        return untrack(function()
+          local out = value
+          if type(out) == "function" then
+            out = out()
+          end
+          return out
+        end)
+      end)
+
+      local mounted = mount_any(v, parent_id, slot_id, branch_scope)
+      if mounted == nil then
+        destroy_scope(branch_scope)
       end
-      return mount_any(v, parent_id, slot_id)
+      return mounted
     end
 
     local function update()
@@ -360,11 +461,24 @@ local function mount_any(node, parent_id, before_id)
   local tag = node.tag
   if tag == nil then
     local records = {}
+    local prev_owner = nil
+    if forced_scope ~= nil then
+      prev_owner = get_owner()
+      set_owner(forced_scope)
+    end
     for _, child in ipairs(node) do
       local child_record = mount_any(child, parent_id, before_id)
       if child_record ~= nil then
         records[#records + 1] = child_record
       end
+    end
+    if forced_scope ~= nil then
+      set_owner(prev_owner)
+      return {
+        kind = "fragment",
+        scope = forced_scope,
+        children = records,
+      }
     end
     return {
       kind = "fragment",
@@ -373,7 +487,7 @@ local function mount_any(node, parent_id, before_id)
   end
 
   local prev_owner = get_owner()
-  local scope = new_scope(prev_owner)
+  local scope = forced_scope or new_scope(prev_owner)
   set_owner(scope)
 
   local id = alloc_id()
@@ -381,23 +495,9 @@ local function mount_any(node, parent_id, before_id)
 
   apply_event_handlers(node, id)
 
-  local class_value = node.class
-  if class_value ~= nil then
-    if type(class_value) == "function" then
-      local last = nil
-      effect(function()
-        local v = normalize_text(class_value())
-        if v ~= last then
-          last = v
-          ui.set_class(id, v)
-        end
-      end)
-    else
-      ui.set_class(id, normalize_text(class_value))
-    end
-  end
+  mount_class(id, node.class)
 
-  mount_props(id, node.props)
+  mount_props(id, node.props, node.scale)
 
   local children_records = {}
   local children_value = node.children
@@ -478,6 +578,9 @@ destroy_record = function(record)
   end
 
   if kind == "fragment" then
+    if record.scope ~= nil then
+      destroy_scope(record.scope)
+    end
     for _, child in ipairs(record.children) do
       destroy_record(child)
     end

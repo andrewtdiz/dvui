@@ -137,6 +137,35 @@ local function batch(fn)
   return result
 end
 
+local function untrack(fn)
+  local prev_comp = current_computation
+  current_computation = nil
+  local ok, packed = xpcall(function()
+    return table.pack(fn())
+  end, debug.traceback)
+  current_computation = prev_comp
+  if not ok then
+    error(packed, 0)
+  end
+  return table.unpack(packed, 1, packed.n)
+end
+
+local function scoped(owner, fn)
+  local prev_owner = current_owner
+  local prev_scope = current_scope
+  current_owner = owner
+  current_scope = owner
+  local ok, packed = xpcall(function()
+    return table.pack(fn())
+  end, debug.traceback)
+  current_owner = prev_owner
+  current_scope = prev_scope
+  if not ok then
+    error(packed, 0)
+  end
+  return table.unpack(packed, 1, packed.n)
+end
+
 local function effect(fn)
   local owner = current_owner
   if owner == nil then
@@ -172,14 +201,17 @@ local function effect(fn)
     run_cleanups(comp.cleanups)
 
     local prev_comp = current_computation
+    local prev_owner = current_owner
     local prev_scope = current_scope
     current_computation = comp
     current_scope = comp
+    current_owner = comp.owner
 
     local ok, err = xpcall(comp.fn, debug.traceback)
 
     current_computation = prev_comp
     current_scope = prev_scope
+    current_owner = prev_owner
 
     if not ok then
       destroy()
@@ -228,14 +260,17 @@ local function derive(fn)
     run_cleanups(node.cleanups)
 
     local prev_comp = current_computation
+    local prev_owner = current_owner
     local prev_scope = current_scope
     current_computation = node
     current_scope = node
+    current_owner = node.owner
 
     local ok, value = xpcall(node.fn, debug.traceback)
 
     current_computation = prev_comp
     current_scope = prev_scope
+    current_owner = prev_owner
 
     if not ok then
       destroy()
@@ -329,8 +364,10 @@ return {
   end,
   new_scope = new_scope,
   root = root,
+  scoped = scoped,
   set_owner = function(owner)
     current_owner = owner
   end,
   source = source,
+  untrack = untrack,
 }
