@@ -44,6 +44,7 @@ const RenderContext = state.RenderContext;
 const intersectRect = state.intersectRect;
 const contextPoint = state.contextPoint;
 const nodeBoundsInContext = state.nodeBoundsInContext;
+const rectContains = state.rectContains;
 
 const applyLayoutScaleToOptions = visual_sync.applyLayoutScaleToOptions;
 const nodeHasAccessibilityProps = visual_sync.nodeHasAccessibilityProps;
@@ -58,6 +59,17 @@ const renderScrollBars = interaction.renderScrollBars;
 const log = std.log.scoped(.retained);
 
 const RenderRuntime = runtime_mod.RenderRuntime;
+
+fn maxDescendantVersion(store: *types.NodeStore, node: *types.SolidNode) u64 {
+    var max_version: u64 = 0;
+    for (node.children.items) |child_id| {
+        const child = store.node(child_id) orelse continue;
+        if (child.version > max_version) max_version = child.version;
+        const child_max = maxDescendantVersion(store, child);
+        if (child_max > max_version) max_version = child_max;
+    }
+    return max_version;
+}
 
 fn rectsIntersect(a: types.Rect, b: types.Rect) bool {
     return !(a.x + a.w < b.x or b.x + b.w < a.x or a.y + a.h < b.y or b.y + b.h < a.y);
@@ -80,8 +92,6 @@ fn applyContextScaleToOptions(ctx: RenderContext, options: *dvui.Options) void {
     if (options.min_size_content) |ms| options.min_size_content = dvui.Size{ .w = ms.w * factor, .h = ms.h * factor };
     if (options.max_size_content) |mx| options.max_size_content = dvui.Options.MaxSize{ .w = mx.w * factor, .h = mx.h * factor };
     if (options.text_outline_thickness) |v| options.text_outline_thickness = v * factor;
-    const font = options.fontGet();
-    options.font = font.resize(font.size * factor);
 }
 
 fn rectToParentLocal(rect: types.Rect, parent_origin: dvui.Point.Physical) types.Rect {
@@ -411,6 +421,125 @@ fn renderNonInteractiveElement(
 }
 
 fn renderContainer(
+    runtime: *RenderRuntime,
+    event_ring: ?*events.EventRing,
+    store: *types.NodeStore,
+    node: *types.SolidNode,
+    allocator: std.mem.Allocator,
+    class_spec: tailwind.ClassSpec,
+    tracker: *DirtyRegionTracker,
+    ctx: RenderContext,
+) void {
+    if (!runtime.offscreen_capture_active) {
+        const t = transitions.effectiveTransform(node);
+        if (t.rotation == 0 and (@abs(t.scale[0] - 1.0) > 0.001 or @abs(t.scale[1] - 1.0) > 0.001) and node.interactiveChildCount() > 0) {
+            if (node.layout.rect) |rect| {
+                const bounds = nodeBoundsInContext(ctx, node, rect);
+                if (bounds.w > 0 and bounds.h > 0) {
+                    if (runtime.offscreen_cache_allocator == null) {
+                        runtime.offscreen_cache_allocator = store.allocator;
+                    }
+
+                    const max_desc_version = maxDescendantVersion(store, node);
+                    const cached = runtime.offscreen_cache.getPtr(node.id);
+                    var needs_capture = cached == null or cached.?.max_desc_version != max_desc_version;
+
+                    var has_press_in_bounds = false;
+                    var has_wheel_in_bounds = false;
+                    var has_release = false;
+                    if (runtime.input_enabled_state) {
+                        for (dvui.events()) |*e| {
+                            switch (e.evt) {
+                                .mouse => |me| {
+                                    switch (me.action) {
+                                        .press => {
+                                            if (me.button.pointer() and rectContains(bounds, me.p)) {
+                                                has_press_in_bounds = true;
+                                            }
+                                        },
+                                        .release => {
+                                            if (me.button.pointer()) {
+                                                has_release = true;
+                                            }
+                                        },
+                                        .wheel_y, .wheel_x => {
+                                            if (rectContains(bounds, me.p)) {
+                                                has_wheel_in_bounds = true;
+                                            }
+                                        },
+                                        else => {},
+                                    }
+                                },
+                                else => {},
+                            }
+                        }
+                    }
+
+                    if (has_press_in_bounds or has_wheel_in_bounds) {
+                        needs_capture = true;
+                    } else if (has_release and runtime.pressed_node_id != 0) {
+                        var current_id: u32 = runtime.pressed_node_id;
+                        while (current_id != 0) {
+                            if (current_id == node.id) {
+                                needs_capture = true;
+                                break;
+                            }
+                            const current_node = store.node(current_id) orelse break;
+                            current_id = current_node.parent orelse 0;
+                        }
+                    }
+
+                    if (needs_capture) {
+                        const x0 = @floor(bounds.x);
+                        const y0 = @floor(bounds.y);
+                        const x1 = @ceil(bounds.x + bounds.w);
+                        const y1 = @ceil(bounds.y + bounds.h);
+                        const capture = types.Rect{
+                            .x = x0,
+                            .y = y0,
+                            .w = @max(0.0, x1 - x0),
+                            .h = @max(0.0, y1 - y0),
+                        };
+                        const target_w: u32 = @intFromFloat(@ceil(capture.w));
+                        const target_h: u32 = @intFromFloat(@ceil(capture.h));
+
+                        if (target_w > 0 and target_h > 0) {
+                            const target = dvui.textureCreateTarget(target_w, target_h, .linear) catch return renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
+                            const gop = runtime.offscreen_cache.getOrPut(store.allocator, node.id) catch {
+                                dvui.textureDestroyLater(.{ .ptr = target.ptr, .width = target.width, .height = target.height });
+                                return renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
+                            };
+                            if (gop.found_existing) {
+                                const old_target = gop.value_ptr.target;
+                                dvui.textureDestroyLater(.{ .ptr = old_target.ptr, .width = old_target.width, .height = old_target.height });
+                            }
+                            gop.value_ptr.* = .{ .target = target, .subtree_version = node.subtree_version, .max_desc_version = max_desc_version };
+
+                            runtime.offscreen_capture_active = true;
+                            const prev_target = dvui.renderTarget(.{ .texture = target, .offset = .{ .x = capture.x, .y = capture.y } });
+                            const prev_clip = dvui.clip(.{ .x = capture.x, .y = capture.y, .w = capture.w, .h = capture.h });
+                            renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
+                            dvui.clipSet(prev_clip);
+                            _ = dvui.renderTarget(prev_target);
+                            runtime.offscreen_capture_active = false;
+                        }
+                    }
+
+                    if (runtime.offscreen_cache.getPtr(node.id)) |entry| {
+                        const tex = dvui.Texture{ .ptr = entry.target.ptr, .width = entry.target.width, .height = entry.target.height };
+                        dvui.renderTexture(tex, .{ .r = direct.rectToPhysical(bounds), .s = dvui.windowNaturalScale() }, .{}) catch {};
+                        node.markRendered();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
+}
+
+fn renderContainerNormal(
     runtime: *RenderRuntime,
     event_ring: ?*events.EventRing,
     store: *types.NodeStore,

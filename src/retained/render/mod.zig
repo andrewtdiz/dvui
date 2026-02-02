@@ -60,10 +60,20 @@ fn updateFrameState(runtime_ptr: *RenderRuntime, mouse: dvui.Point.Physical, inp
     runtime_ptr.last_hover_layer = layer;
 }
 
+fn hoverLayerForPointer(portal_ids: []const u32, overlay_state: state.OverlayState, mouse: dvui.Point.Physical) state.RenderLayer {
+    if (portal_ids.len == 0) return .base;
+    if (overlay_state.modal) return .overlay;
+    if (overlay_state.hit_rect) |hit_rect| {
+        if (rectContains(hit_rect, mouse)) return .overlay;
+    }
+    return .base;
+}
+
 pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_enabled: bool) bool {
     const root = store.node(0) orelse return false;
 
     runtime.input_enabled_state = input_enabled;
+    var clear_pressed = false;
     focus.beginFrame(store);
     layout.updateLayouts(store);
     var layout_did_update = layout.didUpdateLayouts();
@@ -76,23 +86,11 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     const scratch = arena.allocator();
 
     const portal_ids = overlay.ensurePortalCache(&runtime, store, root);
-    const overlay_state = overlay.ensureOverlayState(&runtime, store, portal_ids, root.subtree_version);
-    runtime.modal_overlay_active = overlay_state.modal;
-    drag_drop.setHitTestContext(portal_ids, overlay_state.modal, overlay_state.hit_rect);
-
     const current_mouse = dvui.currentWindow().mouse_pt;
     const root_ctx = state.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
 
-    runtime.hover_layer = .base;
-    if (portal_ids.len > 0) {
-        if (overlay_state.modal) {
-            runtime.hover_layer = .overlay;
-        } else if (overlay_state.hit_rect) |hit_rect| {
-            if (rectContains(hit_rect, current_mouse)) {
-                runtime.hover_layer = .overlay;
-            }
-        }
-    }
+    var overlay_state = overlay.ensureOverlayState(&runtime, store, portal_ids, root.subtree_version);
+    runtime.hover_layer = hoverLayerForPointer(portal_ids, overlay_state, current_mouse);
 
     runtime.render_layer = .base;
 
@@ -119,6 +117,9 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
                 layout_did_update = true;
             }
 
+            overlay_state = overlay.ensureOverlayState(&runtime, store, portal_ids, root.subtree_version);
+            runtime.hover_layer = hoverLayerForPointer(portal_ids, overlay_state, current_mouse);
+
             base_pair = .{};
             base_order = 0;
             interaction.scanPickPair(store, root, current_mouse, root_ctx, &base_pair, &base_order, true);
@@ -141,6 +142,29 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
         runtime.pointer_top_overlay_id = 0;
         _ = hover.syncHoverPath(&runtime, event_ring, store, scratch, 0);
     }
+
+    if (runtime.input_enabled_state) {
+        const press_target = if (runtime.hover_layer == .overlay) runtime.pointer_top_overlay_id else runtime.pointer_top_base_id;
+        for (dvui.events()) |*e| {
+            switch (e.evt) {
+                .mouse => |me| {
+                    switch (me.action) {
+                        .press => {
+                            if (me.button.pointer()) runtime.pressed_node_id = press_target;
+                        },
+                        .release => {
+                            if (me.button.pointer()) clear_pressed = true;
+                        },
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    runtime.modal_overlay_active = overlay_state.modal;
+    drag_drop.setHitTestContext(portal_ids, overlay_state.modal, overlay_state.hit_rect);
 
     var dirty_tracker = DirtyRegionTracker.init(scratch);
     defer dirty_tracker.deinit();
@@ -197,5 +221,8 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     focus.endFrame(event_ring, store, runtime.input_enabled_state);
     runtime.render_layer = .base;
     updateFrameState(&runtime, current_mouse, runtime.input_enabled_state, runtime.hover_layer);
+    if (clear_pressed) {
+        runtime.pressed_node_id = 0;
+    }
     return true;
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const dvui = @import("dvui");
+
 const types = @import("../../core/types.zig");
 const events = @import("../../events/mod.zig");
 const tailwind = @import("../../style/tailwind.zig");
@@ -32,9 +34,15 @@ pub fn ensurePortalCache(runtime: *RenderRuntime, store: *types.NodeStore, root:
 }
 
 pub fn ensureOverlayState(runtime: *RenderRuntime, store: *types.NodeStore, portal_ids: []const u32, version: u64) state.OverlayState {
-    if (runtime.overlay_cache_version != version) {
+    const frame_time = dvui.frameTimeNS();
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(std.mem.asBytes(&version));
+    hasher.update(std.mem.asBytes(&frame_time));
+    const key = hasher.final();
+
+    if (runtime.overlay_cache_version != key) {
         runtime.cached_overlay_state = computeOverlayState(store, portal_ids);
-        runtime.overlay_cache_version = version;
+        runtime.overlay_cache_version = key;
     }
     return runtime.cached_overlay_state;
 }

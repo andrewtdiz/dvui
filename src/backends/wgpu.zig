@@ -3,6 +3,8 @@ const dvui = @import("dvui");
 const wgpu = @import("wgpu");
 const msdf_zig = @import("msdf_zig");
 
+const globals_stride: usize = 256;
+
 pub const kind: dvui.enums.Backend = .wgpu;
 
 pub const WgpuBackend = @This();
@@ -44,6 +46,7 @@ const default_msdf_params = MsdfParams{
 };
 
 const DrawCommand = struct {
+    target: ?*TextureResource,
     texture: *TextureResource,
     index_offset: u32,
     index_count: u32,
@@ -59,6 +62,13 @@ const ClipRect = struct {
     y: i32 = 0,
     width: i32 = 0,
     height: i32 = 0,
+};
+
+const ViewportRect = struct {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 };
 
 const Extent2D = struct {
@@ -84,6 +94,8 @@ const TextureResource = struct {
     bind_group: *wgpu.BindGroup,
     kind: DrawPipeline,
     interpolation: dvui.enums.TextureInterpolation,
+    width: u32,
+    height: u32,
 
     fn deinit(self: *TextureResource) void {
         self.bind_group.release();
@@ -134,6 +146,8 @@ frame_arena: std.mem.Allocator = undefined,
 msaa_texture: ?*wgpu.Texture = null,
 msaa_view: ?*wgpu.TextureView = null,
 msaa_extent: Extent2D = .{},
+
+active_target: ?*TextureResource = null,
 
 pub fn init(options: InitOptions) !WgpuBackend {
     var wgpu_backend: WgpuBackend = .{
@@ -247,7 +261,18 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
     if (self.draw_commands.items.len == 0) return;
 
     try self.ensurePipeline();
-    try self.ensureGlobals();
+    const pass_count = blk: {
+        var count: usize = 1;
+        var current = self.draw_commands.items[0].target;
+        for (self.draw_commands.items[1..]) |cmd| {
+            if (cmd.target != current) {
+                count += 1;
+                current = cmd.target;
+            }
+        }
+        break :blk count;
+    };
+    try self.ensureGlobals(pass_count);
     try self.uploadGeometry();
     var needs_msdf = false;
     for (self.draw_commands.items) |cmd| {
@@ -260,65 +285,93 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
         try self.ensureMsdfPipeline();
     }
 
-    var color_attachment = wgpu.ColorAttachment{
-        .view = color_view,
-        .resolve_target = null,
-        .load_op = wgpu.LoadOp.load,
-        .store_op = wgpu.StoreOp.store,
-        .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
-    };
+    var pass_index: usize = 0;
+    var i: usize = 0;
+    while (i < self.draw_commands.items.len) {
+        const target = self.draw_commands.items[i].target;
+        const view = if (target) |t| t.view else color_view;
 
-    if (self.sample_count > 1) {
-        try self.ensureMsaaResources();
-        color_attachment.view = self.msaa_view.?;
-        color_attachment.resolve_target = color_view;
-        color_attachment.load_op = wgpu.LoadOp.clear;
-        color_attachment.store_op = wgpu.StoreOp.discard;
+        const target_width: f32 = if (target) |t| @floatFromInt(@max(t.width, 1)) else if (self.surface.surface_size.w <= 0) 1.0 else self.surface.surface_size.w;
+        const target_height: f32 = if (target) |t| @floatFromInt(@max(t.height, 1)) else if (self.surface.surface_size.h <= 0) 1.0 else self.surface.surface_size.h;
+
+        const origin_x: f32 = if (target != null) 0.0 else if (self.surface.viewport_origin.x < 0) 0.0 else self.surface.viewport_origin.x;
+        const origin_y: f32 = if (target != null) 0.0 else if (self.surface.viewport_origin.y < 0) 0.0 else self.surface.viewport_origin.y;
+
+        const globals_data = Globals{
+            .surface_size = .{ target_width, target_height },
+            .viewport_origin = .{ origin_x, origin_y },
+        };
+        const globals_offset: u32 = @intCast(pass_index * globals_stride);
+        pass_index += 1;
+        self.queue.writeBuffer(self.globals_buffer.?, globals_offset, &globals_data, @sizeOf(Globals));
+
+        const viewport: ViewportRect = if (target) |t|
+            .{ .x = 0, .y = 0, .width = @as(i32, @intCast(t.width)), .height = @as(i32, @intCast(t.height)) }
+        else
+            self.viewportRect();
+
+        const load_op = if (target != null) wgpu.LoadOp.clear else wgpu.LoadOp.load;
+        const store_op = wgpu.StoreOp.store;
+        var color_attachment = wgpu.ColorAttachment{
+            .view = view,
+            .resolve_target = null,
+            .load_op = load_op,
+            .store_op = store_op,
+            .clear_value = .{ .r = 0, .g = 0, .b = 0, .a = 0 },
+        };
+
+        if (target == null and self.sample_count > 1) {
+            try self.ensureMsaaResources();
+            color_attachment.view = self.msaa_view.?;
+            color_attachment.resolve_target = color_view;
+            color_attachment.load_op = wgpu.LoadOp.clear;
+            color_attachment.store_op = wgpu.StoreOp.discard;
+        }
+
+        const pass = encoder.beginRenderPass(&wgpu.RenderPassDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui pass"),
+            .color_attachment_count = 1,
+            .color_attachments = &[_]wgpu.ColorAttachment{color_attachment},
+        }) orelse return dvui.Backend.GenericError.BackendError;
+        defer pass.release();
+
+        pass.setPipeline(self.render_pipeline.?);
+        pass.setVertexBuffer(0, self.vertex_buffer.?, 0, wgpu.WGPU_WHOLE_SIZE);
+        pass.setIndexBuffer(self.index_buffer.?, .uint16, 0, wgpu.WGPU_WHOLE_SIZE);
+        pass.setBindGroup(0, self.globals_bind_group.?, 1, &[_]u32{globals_offset});
+
+        pass.setViewport(0.0, 0.0, target_width, target_height, 0.0, 1.0);
+        pass.setScissorRect(@intCast(viewport.x), @intCast(viewport.y), @intCast(viewport.width), @intCast(viewport.height));
+
+        var current_scissor = ClipRect{ .enabled = false };
+        var current_pipeline: DrawPipeline = .raster;
+
+        while (i < self.draw_commands.items.len and self.draw_commands.items[i].target == target) : (i += 1) {
+            const cmd = self.draw_commands.items[i];
+            if (cmd.clip_rect.enabled) {
+                if (!applyClip(pass, cmd.clip_rect, viewport, &current_scissor)) continue;
+            } else if (current_scissor.enabled) {
+                current_scissor = .{ .enabled = false };
+                pass.setScissorRect(@intCast(viewport.x), @intCast(viewport.y), @intCast(viewport.width), @intCast(viewport.height));
+            }
+
+            if (cmd.pipeline != current_pipeline) {
+                current_pipeline = cmd.pipeline;
+                pass.setPipeline(if (cmd.pipeline == .msdf) self.msdf_pipeline.? else self.render_pipeline.?);
+            }
+
+            if (cmd.pipeline == .msdf) {
+                self.queue.writeBuffer(self.msdf_buffer.?, 0, &cmd.msdf_params, @sizeOf(MsdfParams));
+                pass.setBindGroup(2, self.msdf_bind_group.?, 0, &[_]u32{});
+            }
+
+            pass.setBindGroup(1, cmd.texture.bind_group, 0, &[_]u32{});
+            pass.drawIndexed(cmd.index_count, 1, cmd.index_offset, cmd.vertex_offset, 0);
+        }
+
+        pass.end();
     }
 
-    const pass = encoder.beginRenderPass(&wgpu.RenderPassDescriptor{
-        .label = wgpu.StringView.fromSlice("dvui pass"),
-        .color_attachment_count = 1,
-        .color_attachments = &[_]wgpu.ColorAttachment{color_attachment},
-    }) orelse return dvui.Backend.GenericError.BackendError;
-    defer pass.release();
-
-    pass.setPipeline(self.render_pipeline.?);
-    pass.setVertexBuffer(0, self.vertex_buffer.?, 0, wgpu.WGPU_WHOLE_SIZE);
-    pass.setIndexBuffer(self.index_buffer.?, .uint16, 0, wgpu.WGPU_WHOLE_SIZE);
-    pass.setBindGroup(0, self.globals_bind_group.?, 0, &[_]u32{});
-
-    const viewport = self.viewportRect();
-    const viewport_width = if (self.surface.surface_size.w <= 0) 1.0 else self.surface.surface_size.w;
-    const viewport_height = if (self.surface.surface_size.h <= 0) 1.0 else self.surface.surface_size.h;
-    pass.setViewport(0.0, 0.0, viewport_width, viewport_height, 0.0, 1.0);
-    pass.setScissorRect(@intCast(viewport.x), @intCast(viewport.y), @intCast(viewport.width), @intCast(viewport.height));
-
-    var current_scissor = ClipRect{ .enabled = false };
-    var current_pipeline: DrawPipeline = .raster;
-    for (self.draw_commands.items) |cmd| {
-        if (cmd.clip_rect.enabled) {
-            if (!self.applyClip(pass, cmd.clip_rect, &current_scissor)) continue;
-        } else if (current_scissor.enabled) {
-            current_scissor = .{ .enabled = false };
-            pass.setScissorRect(@intCast(viewport.x), @intCast(viewport.y), @intCast(viewport.width), @intCast(viewport.height));
-        }
-
-        if (cmd.pipeline != current_pipeline) {
-            current_pipeline = cmd.pipeline;
-            pass.setPipeline(if (cmd.pipeline == .msdf) self.msdf_pipeline.? else self.render_pipeline.?);
-        }
-
-        if (cmd.pipeline == .msdf) {
-            self.queue.writeBuffer(self.msdf_buffer.?, 0, &cmd.msdf_params, @sizeOf(MsdfParams));
-            pass.setBindGroup(2, self.msdf_bind_group.?, 0, &[_]u32{});
-        }
-
-        pass.setBindGroup(1, cmd.texture.bind_group, 0, &[_]u32{});
-        pass.drawIndexed(cmd.index_count, 1, cmd.index_offset, cmd.vertex_offset, 0);
-    }
-
-    pass.end();
     self.clearFrameData();
 }
 
@@ -388,6 +441,7 @@ pub fn drawClippedTriangles(
     }
 
     self.draw_commands.appendAssumeCapacity(.{
+        .target = self.active_target,
         .texture = resource,
         .index_offset = index_offset,
         .index_count = @intCast(idx.len),
@@ -474,12 +528,65 @@ pub fn textureUpdate(
 }
 
 pub fn textureCreateTarget(
-    _: *WgpuBackend,
-    _: u32,
-    _: u32,
-    _: dvui.enums.TextureInterpolation,
+    self: *WgpuBackend,
+    width: u32,
+    height: u32,
+    interpolation: dvui.enums.TextureInterpolation,
 ) dvui.Backend.TextureError!dvui.TextureTarget {
-    return dvui.Backend.TextureError.NotImplemented;
+    if (width == 0 or height == 0) return dvui.Backend.TextureError.TextureCreate;
+    try self.ensurePipeline();
+
+    const descriptor = wgpu.TextureDescriptor{
+        .label = wgpu.StringView.fromSlice("dvui target"),
+        .usage = wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.render_attachment,
+        .dimension = .@"2d",
+        .size = .{ .width = width, .height = height, .depth_or_array_layers = 1 },
+        .format = self.color_format,
+        .mip_level_count = 1,
+        .sample_count = 1,
+    };
+
+    const texture = self.device.createTexture(&descriptor) orelse return dvui.Backend.TextureError.TextureCreate;
+    errdefer texture.release();
+
+    const sampler = self.device.createSampler(&wgpu.SamplerDescriptor{
+        .label = wgpu.StringView.fromSlice("dvui target sampler"),
+        .min_filter = if (interpolation == .linear) .linear else .nearest,
+        .mag_filter = if (interpolation == .linear) .linear else .nearest,
+        .mipmap_filter = .nearest,
+        .address_mode_u = .clamp_to_edge,
+        .address_mode_v = .clamp_to_edge,
+        .address_mode_w = .clamp_to_edge,
+    }) orelse return dvui.Backend.TextureError.TextureCreate;
+    errdefer sampler.release();
+
+    const view = texture.createView(&wgpu.TextureViewDescriptor{}) orelse return dvui.Backend.TextureError.TextureCreate;
+    errdefer view.release();
+
+    const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
+        .label = wgpu.StringView.fromSlice("dvui target bind"),
+        .layout = self.texture_bind_group_layout.?,
+        .entry_count = 2,
+        .entries = &[_]wgpu.BindGroupEntry{
+            .{ .binding = 0, .sampler = sampler },
+            .{ .binding = 1, .texture_view = view },
+        },
+    }) orelse return dvui.Backend.TextureError.TextureCreate;
+    errdefer bind_group.release();
+
+    const resource = try self.gpa.create(TextureResource);
+    resource.* = .{
+        .texture = texture,
+        .view = view,
+        .sampler = sampler,
+        .bind_group = bind_group,
+        .kind = .raster,
+        .interpolation = interpolation,
+        .width = width,
+        .height = height,
+    };
+
+    return dvui.TextureTarget{ .ptr = resource, .width = width, .height = height };
 }
 
 pub fn textureReadTarget(
@@ -490,12 +597,12 @@ pub fn textureReadTarget(
     return dvui.Backend.TextureError.NotImplemented;
 }
 
-pub fn textureFromTarget(_: *WgpuBackend, _: dvui.TextureTarget) dvui.Backend.TextureError!dvui.Texture {
-    return dvui.Backend.TextureError.NotImplemented;
+pub fn textureFromTarget(_: *WgpuBackend, texture: dvui.TextureTarget) dvui.Backend.TextureError!dvui.Texture {
+    return dvui.Texture{ .ptr = texture.ptr, .width = texture.width, .height = texture.height };
 }
 
-pub fn renderTarget(_: *WgpuBackend, _: ?dvui.TextureTarget) dvui.Backend.GenericError!void {
-    return error.BackendError;
+pub fn renderTarget(self: *WgpuBackend, texture: ?dvui.TextureTarget) dvui.Backend.GenericError!void {
+    self.active_target = if (texture) |t| @ptrCast(@alignCast(t.ptr)) else null;
 }
 
 pub fn clipboardText(_: *WgpuBackend) dvui.Backend.GenericError![]const u8 {
@@ -550,7 +657,7 @@ fn ensurePipeline(self: *WgpuBackend) !void {
                     .visibility = wgpu.ShaderStages.vertex,
                     .buffer = wgpu.BufferBindingLayout{
                         .type = .uniform,
-                        .has_dynamic_offset = 0,
+                        .has_dynamic_offset = 1,
                         .min_binding_size = @sizeOf(Globals),
                     },
                 },
@@ -762,28 +869,30 @@ fn ensureMsdfPipeline(self: *WgpuBackend) !void {
     }
 }
 
-fn ensureGlobals(self: *WgpuBackend) !void {
-    const surface_w = if (self.surface.surface_size.w <= 0) 1.0 else self.surface.surface_size.w;
-    const surface_h = if (self.surface.surface_size.h <= 0) 1.0 else self.surface.surface_size.h;
-    const origin_x = if (self.surface.viewport_origin.x < 0) 0 else self.surface.viewport_origin.x;
-    const origin_y = if (self.surface.viewport_origin.y < 0) 0 else self.surface.viewport_origin.y;
+fn ensureGlobals(self: *WgpuBackend, pass_count: usize) !void {
+    const min_count: usize = if (pass_count == 0) 1 else pass_count;
+    const required_size: u64 = @intCast(globals_stride * min_count);
 
-    const globals_data = Globals{
-        .surface_size = .{ surface_w, surface_h },
-        .viewport_origin = .{ origin_x, origin_y },
-    };
+    if (self.globals_buffer) |buffer| {
+        if (buffer.getSize() < required_size) {
+            buffer.release();
+            self.globals_buffer = null;
+            if (self.globals_bind_group) |group| {
+                group.release();
+                self.globals_bind_group = null;
+            }
+        }
+    }
 
     if (self.globals_buffer == null) {
         const buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("dvui globals"),
             .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
-            .size = @sizeOf(Globals),
+            .size = required_size,
             .mapped_at_creation = @intFromBool(false),
         }) orelse return dvui.Backend.GenericError.BackendError;
         self.globals_buffer = buffer;
     }
-
-    self.queue.writeBuffer(self.globals_buffer.?, 0, &globals_data, @sizeOf(Globals));
 
     if (self.globals_bind_group == null) {
         const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
@@ -906,12 +1015,11 @@ fn ensureMsaaResources(self: *WgpuBackend) !void {
 }
 
 fn applyClip(
-    self: *WgpuBackend,
     pass: *wgpu.RenderPassEncoder,
     clip: ClipRect,
+    viewport: ViewportRect,
     previous: *ClipRect,
 ) bool {
-    const viewport = self.viewportRect();
     const x = std.math.clamp(clip.x, viewport.x, viewport.x + viewport.width);
     const y = std.math.clamp(clip.y, viewport.y, viewport.y + viewport.height);
     const max_x = std.math.clamp(clip.x + clip.width, viewport.x, viewport.x + viewport.width);
@@ -926,7 +1034,7 @@ fn applyClip(
     return true;
 }
 
-fn viewportRect(self: *const WgpuBackend) struct { x: i32, y: i32, width: i32, height: i32 } {
+fn viewportRect(self: *const WgpuBackend) ViewportRect {
     const pixel_width: i32 = if (self.surface.pixel_size.w <= 0) 0 else @intFromFloat(self.surface.pixel_size.w);
     const pixel_height: i32 = if (self.surface.pixel_size.h <= 0) 0 else @intFromFloat(self.surface.pixel_size.h);
     const surface_width: i32 = if (self.surface.surface_size.w <= 0) 0 else @intFromFloat(self.surface.surface_size.w);
@@ -943,8 +1051,8 @@ fn viewportRect(self: *const WgpuBackend) struct { x: i32, y: i32, width: i32, h
 }
 
 fn computeClipRect(self: *const WgpuBackend, rect: dvui.Rect.Physical) ClipRect {
-    const viewport_offset_x = self.surface.viewport_origin.x;
-    const viewport_offset_y = self.surface.viewport_origin.y;
+    const viewport_offset_x: f32 = if (self.active_target != null) 0 else self.surface.viewport_origin.x;
+    const viewport_offset_y: f32 = if (self.active_target != null) 0 else self.surface.viewport_origin.y;
     const x0 = @floor(rect.x + viewport_offset_x);
     const y0 = @floor(rect.y + viewport_offset_y);
     const x1 = @ceil(rect.x + rect.w + viewport_offset_x);
@@ -1053,6 +1161,8 @@ fn createTextureResourceKind(
         .bind_group = bind_group,
         .kind = pipeline_kind,
         .interpolation = interpolation,
+        .width = width,
+        .height = height,
     };
 
     return resource;
