@@ -9,10 +9,10 @@ const utils = @import("utils.zig");
 const Renderer = types.Renderer;
 
 const lua_script_paths = [_][]const u8{
-    "scripts/ui_features_decl.luau",
-    "scripts/ui_features.luau",
-    "scripts/ui_features_all.luau",
-    "scripts/native_ui.luau",
+    "luau/ui_features_decl.luau",
+    "luau/ui_features.luau",
+    "luau/ui_features_all.luau",
+    "luau/native_ui.luau",
 };
 const max_lua_script_bytes: usize = 1024 * 1024;
 const max_lua_error_len: usize = 120;

@@ -26,9 +26,9 @@ function require(path)
   return result
 end
 
-local content = require("scripts/ui_features_decl/content")
-local renderer = require("scripts/ui_features_decl/renderer")
-local animation = require("scripts/ui_features_decl/animation")
+local content = require("luau/ui_features_decl/content")
+local renderer = require("luau/ui_features_decl/renderer")
+local animation = require("luau/ui_features_decl/animation")
 
 function init()
   renderer.init(content)

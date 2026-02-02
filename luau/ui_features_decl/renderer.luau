@@ -1,4 +1,4 @@
-local reactivity = require("scripts/ui_features_decl/reactivity")
+local reactivity = require("luau/ui_features_decl/reactivity")
 
 local effect = reactivity.effect
 local root = reactivity.root

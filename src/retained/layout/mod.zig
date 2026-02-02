@@ -89,10 +89,31 @@ fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_r
     }
 
     if (!node.needsLayoutUpdate()) {
-        const child_rect = node.layout.rect orelse parent_rect;
+        const base_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
+        var layout_rect = base_rect;
+        if (node.scroll.isEnabled()) {
+            const allow_x = node.scroll.allowX();
+            const allow_y = node.scroll.allowY();
+            if (allow_x) {
+                var content_w = base_rect.w;
+                if (node.scroll.canvas_width > 0) {
+                    content_w = @max(content_w, node.scroll.canvas_width);
+                }
+                layout_rect.w = content_w;
+                layout_rect.x -= node.scroll.offset_x;
+            }
+            if (allow_y) {
+                var content_h = base_rect.h;
+                if (node.scroll.canvas_height > 0) {
+                    content_h = @max(content_h, node.scroll.canvas_height);
+                }
+                layout_rect.h = content_h;
+                layout_rect.y -= node.scroll.offset_y;
+            }
+        }
         for (node.children.items) |child_id| {
             if (store.node(child_id)) |child| {
-                updateLayoutIfDirty(store, child, child_rect);
+                updateLayoutIfDirty(store, child, layout_rect);
             }
         }
         return;

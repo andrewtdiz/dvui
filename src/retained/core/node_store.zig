@@ -78,11 +78,16 @@ pub const InputState = struct {
     }
 
     pub fn ensureCapacity(self: *InputState, needed: usize) !void {
-        var target = if (needed > self.limit) needed else needed;
-        if (self.buffer.len >= target and self.buffer.len != 0) return;
+        const max_needed = if (self.limit == std.math.maxInt(usize)) self.limit else self.limit + 1;
+        if (needed > max_needed) return error.InputLimitExceeded;
+        if (self.buffer.len >= needed and self.buffer.len != 0) return;
+        var target = needed;
         if (target < 32) target = 32;
         if (self.buffer.len > 0) {
             target = @max(target, self.buffer.len * 2);
+        }
+        if (target > max_needed) target = max_needed;
+        if (self.buffer.len > 0) {
             self.buffer = try self.allocator.realloc(self.buffer, target);
         } else {
             self.buffer = try self.allocator.alloc(u8, target);
@@ -90,6 +95,7 @@ pub const InputState = struct {
     }
 
     fn setValue(self: *InputState, value: []const u8) !void {
+        if (value.len > self.limit) return error.InputLimitExceeded;
         const copy = try self.allocator.dupe(u8, value);
         if (self.value_owned.len > 0) self.allocator.free(self.value_owned);
         self.value_owned = copy;

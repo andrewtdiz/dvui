@@ -119,7 +119,7 @@ pub fn build(b: *Build) !void {
     native_module.addImport("luau_ui", luau_ui_mod);
 
     const luau_runner_mod = b.createModule(.{
-        .root_source_file = b.path("examples/luau-native-runner.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,

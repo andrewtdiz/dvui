@@ -1,6 +1,6 @@
-local dsl = require("scripts/ui_features_decl/dsl")
-local reactivity = require("scripts/ui_features_decl/reactivity")
-local animation = require("scripts/ui_features_decl/animation")
+local dsl = require("luau/ui_features_decl/dsl")
+local reactivity = require("luau/ui_features_decl/reactivity")
+local animation = require("luau/ui_features_decl/animation")
 
 local Tag = dsl.Tag
 local For = dsl.For
@@ -42,15 +42,6 @@ local function App()
       div({
         class = "w-full h-px bg-neutral-700 opacity-60",
       })(),
-      div({
-        class = "w-full h-3 bg-amber-500 opacity-80",
-        props = {
-          transform = {
-            translateX = 16,
-            translateY = 4,
-          },
-        },
-      })(),
       p({
         class = "text-sm text-neutral-300 text-center",
       }){
@@ -71,6 +62,7 @@ local function App()
           children = function(label)
             return button({
               class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-500 bg-transparent cursor-pointer",
+              scale = menu_scale_target,
               props = {
                 visual = {
                   fontRenderMode = "msdf",

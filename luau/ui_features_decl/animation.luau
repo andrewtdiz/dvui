@@ -1,5 +1,5 @@
-local reactivity = require("scripts/ui_features_decl/reactivity")
-local easing = require("scripts/ui_features_decl/easing")
+local reactivity = require("luau/ui_features_decl/reactivity")
+local easing = require("luau/ui_features_decl/easing")
 
 local source = reactivity.source
 local effect = reactivity.effect
