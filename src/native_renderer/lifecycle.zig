@@ -10,6 +10,7 @@ const utils = @import("utils.zig");
 const Renderer = types.Renderer;
 
 const lua_script_paths = [_][]const u8{
+    "luau/index.luau",
     "luau/ui_features_decl.luau",
     "luau/ui_features.luau",
     "luau/ui_features_all.luau",

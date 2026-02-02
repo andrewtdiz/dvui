@@ -1,6 +1,6 @@
 • Entry Points / Call Flow (Zig → Luau → retained)
 
-  - src/native_renderer/lifecycle.zig loads luau/ui_features_decl.luau, installs dvui_dofile and a Zig-provided global require(), calls global init() once, then marks lua_ready.
+  - src/native_renderer/lifecycle.zig loads luau/index.luau, installs dvui_dofile and a Zig-provided global require(), calls global init() once, then marks lua_ready.
   - Each frame in src/native_renderer/window.zig:
       - Drain retained events → Luau (drainLuaEvents() calls on_event(kind_int, id, payload_bytes)) before Luau update().
       - Call Luau update(dt, input_table) (if present).
@@ -8,7 +8,7 @@
 
   Luau “Declarative UI” Rendering Model
 
-  - luau/ui_features_decl.luau is a tiny entrypoint:
+  - luau/index.luau is a tiny entrypoint:
       - Loads SolidLuau via require("solidluau") (modules embedded in Zig).
       - Installs the compat adapter: SolidLuau.ui.adapters.compat_ui(ui).
       - init(): SolidLuau.ui.init(App)
