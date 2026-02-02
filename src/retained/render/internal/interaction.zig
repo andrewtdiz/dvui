@@ -2,19 +2,15 @@ const dvui = @import("dvui");
 
 const types = @import("../../core/types.zig");
 const direct = @import("../direct.zig");
+const hit_test = @import("../../hit_test.zig");
 const state = @import("state.zig");
 const tailwind = @import("../../style/tailwind.zig");
-const transitions = @import("../transitions.zig");
 const runtime_mod = @import("runtime.zig");
 
-const rectContains = state.rectContains;
-const intersectRect = state.intersectRect;
-const isPortalNode = state.isPortalNode;
 const nodeIdExtra = state.nodeIdExtra;
 const physicalToDvuiRect = state.physicalToDvuiRect;
 const PointerPick = state.PointerPick;
 const RenderContext = state.RenderContext;
-const nodeBoundsInContext = state.nodeBoundsInContext;
 
 const RenderRuntime = runtime_mod.RenderRuntime;
 
@@ -52,67 +48,26 @@ pub fn scanPickInteractive(
     order: *u32,
     skip_portals: bool,
 ) void {
-    if (skip_portals and isPortalNode(node)) return;
-    if (ctx.clip) |clip| {
-        if (!rectContains(clip, point)) return;
-    }
+    var visitor = struct {
+        result: *PointerPick,
 
-    var next_ctx = ctx;
-    var node_rect: ?types.Rect = null;
-    if (node.kind == .element) {
-        const spec = node.prepareClassSpec();
-        if (!spec.hidden and (spec.opacity orelse node.visual_props.opacity) > 0) {
-            if (node.layout.rect) |base_rect| {
-                node_rect = nodeBoundsInContext(ctx, node, base_rect);
-            }
-            if (node_rect) |rect| {
-                if (rectContains(rect, point)) {
-                    if (node.isInteractive()) {
-                        order.* += 1;
-                        const z_index = spec.z_index;
-                        if (z_index > result.z_index or (z_index == result.z_index and order.* >= result.order)) {
-                            result.* = .{
-                                .id = node.id,
-                                .z_index = z_index,
-                                .order = order.*,
-                            };
-                        }
-                    }
-                }
-                const clip_children = spec.clip_children orelse node.visual_props.clip_children;
-                const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
-                if (clip_children or scroll_enabled) {
-                    if (next_ctx.clip) |clip| {
-                        next_ctx.clip = intersectRect(clip, rect);
-                    } else {
-                        next_ctx.clip = rect;
-                    }
-                }
+        pub fn count(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec) bool {
+            _ = self;
+            _ = spec;
+            return n.isInteractive();
+        }
+
+        pub fn hit(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec, rect: types.Rect, ord: u32) void {
+            _ = rect;
+            if (!n.isInteractive()) return;
+            const z_index = spec.z_index;
+            if (z_index > self.result.z_index or (z_index == self.result.z_index and ord >= self.result.order)) {
+                self.result.* = .{ .id = n.id, .z_index = z_index, .order = ord };
             }
         }
-        if (node.layout.rect) |rect| {
-            const t = transitions.effectiveTransform(node);
-            const anchor = dvui.Point.Physical{
-                .x = rect.x + rect.w * t.anchor[0],
-                .y = rect.y + rect.h * t.anchor[1],
-            };
-            const offset = dvui.Point.Physical{
-                .x = anchor.x + t.translation[0] - t.scale[0] * anchor.x,
-                .y = anchor.y + t.translation[1] - t.scale[1] * anchor.y,
-            };
-            next_ctx.scale = .{ ctx.scale[0] * t.scale[0], ctx.scale[1] * t.scale[1] };
-            next_ctx.offset = .{
-                ctx.scale[0] * offset.x + ctx.offset[0],
-                ctx.scale[1] * offset.y + ctx.offset[1],
-            };
-        }
-    }
+    }{ .result = result };
 
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            scanPickInteractive(store, child, point, next_ctx, result, order, skip_portals);
-        }
-    }
+    hit_test.scan(store, node, point, ctx, &visitor, order, .{ .skip_portals = skip_portals });
 }
 
 pub fn pickInteractiveId(store: *types.NodeStore, root: *types.SolidNode, point: dvui.Point.Physical, skip_portals: bool, ctx: RenderContext) u32 {
@@ -131,72 +86,33 @@ pub fn scanPickPair(
     order: *u32,
     skip_portals: bool,
 ) void {
-    if (skip_portals and isPortalNode(node)) return;
-    if (ctx.clip) |clip| {
-        if (!rectContains(clip, point)) return;
-    }
+    var visitor = struct {
+        out: *PickPair,
 
-    var next_ctx = ctx;
-    var node_rect: ?types.Rect = null;
-    if (node.kind == .element) {
-        var spec = node.prepareClassSpec();
-        if (!spec.hidden and (spec.opacity orelse node.visual_props.opacity) > 0) {
-            if (node.layout.rect) |base_rect| {
-                node_rect = nodeBoundsInContext(ctx, node, base_rect);
-            }
-            if (node_rect) |rect| {
-                if (rectContains(rect, point)) {
-                    const z_index = spec.z_index;
-                    const is_interactive = node.isInteractive();
-                    const is_hover = wantsHover(node, &spec);
-                    if (is_interactive or is_hover) {
-                        order.* += 1;
-                    }
-                    if (is_interactive) {
-                        if (z_index > out.interactive.z_index or (z_index == out.interactive.z_index and order.* >= out.interactive.order)) {
-                            out.interactive = .{ .id = node.id, .z_index = z_index, .order = order.* };
-                        }
-                    }
-                    if (is_hover) {
-                        if (z_index > out.hover.z_index or (z_index == out.hover.z_index and order.* >= out.hover.order)) {
-                            out.hover = .{ .id = node.id, .z_index = z_index, .order = order.* };
-                        }
-                    }
+        pub fn count(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec) bool {
+            _ = self;
+            return n.isInteractive() or wantsHover(n, &spec);
+        }
+
+        pub fn hit(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec, rect: types.Rect, ord: u32) void {
+            _ = rect;
+            const z_index = spec.z_index;
+
+            if (n.isInteractive()) {
+                if (z_index > self.out.interactive.z_index or (z_index == self.out.interactive.z_index and ord >= self.out.interactive.order)) {
+                    self.out.interactive = .{ .id = n.id, .z_index = z_index, .order = ord };
                 }
-                const clip_children = spec.clip_children orelse node.visual_props.clip_children;
-                const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
-                if (clip_children or scroll_enabled) {
-                    if (next_ctx.clip) |clip| {
-                        next_ctx.clip = intersectRect(clip, rect);
-                    } else {
-                        next_ctx.clip = rect;
-                    }
+            }
+
+            if (wantsHover(n, &spec)) {
+                if (z_index > self.out.hover.z_index or (z_index == self.out.hover.z_index and ord >= self.out.hover.order)) {
+                    self.out.hover = .{ .id = n.id, .z_index = z_index, .order = ord };
                 }
             }
         }
-        if (node.layout.rect) |rect| {
-            const t = transitions.effectiveTransform(node);
-            const anchor = dvui.Point.Physical{
-                .x = rect.x + rect.w * t.anchor[0],
-                .y = rect.y + rect.h * t.anchor[1],
-            };
-            const offset = dvui.Point.Physical{
-                .x = anchor.x + t.translation[0] - t.scale[0] * anchor.x,
-                .y = anchor.y + t.translation[1] - t.scale[1] * anchor.y,
-            };
-            next_ctx.scale = .{ ctx.scale[0] * t.scale[0], ctx.scale[1] * t.scale[1] };
-            next_ctx.offset = .{
-                ctx.scale[0] * offset.x + ctx.offset[0],
-                ctx.scale[1] * offset.y + ctx.offset[1],
-            };
-        }
-    }
+    }{ .out = out };
 
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            scanPickPair(store, child, point, next_ctx, out, order, skip_portals);
-        }
-    }
+    hit_test.scan(store, node, point, ctx, &visitor, order, .{ .skip_portals = skip_portals });
 }
 
 pub fn clickedExTopmost(runtime: *const RenderRuntime, wd: *const dvui.WidgetData, node_id: u32, opts: dvui.ClickOptions) ?dvui.Event.EventTypes {

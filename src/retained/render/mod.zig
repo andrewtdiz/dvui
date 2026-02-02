@@ -78,6 +78,7 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     const portal_ids = overlay.ensurePortalCache(&runtime, store, root);
     const overlay_state = overlay.ensureOverlayState(&runtime, store, portal_ids, root.subtree_version);
     runtime.modal_overlay_active = overlay_state.modal;
+    drag_drop.setHitTestContext(portal_ids, overlay_state.modal, overlay_state.hit_rect);
 
     const current_mouse = dvui.currentWindow().mouse_pt;
     const root_ctx = state.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };

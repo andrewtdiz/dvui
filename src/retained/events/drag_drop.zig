@@ -3,6 +3,8 @@ const dvui = @import("dvui");
 
 const events = @import("mod.zig");
 const types = @import("../core/types.zig");
+const hit_test = @import("../hit_test.zig");
+const tailwind = @import("../style/tailwind.zig");
 
 const DragState = struct {
     active: bool = false,
@@ -15,12 +17,28 @@ const DragState = struct {
 
 var drag_state: DragState = .{};
 
+const HitTestContext = struct {
+    portal_ids: []const u32 = &.{},
+    overlay_modal: bool = false,
+    overlay_hit_rect: ?types.Rect = null,
+};
+
+var hit_ctx: HitTestContext = .{};
+
 pub fn init() void {
     drag_state = .{};
+    hit_ctx = .{};
 }
 
 pub fn deinit() void {
     drag_state = .{};
+    hit_ctx = .{};
+}
+
+pub fn setHitTestContext(portal_ids: []const u32, overlay_modal: bool, overlay_hit_rect: ?types.Rect) void {
+    hit_ctx.portal_ids = portal_ids;
+    hit_ctx.overlay_modal = overlay_modal;
+    hit_ctx.overlay_hit_rect = overlay_hit_rect;
 }
 
 pub fn cancelIfMissing(event_ring: ?*events.EventRing, store: *types.NodeStore) void {
@@ -244,47 +262,55 @@ fn findDropTarget(store: *types.NodeStore, point: dvui.Point.Physical, source_id
     var best_z: i16 = std.math.minInt(i16);
     var best_order: u32 = 0;
     var order: u32 = 0;
-    scanNode(store, root, point, source_id, &best_id, &best_z, &best_order, &order);
-    return best_id;
-}
+    const ctx = hit_test.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
 
-fn scanNode(
-    store: *types.NodeStore,
-    node: *types.SolidNode,
-    point: dvui.Point.Physical,
-    source_id: u32,
-    best_id: *?u32,
-    best_z: *i16,
-    best_order: *u32,
-    order: *u32,
-) void {
-    if (node.kind == .element and node.id != source_id and std.mem.eql(u8, node.tag, "div")) {
-        const wants_drop = node.hasListenerKind(.dragenter) or node.hasListenerKind(.dragleave) or node.hasListenerKind(.drop);
-        if (wants_drop) {
-            const spec = node.prepareClassSpec();
-            if (!spec.hidden) {
-                if (node.layout.rect) |rect| {
-                    if (rectContains(rect, point)) {
-                        order.* += 1;
-                        const z = node.visual.z_index;
-                        if (z > best_z.* or (z == best_z.* and order.* >= best_order.*)) {
-                            best_z.* = z;
-                            best_order.* = order.*;
-                            best_id.* = node.id;
-                        }
-                    }
-                }
+    var visitor = struct {
+        source_id: u32,
+        best_id: *?u32,
+        best_z: *i16,
+        best_order: *u32,
+
+        fn wantsDrop(self: *@This(), n: *types.SolidNode) bool {
+            if (n.id == self.source_id) return false;
+            if (n.kind != .element) return false;
+            if (!std.mem.eql(u8, n.tag, "div")) return false;
+            return n.hasListenerKind(.dragenter) or n.hasListenerKind(.dragleave) or n.hasListenerKind(.drop);
+        }
+
+        pub fn count(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec) bool {
+            _ = spec;
+            return self.wantsDrop(n);
+        }
+
+        pub fn hit(self: *@This(), n: *types.SolidNode, spec: tailwind.Spec, rect: types.Rect, ord: u32) void {
+            _ = rect;
+            if (!self.wantsDrop(n)) return;
+            const z = spec.z_index;
+            if (z > self.best_z.* or (z == self.best_z.* and ord >= self.best_order.*)) {
+                self.best_z.* = z;
+                self.best_order.* = ord;
+                self.best_id.* = n.id;
             }
         }
-    }
+    }{ .source_id = source_id, .best_id = &best_id, .best_z = &best_z, .best_order = &best_order };
 
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            scanNode(store, child, point, source_id, best_id, best_z, best_order, order);
+    var use_overlay = false;
+    if (hit_ctx.portal_ids.len > 0) {
+        if (hit_ctx.overlay_modal) {
+            use_overlay = true;
+        } else if (hit_ctx.overlay_hit_rect) |hit_rect| {
+            use_overlay = hit_test.rectContains(hit_rect, point);
         }
     }
-}
 
-fn rectContains(rect: types.Rect, point: dvui.Point.Physical) bool {
-    return point.x >= rect.x and point.x <= (rect.x + rect.w) and point.y >= rect.y and point.y <= (rect.y + rect.h);
+    if (use_overlay) {
+        for (hit_ctx.portal_ids) |portal_id| {
+            const portal = store.node(portal_id) orelse continue;
+            hit_test.scan(store, portal, point, ctx, &visitor, &order, .{ .skip_portals = false });
+        }
+    } else {
+        hit_test.scan(store, root, point, ctx, &visitor, &order, .{ .skip_portals = true });
+    }
+
+    return best_id;
 }

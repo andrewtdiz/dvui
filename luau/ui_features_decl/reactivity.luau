@@ -14,6 +14,8 @@ local function new_scope(parent)
     owned = {},
     children = {},
     cleanups = {},
+    mounts = {},
+    mounted = false,
     destroyed = false,
   }
   if parent ~= nil then
@@ -52,6 +54,40 @@ local function destroy_scope(scope)
   table.clear(scope.children)
   table.clear(scope.owned)
   table.clear(scope.cleanups)
+  table.clear(scope.mounts)
+end
+
+local function run_mounts(scope)
+  if scope == nil or scope.destroyed then
+    return
+  end
+  if scope.mounted and #scope.mounts == 0 then
+    return
+  end
+
+  local mounts = scope.mounts
+  scope.mounts = {}
+
+  local prev_owner = current_owner
+  local prev_scope = current_scope
+  current_owner = scope
+  current_scope = scope
+
+  for i = 1, #mounts do
+    local fn = mounts[i]
+    mounts[i] = nil
+    local ok, err = xpcall(fn, debug.traceback)
+    if not ok then
+      current_owner = prev_owner
+      current_scope = prev_scope
+      destroy_scope(scope)
+      error(err, 0)
+    end
+  end
+
+  current_owner = prev_owner
+  current_scope = prev_scope
+  scope.mounted = true
 end
 
 local function flush()
@@ -68,7 +104,7 @@ local function flush()
     if comp ~= nil then
       comp.scheduled = false
       if not comp.destroyed then
-        if comp.kind == "derive" then
+        if comp.kind == "memo" then
           comp.dirty = true
           for observer in pairs(comp.observers) do
             if not observer.destroyed and not observer.scheduled then
@@ -116,10 +152,10 @@ local function add_dependency(comp, sig)
   sig.observers[comp] = true
 end
 
-local function cleanup(fn)
+local function onCleanup(fn)
   local scope = current_scope
   if scope == nil then
-    error("cleanup outside scope", 0)
+    error("onCleanup outside scope", 0)
   end
   scope.cleanups[#scope.cleanups + 1] = fn
 end
@@ -150,7 +186,7 @@ local function untrack(fn)
   return table.unpack(packed, 1, packed.n)
 end
 
-local function scoped(owner, fn)
+local function runWithOwner(owner, fn)
   local prev_owner = current_owner
   local prev_scope = current_scope
   current_owner = owner
@@ -166,10 +202,22 @@ local function scoped(owner, fn)
   return table.unpack(packed, 1, packed.n)
 end
 
-local function effect(fn)
+local function onMount(fn)
   local owner = current_owner
   if owner == nil then
-    error("effect outside root", 0)
+    error("onMount outside root", 0)
+  end
+  if owner.mounted then
+    runWithOwner(owner, fn)
+    return
+  end
+  owner.mounts[#owner.mounts + 1] = fn
+end
+
+local function createEffect(fn)
+  local owner = current_owner
+  if owner == nil then
+    error("createEffect outside root", 0)
   end
 
   local comp = {
@@ -224,14 +272,18 @@ local function effect(fn)
   return destroy
 end
 
-local function derive(fn)
+local function createComputed(fn)
+  return createEffect(fn)
+end
+
+local function createMemo(fn)
   local owner = current_owner
   if owner == nil then
-    error("derive outside root", 0)
+    error("createMemo outside root", 0)
   end
 
   local node = {
-    kind = "derive",
+    kind = "memo",
     owner = owner,
     fn = fn,
     observers = {},
@@ -300,22 +352,24 @@ local function derive(fn)
   return read
 end
 
-local function source(initial)
+local function createSignal(initial)
   local sig = {
     kind = "source",
     value = initial,
     observers = {},
   }
 
-  local function access(...)
-    if select("#", ...) == 0 then
-      if current_computation ~= nil then
-        add_dependency(current_computation, sig)
-      end
-      return sig.value
+  local function get()
+    if current_computation ~= nil then
+      add_dependency(current_computation, sig)
     end
+    return sig.value
+  end
 
-    local v = ...
+  local function set(v)
+    if type(v) == "function" then
+      v = v(sig.value)
+    end
     if sig.value == v and (type(v) ~= "table" or table.isfrozen(v)) then
       return v
     end
@@ -326,10 +380,123 @@ local function source(initial)
     return v
   end
 
-  return access
+  return get, set
 end
 
-local function root(fn)
+local function mergeProps(...)
+  local sources = table.pack(...)
+  local has_fn_source = false
+  for i = 1, sources.n do
+    if type(sources[i]) == "function" then
+      has_fn_source = true
+      break
+    end
+  end
+
+  local keys = {}
+  local key_set = {}
+  for i = 1, sources.n do
+    local src = sources[i]
+    if type(src) == "table" then
+      for k in pairs(src) do
+        if not key_set[k] then
+          key_set[k] = true
+          keys[#keys + 1] = k
+        end
+      end
+    end
+  end
+
+  local function resolve_raw(key)
+    for i = sources.n, 1, -1 do
+      local src = sources[i]
+      local table_src = src
+      if type(src) == "function" then
+        table_src = src()
+      end
+      if type(table_src) == "table" then
+        local value = table_src[key]
+        if value ~= nil then
+          return value
+        end
+      end
+    end
+    return nil
+  end
+
+  local function resolve_value(key)
+    for i = sources.n, 1, -1 do
+      local src = sources[i]
+      local table_src = src
+      if type(src) == "function" then
+        table_src = src()
+      end
+      if type(table_src) == "table" then
+        local value = table_src[key]
+        if value ~= nil then
+          if type(value) == "function" then
+            return value()
+          end
+          return value
+        end
+      end
+    end
+    return nil
+  end
+
+  local function key_needs_fn(key)
+    if has_fn_source then
+      return true
+    end
+    for i = sources.n, 1, -1 do
+      local src = sources[i]
+      if type(src) == "table" then
+        local value = src[key]
+        if type(value) == "function" then
+          return true
+        end
+      end
+    end
+    return false
+  end
+
+  local merged = {}
+  for _, key in ipairs(keys) do
+    if key_needs_fn(key) then
+      merged[key] = function()
+        return resolve_value(key)
+      end
+    else
+      merged[key] = resolve_raw(key)
+    end
+  end
+
+  setmetatable(merged, {
+    __index = function(_, key)
+      if key_needs_fn(key) then
+        return function()
+          return resolve_value(key)
+        end
+      end
+      return resolve_raw(key)
+    end,
+    __pairs = function()
+      local i = 0
+      return function()
+        i = i + 1
+        local key = keys[i]
+        if key == nil then
+          return nil
+        end
+        return key, merged[key]
+      end
+    end,
+  })
+
+  return merged
+end
+
+local function createRoot(fn)
   local scope = new_scope(nil)
   local function destroy()
     destroy_scope(scope)
@@ -350,24 +517,29 @@ local function root(fn)
     error(result, 0)
   end
 
+  run_mounts(scope)
   return destroy, result
 end
 
 return {
   batch = batch,
-  cleanup = cleanup,
-  derive = derive,
+  createComputed = createComputed,
+  createEffect = createEffect,
+  createMemo = createMemo,
+  createRoot = createRoot,
+  createSignal = createSignal,
   destroy_scope = destroy_scope,
-  effect = effect,
   get_owner = function()
     return current_owner
   end,
+  mergeProps = mergeProps,
   new_scope = new_scope,
-  root = root,
-  scoped = scoped,
+  onCleanup = onCleanup,
+  onMount = onMount,
+  runWithOwner = runWithOwner,
+  run_mounts = run_mounts,
   set_owner = function(owner)
     current_owner = owner
   end,
-  source = source,
   untrack = untrack,
 }

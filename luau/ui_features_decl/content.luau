@@ -10,8 +10,8 @@ local h1 = Tag.h1
 local p = Tag.p
 local button = Tag.button
 
-local source = reactivity.source
-local selected_label = source("None")
+local createSignal = reactivity.createSignal
+local selected_label, set_selected_label = createSignal("None")
 
 local menuOptions = { "Play Game", "Load Game", "Settings", "Quit" }
 for i = 1, 40 do
@@ -19,8 +19,8 @@ for i = 1, 40 do
 end
 
 local function App()
-  local menu_scale_target = source(1)
-  local menu_scale = animation.spring(menu_scale_target, 0.2, 1)
+  local menu_scale_target, set_menu_scale_target = createSignal(1)
+  local menu_scale = animation.createSpring(menu_scale_target, { stiffness = 100, damping = 5 })
 
   return div({
     class = "w-full h-full flex flex-col justify-center items-center bg-neutral-950",
@@ -28,6 +28,9 @@ local function App()
     div({
       class = "w-[220px] flex flex-col anchor-center items-center gap-6 bg-neutral-900 rounded-xl p-6",
       scale = menu_scale,
+      onMouseLeave = function()
+        set_menu_scale_target(1)
+      end,
     }){
       h1({
         class = "text-4xl text-neutral-50 text-center text-nowrap",
@@ -43,10 +46,10 @@ local function App()
         class = "w-full h-px bg-neutral-700 opacity-60",
       })(),
       p({
-        class = "text-sm text-neutral-300 text-center",
+        class = "text-sm w-full text-neutral-300 text-center",
       }){
         function()
-          return string.format("Selected: %s", selected_label())
+          return string.format("selected: %s", selected_label())
         end,
       },
       div({
@@ -71,7 +74,8 @@ local function App()
                 },
               },
               onMouseEnter = function()
-                selected_label(label)
+                set_selected_label(label)
+                set_menu_scale_target(1.15)
               end,
             }){ label }
           end,

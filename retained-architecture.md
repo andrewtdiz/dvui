@@ -1,56 +1,129 @@
-# Retained Mode Architecture Analysis
+# Retained Mode Architecture Deep Dive
 
-## Overview
+## 1. Overview & Core Philosophy
 
-The `src/retained` module implements a **retained-mode UI system** on top of the `dvui` immediate-mode library. This hybrid approach combines the performance and statelessness of immediate mode for low-level drawing with the ease of use, state persistence, and complex layout capabilities of a retained object model.
+This architecture implements a **Retained Mode** layer on top of an **Immediate Mode** backend (`dvui`). The primary goal is to provide a persistent object model (DOM-like) that manages state, layout, and complex styling, while leveraging the immediate mode library for efficient low-level drawing and OS integration.
 
-It allows developers to build UIs declaratively using a persistent tree of nodes (`SolidNode`), styled with a Tailwind-CSS-inspired syntax, and laid out using Flexbox.
+**Key Characteristics:**
+-   **Data-Driven:** The UI is defined by a graph of data objects (`SolidNode`), not function calls.
+-   **Stateful:** Component state (scroll position, text cursor, animations) is stored in the node graph, persisting across frames.
+-   **Lazy Updates:** Layout and painting are only re-computed when the underlying data version changes.
+-   **Hybrid Rendering:** Static content is drawn directly; interactive content delegates to immediate-mode widgets.
 
-## Core Pillars
+## 2. Core Data Structures
 
-### 1. Retained Object Model (`core/`)
-At the heart of the system is the **Node Graph**, managed by `NodeStore`.
-- **`SolidNode`**: The fundamental unit of the UI. Unlike immediate mode widgets that exist only during a function call, a `SolidNode` persists across frames. It aggregates:
-    - **Hierarchy**: Parent/child relationships.
-    - **Data**: Text content, image sources, tags.
-    - **State**: Persistent state for scrolling, text input, and animations.
-    - **Caches**: Layout results (`rect`) and paint commands (`PaintCache`) to minimize re-computation.
-- **`NodeStore`**: A central repository mapping `u32` IDs to `SolidNode` instances. It handles tree operations (insert, remove) and employs a **Versioning System** (`version`, `subtree_version`) to efficiently track dirty nodes and minimize traversal during layout and render passes.
+### 2.1 The Node Graph (`NodeStore`)
+The `NodeStore` is the "heap" of the UI. It owns all nodes and manages their lifecycle.
 
-### 2. Declarative Styling (`style/`)
-The system uses a string-based, functional styling approach inspired by **Tailwind CSS**.
-- **Parsing**: Class strings (e.g., `bg-slate-800 p-4 rounded-lg flex-row`) are parsed into structured `Spec` objects.
-- **Caching**: The `SpecCache` avoids re-parsing common strings.
-- **Application**: The `derive` module maps these specs to concrete `VisualProps` (colors, radii) on nodes or `dvui.Options` for leaf widgets.
-- **Reactivity**: Styles support pseudo-classes like `hover:` and transitions, automatically updating visual properties in response to interaction state.
+-   **Structure:** A flat hash map `AutoHashMap(u32, SolidNode)`.
+-   **Addressing:** Nodes are referenced by `u32` IDs. `0` is always the root.
+-   **Versioning:** A global `VersionTracker` increments on every mutation.
+    -   `node.version`: Last time this specific node changed.
+    -   `node.subtree_version`: Last time this node or any descendant changed.
+    -   `node.layout_subtree_version`: Last time a layout-affecting property changed in the subtree.
+    -   *Purpose:* Allows the traverser to skip huge chunks of the tree during layout/render if `node.subtree_version < last_process_version`.
 
-### 3. State Persistence
-State is managed explicitly within the node graph, solving a common pain point of immediate-mode GUIs.
-- **Input State**: `InputState` buffers text input, tracking cursor position and selection, decoupling the UI update loop from the typing speed.
-- **Scroll State**: `ScrollState` persists scroll offsets (`offset_x`, `offset_y`) and content dimensions, enabling complex scrollable containers (`scrollframe`) independent of the immediate mode frame.
-- **Animation State**: `TransitionState` tracks previous and current values for animatable properties (opacity, transform, color), allowing the render engine to interpolate frames automatically.
+### 2.2 The Node (`SolidNode`)
+The `SolidNode` is a heavyweight struct encompassing all aspects of a UI element.
 
-### 4. Layout Engine (`layout/`)
-The system creates a distinct layout phase before rendering.
-- **Flexbox**: The primary layout model is a native Zig implementation of Flexbox (`flex.zig`), supporting nested containers, alignment (`justify-center`, `items-end`), and flexible sizing (`grow`, `shrink`).
-- **Text Layout**: A dedicated text engine (`text_wrap.zig`) handles word wrapping, line breaking, and sizing based on font metrics, caching results to avoid expensive re-measurement.
-- **Phased Update**: `layout.updateLayouts()` is called at the start of the frame. It checks dirty flags and only re-computes parts of the tree that have changed or are affected by screen resizing.
+| Component | Description |
+| :--- | :--- |
+| **Hierarchy** | `parent` (ID), `children` (List of IDs). |
+| **Identity** | `tag` ("div", "button"), `id`. |
+| **Styling** | `class_name` (string), `class_spec` (parsed Tailwind spec), `visual_props` (colors, radius). |
+| **Layout Cache** | `rect` (Computed bounds), `child_rect` (Content area), `text_layout` (Line breaks). |
+| **Persistent State** | `scroll` (Offset, canvas size), `input_state` (Text buffer, cursor), `transition_state` (Animation values). |
+| **Flags** | `hovered`, `interactive_self`, `total_interactive` (Optimization flag: does subtree have events?). |
 
-### 5. Rendering Pipeline (`render/`)
-The `render()` function orchestrates the frame, bridging the retained graph with the immediate-mode backend.
-1.  **Layout**: Recalculates geometry if versions have changed.
-2.  **Input & Hit Testing**: The `interaction` module performs hit testing to determine hovered nodes, active drag targets, and focus, respecting z-index and overlay layers.
-3.  **Dirty Tracking**: A `DirtyRegionTracker` identifies screen regions that need repainting, optimizing performance.
-4.  **Paint Dispatch**:
-    -   **Container Nodes**: Rendered directly using `dvui` primitives (rects, borders).
-    -   **Leaf Widgets**: Delegated to `dvui` widgets (e.g., `dvui.button`, `dvui.textEntry`). This "hybrid" approach leverages `dvui`'s robust native input handling while imposing the retained system's strict layout and styling.
-    -   **Overlays**: Portals (modals, tooltips) are identified and rendered in a separate pass into a `dvui` subwindow, ensuring they float above the content and break out of clipping contexts.
+## 3. The Frame Lifecycle
 
-## Animation System
-Simple animations are built-in via the **Transitions** engine.
-- **Implicit Transitions**: When a style property changes (e.g., `opacity` goes from 0 to 1), the system detects the delta in `TransitionState`.
-- **Interpolation**: It automatically interpolates the value over a specified duration using an easing function.
-- **Properties**: Supports layout (width/height), transforms (scale/translate), colors, and opacity.
+The system operates in a distinct "Update -> Layout -> Render" cycle, orchestrated by `render/mod.zig`.
 
-## Summary
-The architecture effectively decouples **logic** (node graph manipulation) from **presentation** (rendering). It provides a high-level, web-like development experience (components, CSS styling, flexbox) while maintaining the performance and portability of the underlying Zig-based immediate mode renderer.
+### Phase 1: Event & State Updates
+Before rendering, external inputs or application logic might mutate the `NodeStore`.
+-   API calls (e.g., `setText`, `setClassName`) update data and bump `node.version`.
+-   **Transitions:** The animation engine checks for property deltas and updates `TransitionState`.
+
+### Phase 2: Layout (`layout/mod.zig`)
+The layout engine traverses the tree top-down.
+1.  **Check Dirty:** If `node.layout_subtree_version > cached_layout_version`, proceed. Else skip.
+2.  **Compute:**
+    -   **Flexbox:** Native Zig implementation calculates positions for children.
+    -   **Text:** `text_wrap` calculates line breaks and height based on font metrics.
+    -   **Intrinsic:** Images/Icons report their natural size.
+3.  **Output:** Writes results to `node.layout.rect`.
+
+### Phase 3: Input & Hit Testing (`render/internal/interaction.zig`)
+Unlike pure immediate mode, this system determines "what is hovered" **before** drawing.
+-   **Z-Index Scanning:** A recursive scan (`scanPickPair`) finds the topmost node under the mouse cursor, respecting `z-index` and stacking contexts.
+-   **Overlay Handling:** Checks if the mouse is interacting with a modal/portal layer.
+-   **Result:** Sets `node.hovered` flags and updates `RenderRuntime.hover_layer`.
+
+### Phase 4: Paint (`render/internal/renderers.zig`)
+The renderer walks the tree to issue draw commands.
+1.  **Clipping:** Uses `node.layout.rect` and `clip_children` property to set scissor rects.
+2.  **Dirty Tracking:** A `DirtyRegionTracker` maintains a list of screen regions that need repainting. Nodes completely outside these regions are skipped.
+3.  **Dispatch:**
+    -   **Containers/Text/Shapes:** Drawn directly (`direct.zig`) using `dvui` primitives (triangles, rects). Fast, no widget overhead.
+    -   **Interactive (Buttons/Inputs):** Delegated to `dvui.button` / `dvui.textEntry`.
+        -   *Why?* DVUI handles OS clipboard, key repeats, and complex focus logic perfectly.
+        -   *How?* The retained system calculates the exact `rect`, creates a `dvui.Options` struct with that rect and style, and calls the widget.
+
+## 4. Subsystems Detail
+
+### 4.1 Event System (`events/mod.zig`)
+A **Ring Buffer** (`EventRing`) decouples the UI from the app logic.
+-   **Producers:** The UI (rendering phase) pushes events (`click`, `input`, `scroll`) into the ring.
+-   **Consumer:** The application polls the ring after `render()` returns.
+-   **Data Layout:** Events use a packed `EventEntry` struct. Variable-length data (like typed text) is stored in a parallel `detail_buffer`.
+
+### 4.2 Styling Engine (`style/`)
+-   **Input:** String (e.g., "bg-red-500 p-4 hover:bg-red-600").
+-   **Parsing:** `tailwind/parse.zig` tokenizes and converts this into a `Spec` struct.
+-   **Derivation:** `derive.zig` combines the base `Spec`, hover state, and animations to produce the final `VisualProps`.
+-   **Caching:** A global `SpecCache` maps string hashes to parsed `Spec`s to avoid parsing "p-4" 1000 times per frame.
+
+### 4.3 Overlays & Portals
+-   **Challenge:** Modals and tooltips must render above everything else, ignoring parent clipping (overflow: hidden).
+-   **Solution:**
+    -   Nodes flagged as portals are skipped during the normal recursive render.
+    -   They are collected into a list (`portal_cache`).
+    -   After the main tree renders, a new `dvui` **Subwindow** is opened covering the screen.
+    -   Portal nodes are rendered into this subwindow, sorted by Z-index.
+
+## 5. Persistent State Deep Dive
+
+This is the critical differentiator from immediate mode.
+
+### Input State (`InputState`)
+-   **Problem:** In immediate mode, you must pass a buffer to the text input every frame. If the app logic updates slower than typing speed, characters are lost or the cursor jumps.
+-   **Solution:** `SolidNode` owns an `InputState`. It buffers the text and cursor position *inside* the UI layer. The app only sees the finalized text via events.
+
+### Scroll State (`ScrollState`)
+-   **Problem:** Scrolling requires remembering an offset `(x, y)`.
+-   **Solution:** `SolidNode` stores `offset_x` and `offset_y`.
+-   **Logic:** The render function for scroll containers (`renderScrollFrame`) uses these offsets to adjust the "view" into the child content. It detects scroll events (mouse wheel, drag) and updates the stored offsets directly.
+
+### Animations (`TransitionState`)
+-   **Mechanism:** When a style changes (e.g., `opacity` 0 -> 1), the render loop sees the delta.
+-   **Storage:** `TransitionState` stores:
+    -   `start_time`: When the change happened.
+    -   `from_value`: The value at start.
+    -   `to_value`: The new target.
+-   **Interpolation:** On subsequent frames, it calculates `lerp(from, to, (now - start) / duration)` and applies it to the visual properties before drawing.
+
+## 6. Reproducing the Architecture
+
+To build a similar system from scratch:
+
+1.  **Define the Atom:** Create a `Node` struct. It *must* have an ID, a parent ID, and a list of child IDs.
+2.  **Create the Heap:** Use a Hash Map to store Nodes. Pointers are dangerous because the map might reallocate; use IDs (handles) instead.
+3.  **Implement Versioning:** Add a `global_version` and `node_version`. Every setter (e.g., `setWidth`) must bump both. This is the key to performance.
+4.  **Split Layout & Render:**
+    -   Don't calculate positions while drawing.
+    -   Write a `layout(node_id)` function that recursively fills `node.rect`.
+5.  **Build the Bridge:**
+    -   Write a `render(node_id)` function.
+    -   If the node is a "container", draw a rectangle.
+    -   If the node is a "button", call your backend's `drawButton(node.rect, node.color)`.
+6.  **Add State:** Identify what needs to persist (scroll, text input) and add those structs to your `Node`.

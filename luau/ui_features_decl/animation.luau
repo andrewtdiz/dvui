@@ -1,9 +1,9 @@
 local reactivity = require("luau/ui_features_decl/reactivity")
 local easing = require("luau/ui_features_decl/easing")
 
-local source = reactivity.source
-local effect = reactivity.effect
-local cleanup = reactivity.cleanup
+local createSignal = reactivity.createSignal
+local createEffect = reactivity.createEffect
+local onCleanup = reactivity.onCleanup
 local batch = reactivity.batch
 
 local UPDATE_RATE = 120
@@ -133,21 +133,39 @@ local function value_from_vec(kind, len, vec)
   return out
 end
 
-local function spring(source_fn, period, damping_ratio)
+local function createSpring(source_fn, opts)
   if type(source_fn) ~= "function" then
-    error("spring source must be function", 0)
+    error("createSpring source must be function", 0)
+  end
+  if opts ~= nil and type(opts) ~= "table" then
+    error("createSpring options must be table", 0)
   end
 
-  local w_n = 2 * math.pi / (period or 1)
-  local z = damping_ratio or 1
-  local k = w_n * w_n
-  local c = z * (2 * w_n)
+  local stiffness = 100
+  local damping = 10
+  if opts ~= nil then
+    if opts.stiffness ~= nil then
+      if type(opts.stiffness) ~= "number" or opts.stiffness <= 0 then
+        error("createSpring stiffness must be positive number", 0)
+      end
+      stiffness = opts.stiffness
+    end
+    if opts.damping ~= nil then
+      if type(opts.damping) ~= "number" or opts.damping < 0 then
+        error("createSpring damping must be non-negative number", 0)
+      end
+      damping = opts.damping
+    end
+  end
+
+  local k = stiffness
+  local c = damping
 
   if c > UPDATE_RATE * 2 then
-    error("spring damping too high, consider reducing damping or increasing period", 0)
+    error("createSpring damping too high", 0)
   end
 
-  local output = source(nil)
+  local output, set_output = createSignal(nil)
 
   local state = {
     kind = nil,
@@ -158,14 +176,14 @@ local function spring(source_fn, period, damping_ratio)
     v = nil,
     goal = nil,
     source_value = nil,
-    output = output,
+    set_output = set_output,
   }
 
-  cleanup(function()
+  onCleanup(function()
     active_springs[state] = nil
   end)
 
-  effect(function()
+  createEffect(function()
     local value = source_fn()
     if state.kind == nil then
       local kind, len = shape_from_value(value)
@@ -176,7 +194,7 @@ local function spring(source_fn, period, damping_ratio)
       state.v = vec_zero(len)
       state.goal = vec_from_normalized(kind, len, normalized)
       state.source_value = normalized
-      output(normalized)
+      set_output(normalized)
       return
     end
 
@@ -201,7 +219,7 @@ local function spring(source_fn, period, damping_ratio)
       state.v = vec_zero(len)
       state.goal = vec_from_normalized(kind, len, normalized)
       state.source_value = normalized
-      output(normalized)
+      set_output(normalized)
       return normalized
     end
 
@@ -209,18 +227,35 @@ local function spring(source_fn, period, damping_ratio)
     state.x = vec_from_normalized(state.kind, state.len, normalized)
     state.v = vec_zero(state.len)
     active_springs[state] = true
-    output(normalized)
+    set_output(normalized)
     return normalized
   end
 
-  local function config(opts)
-    if type(opts) ~= "table" then
-      error("spring config must be table", 0)
+  local function config(next_opts)
+    if type(next_opts) ~= "table" then
+      error("createSpring config must be table", 0)
     end
 
-    local position = opts.position
-    local velocity = opts.velocity
-    local impulse = opts.impulse
+    if next_opts.stiffness ~= nil then
+      if type(next_opts.stiffness) ~= "number" or next_opts.stiffness <= 0 then
+        error("createSpring stiffness must be positive number", 0)
+      end
+      stiffness = next_opts.stiffness
+    end
+
+    if next_opts.damping ~= nil then
+      if type(next_opts.damping) ~= "number" or next_opts.damping < 0 then
+        error("createSpring damping must be non-negative number", 0)
+      end
+      damping = next_opts.damping
+    end
+
+    state.k = stiffness
+    state.c = damping
+
+    local position = next_opts.position
+    local velocity = next_opts.velocity
+    local impulse = next_opts.impulse
 
     if position ~= nil and state.kind == nil then
       local kind, len = shape_from_value(position)
@@ -230,17 +265,17 @@ local function spring(source_fn, period, damping_ratio)
       state.v = vec_zero(len)
       state.goal = vec_clone(state.x, len)
       state.source_value = normalize_value(kind, len, position)
-      output(state.source_value)
+      set_output(state.source_value)
     end
 
     if state.kind == nil then
-      error("spring config called before initialization", 0)
+      error("createSpring config called before initialization", 0)
     end
 
     if position ~= nil then
       local normalized = normalize_value(state.kind, state.len, position)
       state.x = vec_from_normalized(state.kind, state.len, normalized)
-      output(normalized)
+      set_output(normalized)
     end
 
     if velocity ~= nil then
@@ -261,37 +296,51 @@ local function spring(source_fn, period, damping_ratio)
   return access, config
 end
 
-local function tween(source_fn, duration, easing_fn)
+local function createTween(source_fn, opts)
   if type(source_fn) ~= "function" then
-    error("tween source must be function", 0)
+    error("createTween source must be function", 0)
   end
-  if type(duration) ~= "number" or duration <= 0 then
-    error("tween duration must be positive number", 0)
-  end
-  if easing_fn ~= nil and type(easing_fn) ~= "function" then
-    error("tween easing must be function", 0)
+  if opts ~= nil and type(opts) ~= "table" then
+    error("createTween options must be table", 0)
   end
 
-  local output = source(nil)
+  local duration = 0.3
+  local easing_fn = easing.linear
+  if opts ~= nil then
+    if opts.duration ~= nil then
+      if type(opts.duration) ~= "number" or opts.duration <= 0 then
+        error("createTween duration must be positive number", 0)
+      end
+      duration = opts.duration
+    end
+    if opts.easing ~= nil then
+      if type(opts.easing) ~= "function" then
+        error("createTween easing must be function", 0)
+      end
+      easing_fn = opts.easing
+    end
+  end
+
+  local output, set_output = createSignal(nil)
 
   local state = {
     kind = nil,
     len = nil,
     elapsed = 0,
     duration = duration,
-    easing = easing_fn or easing.linear,
+    easing = easing_fn,
     from = nil,
     to = nil,
     current = nil,
     target_value = nil,
-    output = output,
+    set_output = set_output,
   }
 
-  cleanup(function()
+  onCleanup(function()
     active_tweens[state] = nil
   end)
 
-  effect(function()
+  createEffect(function()
     local value = source_fn()
     if state.kind == nil then
       local kind, len = shape_from_value(value)
@@ -303,7 +352,7 @@ local function tween(source_fn, duration, easing_fn)
       state.to = vec_clone(state.current, len)
       state.elapsed = state.duration
       state.target_value = normalized
-      output(normalized)
+      set_output(normalized)
       return
     end
 
@@ -331,7 +380,7 @@ local function tween(source_fn, duration, easing_fn)
       state.to = vec_clone(state.current, len)
       state.elapsed = state.duration
       state.target_value = normalized
-      output(normalized)
+      set_output(normalized)
       return normalized
     end
 
@@ -342,32 +391,32 @@ local function tween(source_fn, duration, easing_fn)
     state.elapsed = state.duration
     state.target_value = normalized
     active_tweens[state] = nil
-    output(normalized)
+    set_output(normalized)
     return normalized
   end
 
-  local function config(opts)
-    if type(opts) ~= "table" then
-      error("tween config must be table", 0)
+  local function config(next_opts)
+    if type(next_opts) ~= "table" then
+      error("createTween config must be table", 0)
     end
 
-    local new_duration = opts.duration
+    local new_duration = next_opts.duration
     if new_duration ~= nil then
       if type(new_duration) ~= "number" or new_duration <= 0 then
-        error("tween duration must be positive number", 0)
+        error("createTween duration must be positive number", 0)
       end
       state.duration = new_duration
     end
 
-    local new_easing = opts.easing
+    local new_easing = next_opts.easing
     if new_easing ~= nil then
       if type(new_easing) ~= "function" then
-        error("tween easing must be function", 0)
+        error("createTween easing must be function", 0)
       end
       state.easing = new_easing
     end
 
-    local position = opts.position
+    local position = next_opts.position
     if position ~= nil then
       access(position)
     end
@@ -431,9 +480,9 @@ local function step(dt)
           remove_springs[#remove_springs + 1] = state
           state.x = vec_clone(goal, len)
           state.v = vec_zero(len)
-          state.output(state.source_value)
+          state.set_output(state.source_value)
         else
-          state.output(value_from_vec(kind, len, x))
+          state.set_output(value_from_vec(kind, len, x))
         end
       end
       for _, state in ipairs(remove_springs) do
@@ -463,9 +512,9 @@ local function step(dt)
           remove_tweens[#remove_tweens + 1] = state
           local target_value = state.target_value
           state.current = vec_from_normalized(state.kind, len, target_value)
-          state.output(target_value)
+          state.set_output(target_value)
         else
-          state.output(value_from_vec(state.kind, len, current))
+          state.set_output(value_from_vec(state.kind, len, current))
         end
       end
     end
@@ -477,7 +526,7 @@ end
 
 return {
   easing = easing,
-  spring = spring,
+  createSpring = createSpring,
   step = step,
-  tween = tween,
+  createTween = createTween,
 }

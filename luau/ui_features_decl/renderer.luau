@@ -1,13 +1,15 @@
 local reactivity = require("luau/ui_features_decl/reactivity")
 
-local effect = reactivity.effect
-local root = reactivity.root
+local createEffect = reactivity.createEffect
+local createRoot = reactivity.createRoot
+local createSignal = reactivity.createSignal
 local new_scope = reactivity.new_scope
 local destroy_scope = reactivity.destroy_scope
 local get_owner = reactivity.get_owner
 local set_owner = reactivity.set_owner
 local untrack = reactivity.untrack
-local scoped = reactivity.scoped
+local runWithOwner = reactivity.runWithOwner
+local run_mounts = reactivity.run_mounts
 
 local next_id = 1
 local listened_by_id = {}
@@ -70,7 +72,7 @@ local function mount_class(id, class_value)
 
   if type(class_value) == "function" then
     local last = nil
-    effect(function()
+    createEffect(function()
       local v = normalize_text(class_value())
       if v ~= last then
         last = v
@@ -89,7 +91,7 @@ local function mount_value(id, setter, value)
   end
 
   if type(value) == "function" then
-    effect(function()
+    createEffect(function()
       setter(id, value())
     end)
     return
@@ -105,7 +107,7 @@ local function mount_value(id, setter, value)
     end
     if has_fn then
       local out = {}
-      effect(function()
+      createEffect(function()
         for k in pairs(out) do
           out[k] = nil
         end
@@ -136,7 +138,7 @@ local function mount_transform(id, transform_value, scale_value)
   end
 
   local out = {}
-  effect(function()
+  createEffect(function()
     for k in pairs(out) do
       out[k] = nil
     end
@@ -179,7 +181,7 @@ local function mount_props(id, props, scale_value)
   local src = props.src
   if src ~= nil then
     if type(src) == "function" then
-      effect(function()
+      createEffect(function()
         ui.set_src(id, normalize_text(src()))
       end)
     else
@@ -189,12 +191,31 @@ local function mount_props(id, props, scale_value)
 
   local listen = props.listen
   if listen ~= nil then
-    for _, event_name in ipairs(listen) do
-      local kind = ui.EventKind[event_name]
-      if kind == nil then
-        error(string.format("unknown event: %s", tostring(event_name)), 0)
+    if type(listen) == "function" then
+      createEffect(function()
+        local list = listen()
+        if type(list) ~= "table" then
+          return
+        end
+        for _, event_name in ipairs(list) do
+          local kind = ui.EventKind[event_name]
+          if kind == nil then
+            error(string.format("unknown event: %s", tostring(event_name)), 0)
+          end
+          listen_event(id, kind)
+        end
+      end)
+    else
+      if type(listen) ~= "table" then
+        return
       end
-      listen_event(id, kind)
+      for _, event_name in ipairs(listen) do
+        local kind = ui.EventKind[event_name]
+        if kind == nil then
+          error(string.format("unknown event: %s", tostring(event_name)), 0)
+        end
+        listen_event(id, kind)
+      end
     end
   end
 end
@@ -231,6 +252,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
     ui.create("text", id, parent_id, before_id)
     ui.set_text(id, normalize_text(node))
 
+    run_mounts(scope)
     set_owner(prev_owner)
 
     return {
@@ -248,7 +270,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
     local id = alloc_id()
     ui.create("text", id, parent_id, before_id)
     local last = nil
-    effect(function()
+    createEffect(function()
       local v = normalize_text(node())
       if v ~= last then
         last = v
@@ -256,6 +278,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       end
     end)
 
+    run_mounts(scope)
     set_owner(prev_owner)
 
     return {
@@ -307,7 +330,9 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       child_fn = child_fn,
       by_key = {},
       value_by_key = {},
+      value_set_by_key = {},
       index_by_key = {},
+      index_set_by_key = {},
       order = {},
     }
 
@@ -333,16 +358,18 @@ local function mount_any(node, parent_id, before_id, forced_scope)
 
         local mounted = record.by_key[key]
         if mounted == nil then
-          local value = reactivity.source(item)
-          local index = reactivity.source(i)
+          local value, set_value = createSignal(item)
+          local index, set_index = createSignal(i)
           record.value_by_key[key] = value
+          record.value_set_by_key[key] = set_value
           record.index_by_key[key] = index
+          record.index_set_by_key[key] = set_index
 
           local parent_owner = get_owner()
           local child_scope = new_scope(parent_owner)
-          local child_node = scoped(child_scope, function()
+          local child_node = runWithOwner(child_scope, function()
             return untrack(function()
-              return child_fn(item, i, value, index, key)
+              return child_fn(item, i, value, index, key, set_value, set_index)
             end)
           end)
           mounted = mount_any(child_node, parent_id, slot_id, child_scope)
@@ -352,13 +379,13 @@ local function mount_any(node, parent_id, before_id, forced_scope)
           end
           record.by_key[key] = mounted
         else
-          local value = record.value_by_key[key]
-          if value ~= nil then
-            value(item)
+          local set_value = record.value_set_by_key[key]
+          if set_value ~= nil then
+            set_value(item)
           end
-          local index = record.index_by_key[key]
-          if index ~= nil then
-            index(i)
+          local set_index = record.index_set_by_key[key]
+          if set_index ~= nil then
+            set_index(i)
           end
         end
       end
@@ -373,7 +400,9 @@ local function mount_any(node, parent_id, before_id, forced_scope)
         destroy_record(record.by_key[key])
         record.by_key[key] = nil
         record.value_by_key[key] = nil
+        record.value_set_by_key[key] = nil
         record.index_by_key[key] = nil
+        record.index_set_by_key[key] = nil
       end
 
       local prev_order = record.order
@@ -420,8 +449,9 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       record.order = next_order
     end
 
-    effect(update)
+    createEffect(update)
 
+    run_mounts(scope)
     set_owner(prev_owner)
 
     return record
@@ -462,7 +492,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       local parent_owner = get_owner()
       local branch_scope = new_scope(parent_owner)
 
-      local v = scoped(branch_scope, function()
+      local v = runWithOwner(branch_scope, function()
         return untrack(function()
           local out = value
           if type(out) == "function" then
@@ -498,8 +528,9 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       end
     end
 
-    effect(update)
+    createEffect(update)
 
+    run_mounts(scope)
     set_owner(prev_owner)
 
     return record
@@ -520,6 +551,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
       end
     end
     if forced_scope ~= nil then
+      run_mounts(forced_scope)
       set_owner(prev_owner)
       return {
         kind = "fragment",
@@ -566,6 +598,7 @@ local function mount_any(node, parent_id, before_id, forced_scope)
 
   set_owner(prev_owner)
 
+  run_mounts(scope)
   return {
     kind = "node",
     id = id,
@@ -656,7 +689,7 @@ local function mount_root(component)
   local tree = nil
   local destroy_reactive = nil
 
-  destroy_reactive, tree = root(function()
+  destroy_reactive, tree = createRoot(function()
     tree = mount_any(component(), 0, nil)
     return tree
   end)
