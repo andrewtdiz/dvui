@@ -82,15 +82,6 @@ pub const AnchorAlign = layout_mod.AnchorAlign;
 pub const AnchorPlacement = layout_mod.AnchorPlacement;
 pub const placeOnScreen = layout_mod.placeOnScreen;
 pub const placeAnchoredOnScreen = layout_mod.placeAnchoredOnScreen;
-pub const native_dialogs = platform_mod.native_dialogs;
-pub const dialogWasmFileOpen = native_dialogs.Wasm.open;
-pub const wasmFileUploaded = native_dialogs.Wasm.uploaded;
-pub const dialogWasmFileOpenMultiple = native_dialogs.Wasm.openMultiple;
-pub const wasmFileUploadedMultiple = native_dialogs.Wasm.uploadedMultiple;
-pub const dialogNativeFileOpen = native_dialogs.Native.open;
-pub const dialogNativeFileOpenMultiple = native_dialogs.Native.openMultiple;
-pub const dialogNativeFileSave = native_dialogs.Native.save;
-pub const dialogNativeFolderSelect = native_dialogs.Native.folderSelect;
 pub const Options = core.Options;
 pub const Path = render_mod.Path;
 pub const PNGEncoder = render_mod.PNGEncoder;
@@ -113,7 +104,6 @@ pub const selection = text_mod.selection;
 pub const Size = core.Size;
 pub const struct_ui = utils_mod.struct_ui;
 pub const Subwindows = window_mod.Subwindows;
-pub const testing = testing_mod.testing;
 pub const Texture = render_mod.Texture;
 pub const TextureTarget = Texture.Target;
 /// Source data for `image()` and `imageSize()`.
@@ -132,24 +122,20 @@ pub const Vertex = core.Vertex;
 pub const Widget = @import("widgets/widget.zig");
 pub const WidgetData = @import("widgets/widget_data.zig");
 pub const widgets = widgets_mod;
-pub const AnimateWidget = widgets.AnimateWidget;
+pub const ButtonWidget = widgets.ButtonWidget;
+pub const LabelWidget = widgets.LabelWidget;
 pub const BoxWidget = widgets.BoxWidget;
 pub const FlexBoxWidget = widgets.FlexBoxWidget;
-pub const ButtonWidget = widgets.ButtonWidget;
 pub const IconWidget = widgets.IconWidget;
-pub const LabelWidget = widgets.LabelWidget;
-pub const ScrollBarWidget = widgets.ScrollBarWidget;
-pub const SelectionWidget = widgets.SelectionWidget;
-pub const ColorPickerWidget = widgets.ColorPickerWidget;
-pub const GizmoWidget = widgets.GizmoWidget;
 pub const MenuWidget = widgets.MenuWidget;
 pub const MenuItemWidget = widgets.MenuItemWidget;
-pub const PanedWidget = widgets.PanedWidget;
-pub const PlotWidget = widgets.PlotWidget;
-pub const ReorderWidget = widgets.ReorderWidget;
-pub const Reorderable = ReorderWidget.Reorderable;
+pub const AnimateWidget = widgets.AnimateWidget;
 pub const ScaleWidget = widgets.ScaleWidget;
-pub const TreeWidget = widgets.TreeWidget;
+pub const GizmoWidget = widgets.GizmoWidget;
+pub const SelectionWidget = widgets.SelectionWidget;
+pub const ScrollBarWidget = widgets.ScrollBarWidget;
+
+
 pub const Window = window_mod.Window;
 
 // Note : Import widgets this way (i.e. importing them via `src/widgets/mod.zig`
@@ -292,10 +278,6 @@ pub const c = @cImport({
     @cInclude("stb_image.h");
     @cInclude("stb_image_write.h");
 
-    // Used by native dialogs
-    if (!wasm) {
-        @cInclude("tinyfiledialogs.h");
-    }
 });
 
 pub var ft2lib: if (useFreeType) c.FT_Library else void = undefined;
@@ -3401,41 +3383,6 @@ pub const Picture = struct {
         dvui.renderTexture(texture, .{ .r = self.r }, .{}) catch {};
     }
 };
-
-pub fn plot(src: std.builtin.SourceLocation, plot_opts: PlotWidget.InitOptions, opts: Options) *PlotWidget {
-    _ = src;
-    _ = plot_opts;
-    _ = opts;
-    return widgetAlloc(PlotWidget);
-}
-
-pub const PlotXYOptions = struct {
-    plot_opts: PlotWidget.InitOptions = .{},
-
-    // Logical pixels
-    thick: f32 = 1.0,
-
-    // If null, uses Theme.highlight.fill
-    color: ?Color = null,
-
-    xs: []const f64,
-    ys: []const f64,
-};
-
-pub fn plotXY(src: std.builtin.SourceLocation, init_opts: PlotXYOptions, opts: Options) void {
-    const defaults: Options = .{ .padding = .{} };
-    var p = dvui.plot(src, init_opts.plot_opts, defaults.override(opts));
-
-    var s1 = p.line();
-    for (init_opts.xs, init_opts.ys) |x, y| {
-        s1.point(x, y);
-    }
-
-    s1.stroke(init_opts.thick, init_opts.color orelse dvui.themeGet().color(.highlight, .fill));
-
-    s1.deinit();
-    p.deinit();
-}
 
 /// Display a struct and allow the user to edit values
 ///

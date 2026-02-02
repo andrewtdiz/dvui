@@ -279,7 +279,7 @@ pub const builtins = blk: {
 
 pub const QuickTheme = struct {
     pub const builtin = struct {
-        pub const shadcn: QuickTheme = @import("presets/shadcn.zon");
+        pub const shadcn: QuickTheme = @import("shadcn.zon");
 
         test {
             // Ensures all the .zon files are valid `QuickTheme` types

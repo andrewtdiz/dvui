@@ -3,15 +3,15 @@ const std = @import("std");
 const types = @import("../../core/types.zig");
 const events = @import("../../events/mod.zig");
 const tailwind = @import("../../style/tailwind.zig");
-const direct = @import("../direct.zig");
 const paint_cache = @import("../cache.zig");
 const renderers = @import("renderers.zig");
 const state = @import("state.zig");
+const transitions = @import("../transitions.zig");
 const runtime_mod = @import("runtime.zig");
 
 const isPortalNode = state.isPortalNode;
 const appendRect = state.appendRect;
-const transformedRect = direct.transformedRect;
+const nodeBoundsInContext = state.nodeBoundsInContext;
 const DirtyRegionTracker = paint_cache.DirtyRegionTracker;
 
 const RenderRuntime = runtime_mod.RenderRuntime;
@@ -75,24 +75,52 @@ fn shouldIncludeOverlayRect(node: *types.SolidNode, spec: tailwind.Spec) bool {
     return false;
 }
 
-fn accumulateOverlayHitRect(store: *types.NodeStore, node: *types.SolidNode, rect_opt: *?types.Rect) void {
+fn ctxForChildren(ctx: state.RenderContext, node: *types.SolidNode) state.RenderContext {
+    var next = ctx;
+    if (node.layout.rect) |rect| {
+        const t = transitions.effectiveTransform(node);
+        const anchor = .{
+            .x = rect.x + rect.w * t.anchor[0],
+            .y = rect.y + rect.h * t.anchor[1],
+        };
+        const offset = .{
+            .x = anchor.x + t.translation[0] - t.scale[0] * anchor.x,
+            .y = anchor.y + t.translation[1] - t.scale[1] * anchor.y,
+        };
+        next.scale = .{ ctx.scale[0] * t.scale[0], ctx.scale[1] * t.scale[1] };
+        next.offset = .{
+            ctx.scale[0] * offset.x + ctx.offset[0],
+            ctx.scale[1] * offset.y + ctx.offset[1],
+        };
+    }
+    return next;
+}
+
+fn accumulateOverlayHitRect(store: *types.NodeStore, node: *types.SolidNode, rect_opt: *?types.Rect, ctx: state.RenderContext) void {
     const spec = node.prepareClassSpec();
     if (spec.hidden) return;
     if (node.layout.rect) |rect_base| {
         if (shouldIncludeOverlayRect(node, spec)) {
-            const rect = transformedRect(node, rect_base) orelse rect_base;
+            const rect = nodeBoundsInContext(ctx, node, rect_base);
             appendRect(rect_opt, rect);
         }
     }
+    const child_ctx = ctxForChildren(ctx, node);
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;
-        accumulateOverlayHitRect(store, child, rect_opt);
+        accumulateOverlayHitRect(store, child, rect_opt, child_ctx);
     }
 }
 
 fn computeOverlayState(store: *types.NodeStore, portal_ids: []const u32) state.OverlayState {
     var state_value = state.OverlayState{};
     if (portal_ids.len == 0) return state_value;
+    const root_ctx = state.RenderContext{
+        .origin = .{ .x = 0, .y = 0 },
+        .clip = null,
+        .scale = .{ 1, 1 },
+        .offset = .{ 0, 0 },
+    };
     for (portal_ids) |portal_id| {
         const portal = store.node(portal_id) orelse continue;
         const spec = portal.prepareClassSpec();
@@ -102,7 +130,7 @@ fn computeOverlayState(store: *types.NodeStore, portal_ids: []const u32) state.O
         }
         for (portal.children.items) |child_id| {
             const child = store.node(child_id) orelse continue;
-            accumulateOverlayHitRect(store, child, &state_value.hit_rect);
+            accumulateOverlayHitRect(store, child, &state_value.hit_rect, root_ctx);
         }
     }
     return state_value;

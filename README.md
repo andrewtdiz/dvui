@@ -77,7 +77,6 @@ Below is a screenshot of the demo window, whose source code can be found at `src
 - Accessibility support via [AccessKit](https://accesskit.dev/)
   - add `-Daccesskit` to `zig build`
   - see [Accessibility](#Accessibility)
-- Native file dialogs via [tinyfiledialogs](https://sourceforge.net/projects/tinyfiledialogs)
 - Animations
 - Themes
 - FPS throttling

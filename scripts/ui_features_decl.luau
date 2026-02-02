@@ -38,6 +38,6 @@ function update(dt, input)
   animation.step(dt)
 end
 
-function on_event(kind, id, detail)
-  renderer.dispatch_event(kind, id, detail)
+function on_event(kind, id, payload)
+  renderer.dispatch_event(kind, id, payload)
 end

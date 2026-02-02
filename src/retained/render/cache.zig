@@ -7,18 +7,7 @@ const tailwind = @import("../style/tailwind.zig");
 const draw = @import("direct.zig");
 const transitions = @import("transitions.zig");
 const derive = @import("internal/derive.zig");
-
-const log = std.log.scoped(.retained);
-
-var paint_clip_debug_count: usize = 0;
-
-pub fn init() void {
-    paint_clip_debug_count = 0;
-}
-
-pub fn deinit() void {
-    paint_clip_debug_count = 0;
-}
+const state = @import("internal/state.zig");
 
 pub const DirtyRegionTracker = struct {
     regions: std.ArrayList(types.Rect) = .empty,
@@ -67,14 +56,44 @@ fn rectUnion(a: types.Rect, b: types.Rect) types.Rect {
     return .{ .x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1 };
 }
 
-pub fn renderPaintCache(node: *types.SolidNode) bool {
+fn applyContextToVertexPos(ctx: state.RenderContext, pos: dvui.Point.Physical) dvui.Point.Physical {
+    return .{
+        .x = ctx.scale[0] * pos.x + ctx.offset[0],
+        .y = ctx.scale[1] * pos.y + ctx.offset[1],
+    };
+}
+
+fn applyContextToVertices(ctx: state.RenderContext, vertices: []dvui.Vertex) void {
+    for (vertices) |*v| {
+        v.pos = applyContextToVertexPos(ctx, v.pos);
+    }
+}
+
+pub fn renderPaintCache(node: *types.SolidNode, ctx: state.RenderContext, allocator: std.mem.Allocator) bool {
     if (node.needsPaintUpdate()) return false;
     if (node.paint.vertices.items.len == 0 or node.paint.indices.items.len == 0) return false;
-    const rect = node.paint.painted_rect orelse return false;
+    const bounds_layout = node.paint.painted_bounds_layout orelse return false;
+    if (ctx.scale[0] == 1 and ctx.scale[1] == 1 and ctx.offset[0] == 0 and ctx.offset[1] == 0) {
+        const win = dvui.currentWindow();
+        if (!win.render_target.offset.nonZero()) {
+            const tris = dvui.Triangles{
+                .vertexes = node.paint.vertices.items,
+                .indices = node.paint.indices.items,
+                .bounds = draw.rectToPhysical(bounds_layout),
+            };
+            dvui.renderTriangles(tris, null) catch {};
+            return true;
+        }
+    }
+    const vertices = allocator.alloc(dvui.Vertex, node.paint.vertices.items.len) catch return false;
+    defer allocator.free(vertices);
+    @memcpy(vertices, node.paint.vertices.items);
+    applyContextToVertices(ctx, vertices);
+    const bounds_ctx = state.contextRect(ctx, bounds_layout);
     const tris = dvui.Triangles{
-        .vertexes = node.paint.vertices.items,
+        .vertexes = vertices,
         .indices = node.paint.indices.items,
-        .bounds = draw.rectToPhysical(rect),
+        .bounds = draw.rectToPhysical(bounds_ctx),
     };
     dvui.renderTriangles(tris, null) catch {};
     return true;
@@ -82,28 +101,12 @@ pub fn renderPaintCache(node: *types.SolidNode) bool {
 
 pub fn renderCachedOrDirectBackground(
     node: *types.SolidNode,
-    rect: types.Rect,
+    rect_layout: types.Rect,
+    ctx: state.RenderContext,
     allocator: std.mem.Allocator,
     fallback_bg: ?dvui.Color,
 ) void {
-    // Debug clipped paint order (gated, removed later).
-    if (paint_clip_debug_count < 8) {
-        const clipr = dvui.clipGet();
-        const win = dvui.currentWindow();
-        const screen = win.rect_pixels;
-        if (clipr.x != 0 or clipr.y != 0 or clipr.w != screen.w or clipr.h != screen.h) {
-            paint_clip_debug_count += 1;
-            log.info("paint under clip id={d} tag={s} layout={any} painted={any} clip={any}", .{
-                node.id,
-                node.tag,
-                rect,
-                node.paint.painted_rect,
-                clipr,
-            });
-        }
-    }
-
-    if (renderPaintCache(node)) return;
+    if (renderPaintCache(node, ctx, allocator)) return;
 
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
@@ -125,13 +128,16 @@ pub fn renderCachedOrDirectBackground(
     if (!has_border and !has_rounding and visual_eff.background == null and fallback_bg == null) return;
 
     if (has_rounding) {
+        const ctx_scale_x = @abs(ctx.scale[0]);
+        const ctx_scale_y = @abs(ctx.scale[1]);
         const transform_scale = @min(@abs(transform_eff.scale[0]), @abs(transform_eff.scale[1]));
-        const radius_phys_val = corner_radius * scale * transform_scale;
+        const radius_phys_val = corner_radius * scale * transform_scale * @min(ctx_scale_x, ctx_scale_y);
         const rounded_rect = if (transform_eff.rotation == 0 and (transform_eff.scale[0] != 1 or transform_eff.scale[1] != 1 or transform_eff.translation[0] != 0 or transform_eff.translation[1] != 0))
-            draw.transformedRect(node, rect) orelse rect
+            draw.transformedRect(node, rect_layout) orelse rect_layout
         else
-            rect;
-        const outer_phys = draw.rectToPhysical(rounded_rect);
+            rect_layout;
+        const rounded_ctx = state.contextRect(ctx, rounded_rect);
+        const outer_phys = draw.rectToPhysical(rounded_ctx);
         const outer_radius = dvui.Rect.Physical.all(radius_phys_val);
         const fade: f32 = 2.0;
 
@@ -146,26 +152,30 @@ pub fn renderCachedOrDirectBackground(
         const border_color = draw.packedColorToDvui(border_color_packed, opacity);
 
         if (has_border) {
-            const uniform = border_left == border_right and border_left == border_top and border_left == border_bottom;
-            if (uniform and border_left > 0) {
+            const border_left_ctx = border_left * ctx_scale_x * @abs(transform_eff.scale[0]);
+            const border_right_ctx = border_right * ctx_scale_x * @abs(transform_eff.scale[0]);
+            const border_top_ctx = border_top * ctx_scale_y * @abs(transform_eff.scale[1]);
+            const border_bottom_ctx = border_bottom * ctx_scale_y * @abs(transform_eff.scale[1]);
+            const uniform = border_left_ctx == border_right_ctx and border_left_ctx == border_top_ctx and border_left_ctx == border_bottom_ctx;
+            if (uniform and border_left_ctx > 0) {
                 if (bg_color_opt) |bg_color| {
                     outer_phys.fill(outer_radius, .{ .color = bg_color, .fade = fade });
                 }
-                const stroke_rect = outer_phys.insetAll(border_left * 0.5);
+                const stroke_rect = outer_phys.insetAll(border_left_ctx * 0.5);
                 // Normal borders should respect paint order; don't use `.after` which forces overlay.
-                stroke_rect.stroke(outer_radius, .{ .thickness = border_left, .color = border_color });
+                stroke_rect.stroke(outer_radius, .{ .thickness = border_left_ctx, .color = border_color });
             } else {
                 // Non-uniform borders: fill outer with border color, then inner with background.
                 outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
                 if (bg_color_opt) |bg_color| {
                     const inset_phys = dvui.Rect.Physical{
-                        .x = border_left,
-                        .y = border_top,
-                        .w = border_right,
-                        .h = border_bottom,
+                        .x = border_left_ctx,
+                        .y = border_top_ctx,
+                        .w = border_right_ctx,
+                        .h = border_bottom_ctx,
                     };
                     const inner_phys = outer_phys.inset(inset_phys);
-                    const min_border = @min(@min(border_left, border_right), @min(border_top, border_bottom));
+                    const min_border = @min(@min(border_left_ctx, border_right_ctx), @min(border_top_ctx, border_bottom_ctx));
                     const inner_radius_val = @max(0.0, radius_phys_val - min_border);
                     const inner_radius = dvui.Rect.Physical.all(inner_radius_val);
                     if (!inner_phys.empty()) {
@@ -181,24 +191,23 @@ pub fn renderCachedOrDirectBackground(
         return;
     }
 
-    if (has_border) {
-        const geom = buildRectGeometry(rect, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, fallback_bg) catch {
-            draw.drawRectDirect(rect, visual_eff, transform_eff, allocator, fallback_bg);
-            return;
-        };
-        defer allocator.free(geom.vertices);
-        defer allocator.free(geom.indices);
+    var vertices: std.ArrayList(dvui.Vertex) = .empty;
+    defer vertices.deinit(allocator);
+    var indices: std.ArrayList(u16) = .empty;
+    defer indices.deinit(allocator);
 
-        const tris = dvui.Triangles{
-            .vertexes = geom.vertices,
-            .indices = geom.indices,
-            .bounds = geom.bounds,
-        };
-        dvui.renderTriangles(tris, null) catch {};
-        return;
-    }
+    const bounds_layout = buildRectGeometryInto(&vertices, &indices, rect_layout, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, fallback_bg) catch return;
+    if (vertices.items.len == 0 or indices.items.len == 0) return;
 
-    draw.drawRectDirect(rect, visual_eff, transform_eff, allocator, fallback_bg);
+    applyContextToVertices(ctx, vertices.items);
+    const bounds_ctx = state.contextRect(ctx, .{ .x = bounds_layout.x, .y = bounds_layout.y, .w = bounds_layout.w, .h = bounds_layout.h });
+
+    const tris = dvui.Triangles{
+        .vertexes = vertices.items,
+        .indices = indices.items,
+        .bounds = draw.rectToPhysical(bounds_ctx),
+    };
+    dvui.renderTriangles(tris, null) catch {};
 }
 
 pub fn updatePaintCache(store: *types.NodeStore, tracker: *DirtyRegionTracker) void {
@@ -228,7 +237,7 @@ fn updatePaintCacheRecursive(store: *types.NodeStore, node: *types.SolidNode, tr
 fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker: *DirtyRegionTracker) void {
     const allocator = store.allocator;
 
-    const old_rect = node.paint.painted_rect;
+    const old_rect = node.paint.painted_bounds_layout;
 
     node.paint.vertices.clearRetainingCapacity();
     node.paint.indices.clearRetainingCapacity();
@@ -246,7 +255,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     if (!shouldCachePaint(node, spec) or rect == null) {
         const bounds = if (rect) |r| draw.transformedRect(node, r) orelse r else null;
-        node.paint.painted_rect = bounds;
+        node.paint.painted_bounds_layout = bounds;
         if (bounds) |r| tracker.add(r);
         if (old_rect) |r| tracker.add(r);
         node.paint.version = version;
@@ -256,7 +265,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const bounds = buildRectGeometryInto(&node.paint.vertices, &node.paint.indices, rect.?, scale, visual_eff, transform_eff, allocator, border_color_packed, spec, null) catch {
         const bounds = draw.transformedRect(node, rect.?) orelse rect.?;
-        node.paint.painted_rect = bounds;
+        node.paint.painted_bounds_layout = bounds;
         tracker.add(bounds);
         if (old_rect) |r| tracker.add(r);
         node.paint.version = version;
@@ -264,10 +273,10 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
         return;
     };
 
-    node.paint.painted_rect = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = bounds.h };
+    node.paint.painted_bounds_layout = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = bounds.h };
     node.paint.version = version;
     node.paint.paint_dirty = false;
-    tracker.add(node.paint.painted_rect.?);
+    tracker.add(node.paint.painted_bounds_layout.?);
     if (old_rect) |r| tracker.add(r);
 }
 

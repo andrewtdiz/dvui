@@ -7,12 +7,7 @@ const state = @import("state.zig");
 pub const RenderRuntime = struct {
     gizmo_override_rect: ?types.GizmoRect = null,
     gizmo_rect_pending: ?types.GizmoRect = null,
-    logged_tree_dump: bool = false,
-    logged_render_state: bool = false,
-    logged_button_render: bool = false,
-    button_debug_count: usize = 0,
     button_text_error_log_count: usize = 0,
-    paragraph_log_count: usize = 0,
     input_enabled_state: bool = true,
 
     render_layer: state.RenderLayer = .base,
@@ -80,4 +75,3 @@ pub const RenderRuntime = struct {
         return self.render_layer == .overlay;
     }
 };
-

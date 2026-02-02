@@ -26,7 +26,7 @@ pub const LuaUi = struct {
     }
 
 fn registerBindings(self: *Self) !void {
-    const ui_table = self.lua.createTable(.{ .rec = 17 });
+    const ui_table = self.lua.createTable(.{ .rec = 16 });
     defer ui_table.deinit();
 
     const kind_fields = @typeInfo(retained.events.EventKind).@"enum".fields;
@@ -54,7 +54,6 @@ fn registerBindings(self: *Self) !void {
     try ui_table.set("set_transform", luaz.Lua.Capture(self, luaSetTransform));
     try ui_table.set("set_scroll", luaz.Lua.Capture(self, luaSetScroll));
     try ui_table.set("set_anchor", luaz.Lua.Capture(self, luaSetAnchor));
-    try ui_table.set("listen", luaz.Lua.Capture(self, luaListen));
     try ui_table.set("listen_kind", luaz.Lua.Capture(self, luaListenKind));
 
     const globals = self.lua.globals();
@@ -149,10 +148,6 @@ fn luaSetScroll(upv: luaz.Lua.Upvalues(*Self), id: u32, props: luaz.Lua.Table) !
 fn luaSetAnchor(upv: luaz.Lua.Upvalues(*Self), id: u32, props: luaz.Lua.Table) !void {
     defer props.deinit();
     try upv.value.setAnchor(id, props);
-}
-
-fn luaListen(upv: luaz.Lua.Upvalues(*Self), id: u32, event_name: []const u8) !void {
-    try upv.value.addListener(id, event_name);
 }
 
 fn luaListenKind(upv: luaz.Lua.Upvalues(*Self), id: u32, kind: u32) !void {
@@ -257,27 +252,27 @@ fn setVisual(self: *Self, id: u32, props: luaz.Lua.Table) !void {
     const target = self.store.node(id) orelse return error.MissingId;
     var changed = false;
     if (try readOptionalField(f32, props, "opacity")) |value| {
-        target.visual.opacity = value;
+        target.visual_props.opacity = value;
         changed = true;
     }
     if (try readOptionalField(f32, props, "cornerRadius")) |value| {
-        target.visual.corner_radius = value;
+        target.visual_props.corner_radius = value;
         changed = true;
     }
     if (try readOptionalField(u32, props, "background")) |value| {
-        target.visual.background = .{ .value = value };
+        target.visual_props.background = .{ .value = value };
         changed = true;
     }
     if (try readOptionalField(u32, props, "textColor")) |value| {
-        target.visual.text_color = .{ .value = value };
+        target.visual_props.text_color = .{ .value = value };
         changed = true;
     }
     if (try readOptionalField(u32, props, "textOutlineColor")) |value| {
-        target.visual.text_outline_color = .{ .value = value };
+        target.visual_props.text_outline_color = .{ .value = value };
         changed = true;
     }
     if (try readOptionalField(f32, props, "textOutlineThickness")) |value| {
-        target.visual.text_outline_thickness = value;
+        target.visual_props.text_outline_thickness = value;
         changed = true;
     }
     if (try readOptionalField([]const u8, props, "fontRenderMode")) |value| {
@@ -288,7 +283,7 @@ fn setVisual(self: *Self, id: u32, props: luaz.Lua.Table) !void {
         }
     }
     if (try readOptionalField(bool, props, "clipChildren")) |value| {
-        target.visual.clip_children = value;
+        target.visual_props.clip_children = value;
         changed = true;
     }
     if (changed) {
@@ -397,12 +392,6 @@ fn setAnchor(self: *Self, id: u32, props: luaz.Lua.Table) !void {
     if (changed) {
         self.store.markNodeChanged(id);
     }
-}
-
-fn addListener(self: *Self, id: u32, event_name: []const u8) !void {
-    if (id == 0) return error.MissingId;
-    const kind = retained.events.eventKindFromName(event_name) orelse return error.InvalidEvent;
-    try self.store.addListenerKind(id, kind);
 }
 
 fn addListenerKind(self: *Self, id: u32, kind: u32) !void {

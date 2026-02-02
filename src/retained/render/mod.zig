@@ -32,7 +32,6 @@ pub fn init() void {
     runtime.reset();
     drag_drop.init();
     focus.init();
-    paint_cache.init();
     image_loader.init();
     icon_registry.init();
 }
@@ -42,7 +41,6 @@ pub fn deinit() void {
     focus.deinit();
     image_loader.deinit();
     icon_registry.deinit();
-    paint_cache.deinit();
     runtime.reset();
 }
 
@@ -151,10 +149,6 @@ pub fn render(event_ring: ?*events.EventRing, store: *types.NodeStore, input_ena
     if (needs_paint_cache) {
         paint_cache.updatePaintCache(store, &dirty_tracker);
         runtime.last_paint_cache_version = current_version;
-    }
-
-    if (!runtime.logged_tree_dump) {
-        runtime.logged_tree_dump = true;
     }
 
     if (root.children.items.len == 0) {

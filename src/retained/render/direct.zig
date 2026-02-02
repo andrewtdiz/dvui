@@ -67,29 +67,6 @@ pub fn transformedRect(node: *const types.SolidNode, base: ?types.Rect) ?types.R
     };
 }
 
-pub fn applyTransformToOptions(node: *const types.SolidNode, options: *dvui.Options, parent_origin: dvui.Point.Physical, base_rect: ?types.Rect) void {
-    const rect = base_rect orelse node.layout.rect orelse return;
-        const t = transitions.effectiveTransform(node);
-        const bounds = transformedRect(node, rect) orelse rect;
-        const local = types.Rect{
-            .x = bounds.x - parent_origin.x,
-            .y = bounds.y - parent_origin.y,
-            .w = bounds.w,
-            .h = bounds.h,
-        };
-        const scale = dvui.windowNaturalScale();
-        const inv_scale: f32 = if (scale != 0) 1.0 / scale else 1.0;
-        options.rect = dvui.Rect{
-            .x = local.x * inv_scale,
-            .y = local.y * inv_scale,
-            .w = local.w * inv_scale,
-            .h = local.h * inv_scale,
-        };
-        if (options.rotation == null) {
-            options.rotation = t.rotation;
-        }
-}
-
 pub fn drawRectDirect(
     rect: types.Rect,
     visual: types.VisualProps,
@@ -143,6 +120,8 @@ pub fn drawTriangleDirect(
     rect: types.Rect,
     visual: types.VisualProps,
     transform: types.Transform,
+    ctx_scale: [2]f32,
+    ctx_offset: [2]f32,
     allocator: std.mem.Allocator,
     fallback_bg: ?dvui.Color,
 ) void {
@@ -176,8 +155,8 @@ pub fn drawTriangleDirect(
         const dy = (p[1] - ay) * sy;
         const rx = dx * cos_r - dy * sin_r;
         const ry = dx * sin_r + dy * cos_r;
-        const fx = ax + rx + tx;
-        const fy = ay + ry + ty;
+        const fx = ctx_scale[0] * (ax + rx + tx) + ctx_offset[0];
+        const fy = ctx_scale[1] * (ay + ry + ty) + ctx_offset[1];
         builder.appendVertex(.{ .pos = .{ .x = fx, .y = fy }, .col = pma });
     }
 

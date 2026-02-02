@@ -12,10 +12,9 @@ const intersectRect = state.intersectRect;
 const isPortalNode = state.isPortalNode;
 const nodeIdExtra = state.nodeIdExtra;
 const physicalToDvuiRect = state.physicalToDvuiRect;
-const transformedRect = direct.transformedRect;
 const PointerPick = state.PointerPick;
 const RenderContext = state.RenderContext;
-const contextRect = state.contextRect;
+const nodeBoundsInContext = state.nodeBoundsInContext;
 
 const RenderRuntime = runtime_mod.RenderRuntime;
 
@@ -64,8 +63,7 @@ pub fn scanPickInteractive(
         const spec = node.prepareClassSpec();
         if (!spec.hidden and (spec.opacity orelse node.visual_props.opacity) > 0) {
             if (node.layout.rect) |base_rect| {
-                const rect = contextRect(ctx, base_rect);
-                node_rect = transformedRect(node, rect) orelse rect;
+                node_rect = nodeBoundsInContext(ctx, node, base_rect);
             }
             if (node_rect) |rect| {
                 if (rectContains(rect, point)) {
@@ -144,8 +142,7 @@ pub fn scanPickPair(
         var spec = node.prepareClassSpec();
         if (!spec.hidden and (spec.opacity orelse node.visual_props.opacity) > 0) {
             if (node.layout.rect) |base_rect| {
-                const rect = contextRect(ctx, base_rect);
-                node_rect = transformedRect(node, rect) orelse rect;
+                node_rect = nodeBoundsInContext(ctx, node, base_rect);
             }
             if (node_rect) |rect| {
                 if (rectContains(rect, point)) {

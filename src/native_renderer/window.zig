@@ -148,26 +148,13 @@ fn saveScreenshotPng(renderer: *Renderer, picture: *dvui.Picture) void {
 }
 
 fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.EventRing) void {
-    const has_handler_v2 = lifecycle.isLuaFuncPresent(lua_state, "on_event_v2");
-    const has_handler_v1 = lifecycle.isLuaFuncPresent(lua_state, "on_event");
-
-    const emit_legacy = blk: {
-        if (!has_handler_v1) break :blk false;
-        const globals_table = lua_state.globals();
-        const enabled = globals_table.get("DVUI_EMIT_LEGACY_EVENTS", bool) catch |err| switch (err) {
-            error.KeyNotFound => true,
-            else => true,
-        };
-        break :blk enabled;
-    };
-
     const header = ring.getHeader();
     if (header.read_head == header.write_head or header.capacity == 0) {
         ring.setReadHead(header.write_head);
         return;
     }
 
-    if (!has_handler_v2 and !emit_legacy) {
+    if (!lifecycle.isLuaFuncPresent(lua_state, "on_event")) {
         ring.setReadHead(header.write_head);
         return;
     }
@@ -190,48 +177,18 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
 
         const kind_int: u32 = @intFromEnum(entry.kind);
 
-        if (has_handler_v2) {
-            const call_result = globals.call("on_event_v2", .{ kind_int, entry.node_id, detail }, void) catch |err| {
-                lifecycle.logLuaError(renderer, "on_event_v2", err);
+        const call_result = globals.call("on_event", .{ kind_int, entry.node_id, detail }, void) catch |err| {
+            lifecycle.logLuaError(renderer, "on_event", err);
+            lifecycle.teardownLua(renderer);
+            return;
+        };
+        switch (call_result) {
+            .ok => {},
+            else => {
+                logMessage(renderer, 3, "lua on_event did not complete", .{});
                 lifecycle.teardownLua(renderer);
                 return;
-            };
-            switch (call_result) {
-                .ok => {},
-                else => {
-                    logMessage(renderer, 3, "lua on_event_v2 did not complete", .{});
-                    lifecycle.teardownLua(renderer);
-                    return;
-                },
-            }
-        }
-
-        if (emit_legacy) {
-            var legacy_detail = detail;
-            var legacy_buf: [192]u8 = undefined;
-            if (entry.kind == .scroll and detail.len == @sizeOf(retained.events.ScrollPayload)) {
-                var payload: retained.events.ScrollPayload = undefined;
-                @memcpy(std.mem.asBytes(&payload), detail);
-                legacy_detail = std.fmt.bufPrint(
-                    &legacy_buf,
-                    "{{\"x\":{},\"y\":{},\"viewportW\":{},\"viewportH\":{},\"contentW\":{},\"contentH\":{}}}",
-                    .{ payload.x, payload.y, payload.viewport_w, payload.viewport_h, payload.content_w, payload.content_h },
-                ) catch "";
-            }
-
-            const call_result = globals.call("on_event", .{ @tagName(entry.kind), entry.node_id, legacy_detail }, void) catch |err| {
-                lifecycle.logLuaError(renderer, "on_event", err);
-                lifecycle.teardownLua(renderer);
-                return;
-            };
-            switch (call_result) {
-                .ok => {},
-                else => {
-                    logMessage(renderer, 3, "lua on_event did not complete", .{});
-                    lifecycle.teardownLua(renderer);
-                    return;
-                },
-            }
+            },
         }
     }
 

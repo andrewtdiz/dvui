@@ -206,11 +206,6 @@ pub const EventRing = struct {
     }
 };
 
-/// Map event name string to EventKind
-pub fn eventKindFromName(name: []const u8) ?EventKind {
-    return std.meta.stringToEnum(EventKind, name);
-}
-
 pub fn eventKindFromInt(value: u32) ?EventKind {
     return std.enums.fromInt(EventKind, value);
 }

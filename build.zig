@@ -260,9 +260,6 @@ fn configureDvuiModule(
         }
         module.addCSourceFiles(.{ .files = &.{stb_source ++ "stb_truetype_impl.c"} });
 
-        module.addIncludePath(b.path("vendor/tfd"));
-        module.addCSourceFiles(.{ .files = &.{"vendor/tfd/tinyfiledialogs.c"} });
-
         if (b.systemIntegrationOption("freetype", .{})) {
             module.linkSystemLibrary("freetype2", .{});
         } else if (b.lazyDependency("freetype", .{

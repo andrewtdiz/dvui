@@ -22,7 +22,7 @@ pub const PaintCache = struct {
     indices: std.ArrayList(u16) = .empty,
     version: u64 = 0,
     paint_dirty: bool = true,
-    painted_rect: ?Rect = null,
+    painted_bounds_layout: ?Rect = null,
 
     pub fn deinit(self: *PaintCache, allocator: std.mem.Allocator) void {
         self.vertices.deinit(allocator);

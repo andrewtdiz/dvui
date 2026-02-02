@@ -13,15 +13,11 @@ pub const FlexBoxWidget = @import("FlexBoxWidget.zig");
 pub const IconWidget = @import("IconWidget.zig");
 pub const LabelWidget = @import("LabelWidget.zig");
 pub const ScrollBarWidget = @import("ScrollBarWidget.zig");
-pub const ColorPickerWidget = @import("ColorPickerWidget.zig");
 pub const GizmoWidget = @import("GizmoWidget.zig");
 pub const MenuWidget = @import("MenuWidget.zig");
 pub const MenuItemWidget = @import("MenuItemWidget.zig");
-pub const PanedWidget = @import("PanedWidget.zig");
-pub const PlotWidget = @import("PlotWidget.zig");
-pub const ReorderWidget = @import("ReorderWidget.zig");
 pub const ScaleWidget = @import("ScaleWidget.zig");
-pub const TreeWidget = @import("TreeWidget.zig");
+pub const SelectionWidget = @import("SelectionWidget.zig");
 // Needed for autodocs "backlink" to work
 const dvui = @import("../dvui.zig");
 

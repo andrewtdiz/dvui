@@ -18,7 +18,7 @@ for i = 1, 40 do
   menuOptions[#menuOptions + 1] = string.format("Option %d", i)
 end
 
-local function UiFeatures()
+local function App()
   local menu_scale_target = source(1)
   local menu_scale = animation.spring(menu_scale_target, 0.2, 1)
 
@@ -26,63 +26,11 @@ local function UiFeatures()
     class = "w-full h-full flex flex-col justify-center items-center bg-neutral-950",
   }){
     div({
-      class = "w-[220px] flex flex-col absolute top-[250px] left-[250px] anchor-center items-center gap-6 bg-neutral-900 border border-neutral-700 rounded-xl p-6",
+      class = "w-[220px] flex flex-col anchor-center items-center gap-6 bg-neutral-900 rounded-xl p-6",
       scale = menu_scale,
-      onMouseLeave = function()
-        menu_scale_target(1)
-      end,
     }){
-      -- h1({
-      --   class = "text-4xl text-neutral-50 text-center text-nowrap",
-      --   props = {
-      --     visual = {
-      --       fontRenderMode = "msdf",
-      --       textOutlineColor = 0x000000ff,
-      --       textOutlineThickness = 1,
-      --     },
-      --   },
-      -- }){ "Main Menu" },
-      -- div({
-      --   class = "w-full h-px bg-neutral-700 opacity-60",
-      -- })(),
-      -- p({
-      --   class = "text-sm text-neutral-300 text-center",
-      -- }){
-      --   function()
-      --     return string.format("Selected: %s", selected_label())
-      --   end,
-      -- },
-      -- div({
-      --   class = "w-full h-[160px] flex flex-col gap-1 items-center overflow-y-scroll",
-      -- }){
-      --   For{
-      --     each = function()
-      --       return menuOptions
-      --     end,
-      --     key = function(label)
-      --       return label
-      --     end,
-      --     children = function(label)
-      --       return button({
-      --         class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 hover:bg-neutral-800 cursor-pointer",
-      --         props = {
-      --           visual = {
-      --             fontRenderMode = "msdf",
-      --             textOutlineColor = 0x000000ff,
-      --             textOutlineThickness = 1,
-      --           },
-      --         },
-      --         onMouseEnter = function()
-      --           selected_label(label)
-      --           menu_scale_target(1.13)
-      --         end,
-      --       }){ label }
-      --     end,
-      --   },
-      -- },
-      --
-      button({
-        class = "w-full h-12 px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 bg-neutral-700 hover:bg-neutral-800 cursor-pointer",
+      h1({
+        class = "text-4xl text-neutral-50 text-center text-nowrap",
         props = {
           visual = {
             fontRenderMode = "msdf",
@@ -90,29 +38,57 @@ local function UiFeatures()
             textOutlineThickness = 1,
           },
         },
-        onMouseEnter = function()
-          menu_scale_target(0.85)
-        end,
-      }){
-        "Here I am"
-      },
-      button({
-        class = "w-full h-12 px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-300 bg-neutral-700 hover:bg-neutral-800 cursor-pointer",
+      }){ "Main Menu" },
+      div({
+        class = "w-full h-px bg-neutral-700 opacity-60",
+      })(),
+      div({
+        class = "w-full h-3 bg-amber-500 opacity-80",
         props = {
-          visual = {
-            fontRenderMode = "msdf",
-            textOutlineColor = 0x000000ff,
-            textOutlineThickness = 1,
+          transform = {
+            translateX = 16,
+            translateY = 4,
           },
         },
-        onMouseEnter = function()
-          menu_scale_target(1.13)
-        end,
+      })(),
+      p({
+        class = "text-sm text-neutral-300 text-center",
       }){
-        "Here I am"
+        function()
+          return string.format("Selected: %s", selected_label())
+        end,
       },
+      div({
+        class = "w-full h-[160px] flex flex-col gap-1 items-center overflow-y-scroll",
+      }){
+        For{
+          each = function()
+            return menuOptions
+          end,
+          key = function(label)
+            return label
+          end,
+          children = function(label)
+            return button({
+              class = "w-full px-6 py-3 rounded-lg text-lg text-neutral-200 hover:text-amber-500 bg-transparent cursor-pointer",
+              props = {
+                visual = {
+                  fontRenderMode = "msdf",
+                  textOutlineColor = 0x000000ff,
+                  textOutlineThickness = 1,
+                },
+              },
+              onMouseEnter = function()
+                selected_label(label)
+              end,
+            }){ label }
+          end,
+        },
+      },
+      
+      
     }
   }
 end
 
-return UiFeatures
+return App

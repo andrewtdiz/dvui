@@ -14,33 +14,38 @@ local listened_by_id = {}
 local handlers_by_id = {}
 local app_destroy = nil
 
+local kind_name_by_value = {}
+for name, value in pairs(ui.EventKind) do
+  kind_name_by_value[value] = name
+end
+
 local function alloc_id()
   local id = next_id
   next_id = next_id + 1
   return id
 end
 
-local function listen_event(id, event_name)
+local function listen_event(id, kind)
   local set = listened_by_id[id]
   if set == nil then
     set = {}
     listened_by_id[id] = set
   end
-  if set[event_name] then
+  if set[kind] then
     return
   end
-  set[event_name] = true
-  ui.listen(id, event_name)
+  set[kind] = true
+  ui.listen_kind(id, kind)
 end
 
-local function set_handler(id, event_name, fn)
+local function set_handler(id, kind, fn)
   local map = handlers_by_id[id]
   if map == nil then
     map = {}
     handlers_by_id[id] = map
   end
-  map[event_name] = fn
-  listen_event(id, event_name)
+  map[kind] = fn
+  listen_event(id, kind)
 end
 
 local function clear_id_bindings(id)
@@ -99,8 +104,11 @@ local function mount_value(id, setter, value)
       end
     end
     if has_fn then
+      local out = {}
       effect(function()
-        local out = {}
+        for k in pairs(out) do
+          out[k] = nil
+        end
         for k, v in pairs(value) do
           out[k] = if type(v) == "function" then v() else v
         end
@@ -127,7 +135,12 @@ local function mount_transform(id, transform_value, scale_value)
     return
   end
 
-  mount_value(id, ui.set_transform, function()
+  local out = {}
+  effect(function()
+    for k in pairs(out) do
+      out[k] = nil
+    end
+
     local base = transform_value
     if type(base) == "function" then
       base = base()
@@ -136,7 +149,6 @@ local function mount_transform(id, transform_value, scale_value)
       error("transform must be table", 0)
     end
 
-    local out = {}
     if base ~= nil then
       for k, v in pairs(base) do
         out[k] = if type(v) == "function" then v() else v
@@ -148,7 +160,7 @@ local function mount_transform(id, transform_value, scale_value)
       scale = scale()
     end
     out.scale = scale
-    return out
+    ui.set_transform(id, out)
   end)
 end
 
@@ -178,26 +190,30 @@ local function mount_props(id, props, scale_value)
   local listen = props.listen
   if listen ~= nil then
     for _, event_name in ipairs(listen) do
-      listen_event(id, event_name)
+      local kind = ui.EventKind[event_name]
+      if kind == nil then
+        error(string.format("unknown event: %s", tostring(event_name)), 0)
+      end
+      listen_event(id, kind)
     end
   end
 end
 
-local event_key_to_name = {
-  onClick = "click",
-  onMouseEnter = "mouseenter",
-  onMouseLeave = "mouseleave",
-  onInput = "input",
-  onFocus = "focus",
-  onBlur = "blur",
-  onEnter = "enter",
+local event_key_to_kind = {
+  onClick = ui.EventKind.click,
+  onMouseEnter = ui.EventKind.mouseenter,
+  onMouseLeave = ui.EventKind.mouseleave,
+  onInput = ui.EventKind.input,
+  onFocus = ui.EventKind.focus,
+  onBlur = ui.EventKind.blur,
+  onEnter = ui.EventKind.enter,
 }
 
 local function apply_event_handlers(node, id)
   for k, v in pairs(node) do
-    local event_name = event_key_to_name[k]
-    if event_name ~= nil and type(v) == "function" then
-      set_handler(id, event_name, v)
+    local kind = event_key_to_kind[k]
+    if kind ~= nil and type(v) == "function" then
+      set_handler(id, kind, v)
     end
   end
 end
@@ -360,13 +376,44 @@ local function mount_any(node, parent_id, before_id, forced_scope)
         record.index_by_key[key] = nil
       end
 
-      local before = slot_id
-      for i = #next_order, 1, -1 do
+      local prev_order = record.order
+      local prev_set = {}
+      for i = 1, #prev_order do
+        prev_set[prev_order[i]] = true
+      end
+
+      local order_ok = true
+      local prev_index = 1
+      local new_tail = false
+      for i = 1, #next_order do
         local key = next_order[i]
-        local child_record = record.by_key[key]
-        if child_record ~= nil then
-          ui.insert(child_record.id, parent_id, before)
-          before = child_record.id
+        if prev_set[key] then
+          if new_tail then
+            order_ok = false
+            break
+          end
+          while prev_index <= #prev_order and not seen[prev_order[prev_index]] do
+            prev_index += 1
+          end
+          if prev_index > #prev_order or prev_order[prev_index] ~= key then
+            order_ok = false
+            break
+          end
+          prev_index += 1
+        else
+          new_tail = true
+        end
+      end
+
+      if not order_ok then
+        local before = slot_id
+        for i = #next_order, 1, -1 do
+          local key = next_order[i]
+          local child_record = record.by_key[key]
+          if child_record ~= nil then
+            ui.insert(child_record.id, parent_id, before)
+            before = child_record.id
+          end
         end
       end
 
@@ -626,7 +673,7 @@ local function mount_root(component)
   end
 end
 
-local function dispatch_event(kind, id, detail)
+local function dispatch_event(kind, id, payload)
   local map = handlers_by_id[id]
   if map == nil then
     return
@@ -635,7 +682,8 @@ local function dispatch_event(kind, id, detail)
   if handler == nil then
     return
   end
-  handler(detail, id, kind)
+  local kind_name = kind_name_by_value[kind]
+  handler(payload, id, kind_name)
 end
 
 local function init(component)

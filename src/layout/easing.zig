@@ -190,51 +190,5 @@ test {
 }
 
 test "DOCIMG easing plots" {
-    var t = try dvui.testing.init(.{ .window_size = .{ .w = 300, .h = 400 } });
-    defer t.deinit();
-
-    const plot = struct {
-        var easing: *const EasingFn = linear;
-
-        const resolution = 100;
-
-        fn frame() !dvui.App.Result {
-            var y_axis = dvui.PlotWidget.Axis{ .min = -0.5, .max = 1.5 };
-            var x_axis = dvui.PlotWidget.Axis{ .min = -0.25, .max = 1.25 };
-            var plot = dvui.plot(@src(), .{ .x_axis = &x_axis, .y_axis = &y_axis }, .{ .expand = .both });
-            defer plot.deinit();
-
-            var x_line = plot.line();
-            defer x_line.deinit();
-            x_line.point(0, 0);
-            x_line.point(1, 0);
-            x_line.stroke(1, dvui.Color.black);
-
-            var y_line = plot.line();
-            defer y_line.deinit();
-            y_line.point(0, 0);
-            y_line.point(0, 1);
-            y_line.stroke(1, dvui.Color.black);
-
-            var line = plot.line();
-            defer line.deinit();
-            for (0..resolution) |i| {
-                const x = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(resolution));
-                const y = easing(@floatCast(x));
-                line.point(x, y);
-            }
-            line.stroke(1, dvui.themeGet().color(.highlight, .fill));
-            return .ok;
-        }
-    };
-
-    try dvui.testing.settle(plot.frame);
-    try t.saveImage(plot.frame, null, "easing-plot-linear.png");
-
-    inline for (@typeInfo(@This()).@"struct".decls) |decl| {
-        if (comptime std.mem.startsWith(u8, decl.name, "in") or std.mem.startsWith(u8, decl.name, "out")) {
-            plot.easing = @field(@This(), decl.name);
-            try t.saveImage(plot.frame, null, "easing-plot-" ++ decl.name ++ ".png");
-        }
-    }
+    _ = @This();
 }

@@ -663,11 +663,6 @@ pub const NodeStore = struct {
         self.removeRecursive(id);
     }
 
-    pub fn addListener(self: *NodeStore, id: u32, name: []const u8) !void {
-        const kind = events.eventKindFromName(name) orelse return error.InvalidEvent;
-        try self.addListenerKind(id, kind);
-    }
-
     pub fn addListenerKind(self: *NodeStore, id: u32, kind: events.EventKind) !void {
         const _node = self.nodes.getPtr(id) orelse return;
         const added = _node.addListenerKind(kind);

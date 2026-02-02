@@ -2,6 +2,7 @@ const std = @import("std");
 const dvui = @import("dvui");
 
 const types = @import("../../core/types.zig");
+const direct = @import("../direct.zig");
 
 pub const RenderLayer = enum {
     base,
@@ -36,6 +37,11 @@ pub fn contextRect(ctx: RenderContext, rect: types.Rect) types.Rect {
         .w = rect.w * ctx.scale[0],
         .h = rect.h * ctx.scale[1],
     };
+}
+
+pub fn nodeBoundsInContext(ctx: RenderContext, node: *const types.SolidNode, rect: types.Rect) types.Rect {
+    const bounds_layout = direct.transformedRect(node, rect) orelse rect;
+    return contextRect(ctx, bounds_layout);
 }
 
 pub const ClipState = struct {
