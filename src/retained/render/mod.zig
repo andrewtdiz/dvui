@@ -29,19 +29,19 @@ const RenderRuntime = runtime_mod.RenderRuntime;
 var runtime: RenderRuntime = .{};
 
 pub fn init() void {
-    runtime.reset();
+    runtime.reset(null);
     drag_drop.init();
     focus.init();
     image_loader.init();
     icon_registry.init();
 }
 
-pub fn deinit() void {
+pub fn deinit(backend: ?dvui.Backend) void {
     drag_drop.deinit();
     focus.deinit();
     image_loader.deinit();
     icon_registry.deinit();
-    runtime.reset();
+    runtime.reset(backend);
 }
 
 pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {

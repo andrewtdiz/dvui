@@ -565,7 +565,11 @@ pub fn tryFinalize(renderer: *Renderer) void {
 }
 
 pub fn deinitRenderer(renderer: *Renderer) void {
+    const had_window = renderer.window != null;
     @import("window.zig").teardownWindow(renderer);
+    if (!had_window) {
+        retained.deinit(null);
+    }
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);
     renderer.frame_arena.deinit();
@@ -590,7 +594,6 @@ pub fn deinitRenderer(renderer: *Renderer) void {
         renderer.allocator.destroy(ring);
         renderer.retained_event_ring_ptr = null;
     }
-    retained.deinit();
 }
 
 pub fn finalizeDestroy(renderer: *Renderer) void {

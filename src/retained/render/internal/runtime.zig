@@ -49,12 +49,12 @@ pub const RenderRuntime = struct {
         self.* = .{};
     }
 
-    pub fn reset(self: *RenderRuntime) void {
-        self.deinit();
+    pub fn reset(self: *RenderRuntime, backend: ?dvui.Backend) void {
+        self.deinit(backend);
         self.* = .{};
     }
 
-    pub fn deinit(self: *RenderRuntime) void {
+    pub fn deinit(self: *RenderRuntime, backend: ?dvui.Backend) void {
         if (self.portal_cache_allocator) |alloc| {
             self.cached_portal_ids.deinit(alloc);
         }
@@ -73,6 +73,13 @@ pub const RenderRuntime = struct {
         self.last_paint_cache_version = 0;
 
         if (self.offscreen_cache_allocator) |alloc| {
+            if (backend) |b| {
+                var iter = self.offscreen_cache.iterator();
+                while (iter.next()) |entry| {
+                    const target = entry.value_ptr.target;
+                    b.textureDestroy(.{ .ptr = target.ptr, .width = target.width, .height = target.height });
+                }
+            }
             self.offscreen_cache.deinit(alloc);
         }
         self.offscreen_cache = .empty;
