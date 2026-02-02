@@ -4,12 +4,6 @@ const dvui = @import("dvui");
 const types = @import("../../core/types.zig");
 const state = @import("state.zig");
 
-pub const OffscreenCacheEntry = struct {
-    target: dvui.TextureTarget,
-    subtree_version: u64 = 0,
-    max_desc_version: u64 = 0,
-};
-
 pub const RenderRuntime = struct {
     gizmo_override_rect: ?types.GizmoRect = null,
     gizmo_rect_pending: ?types.GizmoRect = null,
@@ -39,10 +33,6 @@ pub const RenderRuntime = struct {
     cached_overlay_state: state.OverlayState = .{},
     overlay_cache_version: u64 = 0,
 
-    offscreen_cache_allocator: ?std.mem.Allocator = null,
-    offscreen_cache: std.AutoHashMapUnmanaged(u32, OffscreenCacheEntry) = .empty,
-    offscreen_capture_active: bool = false,
-
     pressed_node_id: u32 = 0,
 
     pub fn init(self: *RenderRuntime) void {
@@ -55,6 +45,7 @@ pub const RenderRuntime = struct {
     }
 
     pub fn deinit(self: *RenderRuntime, backend: ?dvui.Backend) void {
+        _ = backend;
         if (self.portal_cache_allocator) |alloc| {
             self.cached_portal_ids.deinit(alloc);
         }
@@ -71,20 +62,6 @@ pub const RenderRuntime = struct {
         self.hovered_cache_allocator = null;
 
         self.last_paint_cache_version = 0;
-
-        if (self.offscreen_cache_allocator) |alloc| {
-            if (backend) |b| {
-                var iter = self.offscreen_cache.iterator();
-                while (iter.next()) |entry| {
-                    const target = entry.value_ptr.target;
-                    b.textureDestroy(.{ .ptr = target.ptr, .width = target.width, .height = target.height });
-                }
-            }
-            self.offscreen_cache.deinit(alloc);
-        }
-        self.offscreen_cache = .empty;
-        self.offscreen_cache_allocator = null;
-        self.offscreen_capture_active = false;
         self.pressed_node_id = 0;
     }
 

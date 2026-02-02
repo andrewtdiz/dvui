@@ -44,7 +44,6 @@ const RenderContext = state.RenderContext;
 const intersectRect = state.intersectRect;
 const contextPoint = state.contextPoint;
 const nodeBoundsInContext = state.nodeBoundsInContext;
-const rectContains = state.rectContains;
 
 const applyLayoutScaleToOptions = visual_sync.applyLayoutScaleToOptions;
 const nodeHasAccessibilityProps = visual_sync.nodeHasAccessibilityProps;
@@ -60,19 +59,51 @@ const log = std.log.scoped(.retained);
 
 const RenderRuntime = runtime_mod.RenderRuntime;
 
-fn maxDescendantVersion(store: *types.NodeStore, node: *types.SolidNode) u64 {
-    var max_version: u64 = 0;
-    for (node.children.items) |child_id| {
-        const child = store.node(child_id) orelse continue;
-        if (child.version > max_version) max_version = child.version;
-        const child_max = maxDescendantVersion(store, child);
-        if (child_max > max_version) max_version = child_max;
-    }
-    return max_version;
-}
-
 fn rectsIntersect(a: types.Rect, b: types.Rect) bool {
     return !(a.x + a.w < b.x or b.x + b.w < a.x or a.y + a.h < b.y or b.y + b.h < a.y);
+}
+
+fn pointerEventAllowed(runtime: *const RenderRuntime, node_id: u32, widget_id: dvui.Id, e: *dvui.Event) bool {
+    switch (e.evt) {
+        .mouse => {
+            if (e.target_widgetId) |target| {
+                return target == widget_id;
+            }
+            return runtime.pointerTargetId() == node_id;
+        },
+        else => return true,
+    }
+}
+
+fn mapPointerButton(button: dvui.enums.Button) u8 {
+    return switch (button) {
+        .left => 0,
+        .middle => 1,
+        .right => 2,
+        .four => 3,
+        .five => 4,
+        else => 255,
+    };
+}
+
+fn pointerModMask(mods: dvui.enums.Mod) u8 {
+    var mask: u8 = 0;
+    if (mods.shift()) mask |= 1;
+    if (mods.control()) mask |= 2;
+    if (mods.alt()) mask |= 4;
+    return mask;
+}
+
+fn pushPointerEvent(event_ring: ?*events.EventRing, kind: events.EventKind, node_id: u32, mouse: dvui.Event.Mouse) void {
+    if (event_ring) |ring| {
+        const payload = events.PointerPayload{
+            .x = mouse.p.x,
+            .y = mouse.p.y,
+            .button = mapPointerButton(mouse.button),
+            .modifiers = pointerModMask(mouse.mod),
+        };
+        _ = ring.push(kind, node_id, std.mem.asBytes(&payload));
+    }
 }
 
 fn applyBorderColorToOptions(node: *const types.SolidNode, visual: types.VisualProps, options: *dvui.Options) void {
@@ -82,16 +113,30 @@ fn applyBorderColorToOptions(node: *const types.SolidNode, visual: types.VisualP
     options.color_border = packedColorToDvui(border_packed, visual.opacity);
 }
 
-fn applyContextScaleToOptions(ctx: RenderContext, options: *dvui.Options) void {
-    const factor = ctx.scale[0];
-    if (factor == 1.0) return;
-    if (options.margin) |m| options.margin = m.scale(factor, dvui.Rect);
-    if (options.border) |b| options.border = b.scale(factor, dvui.Rect);
-    if (options.padding) |p| options.padding = p.scale(factor, dvui.Rect);
-    if (options.corner_radius) |c| options.corner_radius = c.scale(factor, dvui.Rect);
-    if (options.min_size_content) |ms| options.min_size_content = dvui.Size{ .w = ms.w * factor, .h = ms.h * factor };
-    if (options.max_size_content) |mx| options.max_size_content = dvui.Options.MaxSize{ .w = mx.w * factor, .h = mx.h * factor };
-    if (options.text_outline_thickness) |v| options.text_outline_thickness = v * factor;
+fn scaleRectXY(r: dvui.Rect, sx: f32, sy: f32) dvui.Rect {
+    return .{ .x = r.x * sx, .y = r.y * sy, .w = r.w * sx, .h = r.h * sy };
+}
+
+const TransformScale = struct { sx: f32, sy: f32, uniform: f32 };
+
+fn effectiveNodeScale(ctx: RenderContext, node: *const types.SolidNode) TransformScale {
+    const t = transitions.effectiveTransform(node);
+    const sx = @abs(ctx.scale[0] * t.scale[0]);
+    const sy = @abs(ctx.scale[1] * t.scale[1]);
+    return .{ .sx = sx, .sy = sy, .uniform = @min(sx, sy) };
+}
+
+fn applyTransformScaleToOptions(scale: TransformScale, options: *dvui.Options) void {
+    if (scale.sx == 1.0 and scale.sy == 1.0) return;
+    if (options.margin) |m| options.margin = scaleRectXY(m, scale.sx, scale.sy);
+    if (options.border) |b| options.border = scaleRectXY(b, scale.sx, scale.sy);
+    if (options.padding) |p| options.padding = scaleRectXY(p, scale.sx, scale.sy);
+    if (options.corner_radius) |c| options.corner_radius = c.scale(scale.uniform, dvui.Rect);
+    if (options.min_size_content) |ms| options.min_size_content = dvui.Size{ .w = ms.w * scale.sx, .h = ms.h * scale.sy };
+    if (options.max_size_content) |mx| options.max_size_content = dvui.Options.MaxSize{ .w = mx.w * scale.sx, .h = mx.h * scale.sy };
+    if (options.text_outline_thickness) |v| options.text_outline_thickness = v * scale.uniform;
+    const font = options.fontGet();
+    options.font = font.resize(font.size * scale.uniform);
 }
 
 fn rectToParentLocal(rect: types.Rect, parent_origin: dvui.Point.Physical) types.Rect {
@@ -149,6 +194,13 @@ pub fn renderNode(
     ctx: RenderContext,
 ) void {
     const node = store.node(node_id) orelse return;
+    if (node.kind != .element and dvui.snapToPixels()) {
+        const scale = effectiveNodeScale(ctx, node);
+        if (scale.sx != 1.0 or scale.sy != 1.0) {
+            const old_snap = dvui.snapToPixelsSet(false);
+            defer _ = dvui.snapToPixelsSet(old_snap);
+        }
+    }
     if (ctx.clip) |clip| {
         if (node.layout.rect) |rect_base| {
             const bounds = nodeBoundsInContext(ctx, node, rect_base);
@@ -196,6 +248,14 @@ fn renderElement(
 
     if (class_spec.transition.enabled or node.transition_state.enabled) {
         transitions.updateNode(node, &class_spec);
+    }
+
+    if (dvui.snapToPixels()) {
+        const scale = effectiveNodeScale(ctx, node);
+        if (scale.sx != 1.0 or scale.sy != 1.0) {
+            const old_snap = dvui.snapToPixelsSet(false);
+            defer _ = dvui.snapToPixelsSet(old_snap);
+        }
     }
 
     if (node.isInteractive() or nodeHasAccessibilityProps(node)) {
@@ -430,112 +490,6 @@ fn renderContainer(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    if (!runtime.offscreen_capture_active) {
-        const t = transitions.effectiveTransform(node);
-        if (t.rotation == 0 and (@abs(t.scale[0] - 1.0) > 0.001 or @abs(t.scale[1] - 1.0) > 0.001) and node.interactiveChildCount() > 0) {
-            if (node.layout.rect) |rect| {
-                const bounds = nodeBoundsInContext(ctx, node, rect);
-                if (bounds.w > 0 and bounds.h > 0) {
-                    if (runtime.offscreen_cache_allocator == null) {
-                        runtime.offscreen_cache_allocator = store.allocator;
-                    }
-
-                    const max_desc_version = maxDescendantVersion(store, node);
-                    const cached = runtime.offscreen_cache.getPtr(node.id);
-                    var needs_capture = cached == null or cached.?.max_desc_version != max_desc_version;
-
-                    var has_press_in_bounds = false;
-                    var has_wheel_in_bounds = false;
-                    var has_release = false;
-                    if (runtime.input_enabled_state) {
-                        for (dvui.events()) |*e| {
-                            switch (e.evt) {
-                                .mouse => |me| {
-                                    switch (me.action) {
-                                        .press => {
-                                            if (me.button.pointer() and rectContains(bounds, me.p)) {
-                                                has_press_in_bounds = true;
-                                            }
-                                        },
-                                        .release => {
-                                            if (me.button.pointer()) {
-                                                has_release = true;
-                                            }
-                                        },
-                                        .wheel_y, .wheel_x => {
-                                            if (rectContains(bounds, me.p)) {
-                                                has_wheel_in_bounds = true;
-                                            }
-                                        },
-                                        else => {},
-                                    }
-                                },
-                                else => {},
-                            }
-                        }
-                    }
-
-                    if (has_press_in_bounds or has_wheel_in_bounds) {
-                        needs_capture = true;
-                    } else if (has_release and runtime.pressed_node_id != 0) {
-                        var current_id: u32 = runtime.pressed_node_id;
-                        while (current_id != 0) {
-                            if (current_id == node.id) {
-                                needs_capture = true;
-                                break;
-                            }
-                            const current_node = store.node(current_id) orelse break;
-                            current_id = current_node.parent orelse 0;
-                        }
-                    }
-
-                    if (needs_capture) {
-                        const x0 = @floor(bounds.x);
-                        const y0 = @floor(bounds.y);
-                        const x1 = @ceil(bounds.x + bounds.w);
-                        const y1 = @ceil(bounds.y + bounds.h);
-                        const capture = types.Rect{
-                            .x = x0,
-                            .y = y0,
-                            .w = @max(0.0, x1 - x0),
-                            .h = @max(0.0, y1 - y0),
-                        };
-                        const target_w: u32 = @intFromFloat(@ceil(capture.w));
-                        const target_h: u32 = @intFromFloat(@ceil(capture.h));
-
-                        if (target_w > 0 and target_h > 0) {
-                            const target = dvui.textureCreateTarget(target_w, target_h, .linear) catch return renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
-                            const gop = runtime.offscreen_cache.getOrPut(store.allocator, node.id) catch {
-                                dvui.textureDestroyLater(.{ .ptr = target.ptr, .width = target.width, .height = target.height });
-                                return renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
-                            };
-                            if (gop.found_existing) {
-                                const old_target = gop.value_ptr.target;
-                                dvui.textureDestroyLater(.{ .ptr = old_target.ptr, .width = old_target.width, .height = old_target.height });
-                            }
-                            gop.value_ptr.* = .{ .target = target, .subtree_version = node.subtree_version, .max_desc_version = max_desc_version };
-
-                            runtime.offscreen_capture_active = true;
-                            const prev_target = dvui.renderTarget(.{ .texture = target, .offset = .{ .x = capture.x, .y = capture.y } });
-                            const prev_clip = dvui.clip(.{ .x = capture.x, .y = capture.y, .w = capture.w, .h = capture.h });
-                            renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
-                            dvui.clipSet(prev_clip);
-                            _ = dvui.renderTarget(prev_target);
-                            runtime.offscreen_capture_active = false;
-                        }
-                    }
-
-                    if (runtime.offscreen_cache.getPtr(node.id)) |entry| {
-                        const tex = dvui.Texture{ .ptr = entry.target.ptr, .width = entry.target.width, .height = entry.target.height };
-                        dvui.renderTexture(tex, .{ .r = direct.rectToPhysical(bounds), .s = dvui.windowNaturalScale() }, .{}) catch {};
-                        node.markRendered();
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
     renderContainerNormal(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
 }
 
@@ -570,15 +524,16 @@ fn renderContainerNormal(
         .expand = .none,
         .id_extra = nodeIdExtra(node.id),
     };
+    const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     options.background = false;
     options.border = dvui.Rect{};
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, .generic_container);
     if (rect_layout_opt) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
@@ -873,6 +828,7 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContex
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
         var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
+        const scale = effectiveNodeScale(ctx, node);
         if (node.parent) |pid| {
             if (store.node(pid)) |parent| {
                 var parent_spec = parent.prepareClassSpec();
@@ -881,11 +837,11 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContex
                 style_apply.resolveFont(&parent_spec, &options);
             }
         }
-        applyLayoutScaleToOptions(node, &options);
-        applyContextScaleToOptions(ctx, &options);
         const visual_eff = transitions.effectiveVisual(node);
         applyVisualPropsToOptions(visual_eff, &options);
         applyBorderColorToOptions(node, visual_eff, &options);
+        applyLayoutScaleToOptions(node, &options);
+        applyTransformScaleToOptions(scale, &options);
         if (node.layout.rect) |rect| {
             const bounds = nodeBoundsInContext(ctx, node, rect);
             options.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
@@ -940,7 +896,9 @@ fn renderButton(
         rect_opt = node.layout.rect;
     }
 
-    var options = dvui.Options{
+    const scale = effectiveNodeScale(ctx, node);
+
+    var options_base = dvui.Options{
         .id_extra = nodeIdExtra(node_id),
         .padding = dvui.Rect.all(6),
         // Respect layout positions exactly; DVUI's default button margin would offset the rect.
@@ -949,24 +907,26 @@ fn renderButton(
     const tab_info = focus.tabIndexForNode(store, node);
     const focus_allowed = runtime.allowFocusRegistration();
     if (tab_info.focusable and focus_allowed) {
-        options.tab_index = tab_info.tab_index;
+        options_base.tab_index = tab_info.tab_index;
     }
-    style_apply.applyToOptions(&class_spec, &options);
-    style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     const visual_eff = transitions.effectiveVisual(node);
-    applyVisualPropsToOptions(visual_eff, &options);
-    applyBorderColorToOptions(node, visual_eff, &options);
-    applyAccessibilityOptions(node, &options, null);
+    style_apply.applyToOptions(&class_spec, &options_base);
+    style_apply.resolveFont(&class_spec, &options_base);
+    applyVisualPropsToOptions(visual_eff, &options_base);
+    applyBorderColorToOptions(node, visual_eff, &options_base);
+    applyAccessibilityOptions(node, &options_base, null);
     if (rect_opt) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
-        options.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
-        options.expand = .none;
-        if (options.rotation == null) {
-            options.rotation = transitions.effectiveTransform(node).rotation;
+        options_base.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
+        options_base.expand = .none;
+        if (options_base.rotation == null) {
+            options_base.rotation = transitions.effectiveTransform(node).rotation;
         }
     }
+
+    var options = options_base;
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
 
     // Use ButtonWidget directly instead of dvui.button() to ensure unique widget IDs.
     // The issue with dvui.button(@src(), ...) is that @src() returns the same source location
@@ -981,6 +941,29 @@ fn renderButton(
         focus.registerFocusable(store, node, bw.data());
     }
     if (runtime.input_enabled_state) {
+        if (node.hasListenerKind(.pointerdown) or node.hasListenerKind(.pointerup)) {
+            const rect = bw.data().borderRectScale().r;
+            for (dvui.events()) |*event| {
+                if (!pointerEventAllowed(runtime, node_id, bw.data().id, event)) continue;
+                if (!dvui.eventMatch(event, .{ .id = bw.data().id, .r = rect })) continue;
+                switch (event.evt) {
+                    .mouse => |mouse| switch (mouse.action) {
+                        .press => {
+                            if (mouse.button.pointer() and node.hasListenerKind(.pointerdown)) {
+                                pushPointerEvent(event_ring, .pointerdown, node_id, mouse);
+                            }
+                        },
+                        .release => {
+                            if (mouse.button.pointer() and node.hasListenerKind(.pointerup)) {
+                                pushPointerEvent(event_ring, .pointerup, node_id, mouse);
+                            }
+                        },
+                        else => {},
+                    },
+                    else => {},
+                }
+            }
+        }
         bw.hover = false;
         bw.click = clickedTopmost(runtime, bw.data(), node_id, .{ .hovered = &bw.hover });
     }
@@ -989,9 +972,7 @@ fn renderButton(
     // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
     // This fixes cases where button text doesn't appear until a later repaint.
     const content_rs = bw.data().contentRectScale();
-    var text_style = options.strip().override(bw.style());
-    applyLayoutScaleToOptions(node, &text_style);
-    applyContextScaleToOptions(ctx, &text_style);
+    const text_style = bw.style();
     const font = text_style.fontGet();
     const size_nat = font.textSize(caption);
     const text_w = size_nat.w * content_rs.s;
@@ -1090,13 +1071,14 @@ fn renderIcon(
         .name = "solid-icon",
         .id_extra = nodeIdExtra(node_id),
     };
+    const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, null);
     if (node.layout.rect) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
@@ -1180,13 +1162,14 @@ fn renderImage(
         .id_extra = nodeIdExtra(node_id),
         .role = .image,
     };
+    const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, null);
     if (node.layout.rect) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
@@ -1279,13 +1262,14 @@ fn renderSlider(
         .name = "solid-slider",
         .id_extra = nodeIdExtra(node_id),
     });
+    const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, .slider);
     if (node.layout.rect) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
@@ -1559,13 +1543,14 @@ fn renderInput(
         .id_extra = nodeIdExtra(node_id),
         .background = true,
     };
+    const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(&class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
-    applyLayoutScaleToOptions(node, &options);
-    applyContextScaleToOptions(ctx, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, .text_input);
     if (node.layout.rect) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
@@ -1925,4 +1910,20 @@ fn collectText(
             }
         },
     }
+}
+
+test "applyTransformScaleToOptions scales font and metrics" {
+    var options = dvui.Options{
+        .padding = dvui.Rect{ .x = 2, .y = 3, .w = 4, .h = 5 },
+        .corner_radius = dvui.Rect.all(6),
+        .text_outline_thickness = 2,
+        .font = dvui.Font{ .size = 10, .id = dvui.Font.default_font_id },
+    };
+
+    applyTransformScaleToOptions(.{ .sx = 2, .sy = 3, .uniform = 2 }, &options);
+
+    try std.testing.expectEqual(dvui.Rect{ .x = 4, .y = 9, .w = 8, .h = 15 }, options.padding.?);
+    try std.testing.expectEqual(dvui.Rect.all(12), options.corner_radius.?);
+    try std.testing.expectEqual(@as(f32, 4), options.text_outline_thickness.?);
+    try std.testing.expectEqual(@as(f32, 20), options.font.?.size);
 }

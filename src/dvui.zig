@@ -500,7 +500,23 @@ pub fn addFont(name: []const u8, ttf_bytes: []const u8, ttf_bytes_allocator: ?st
     const font = Font{ .id = .fromName(name), .size = 14 };
     var entry = try Font.Cache.Entry.init(ttf_bytes, font, name);
     // Try and cache the entry since the work is already done
-    cw.fonts.cache.put(cw.gpa, font.hash(), entry) catch entry.deinit(cw.gpa, cw.backend);
+    const cache_key = blk: {
+        if (cw.fonts.msdf_fonts.getPtr(font.id) != null) {
+            var h = dvui.fnv.init();
+            h.update(std.mem.asBytes(&font.id));
+            const key_tag: u8 = 0x6d;
+            h.update(std.mem.asBytes(&key_tag));
+            break :blk h.final();
+        }
+        const quantized_size: u32 = @intFromFloat(@max(1.0, @floor(font.size)));
+        var h = dvui.fnv.init();
+        h.update(std.mem.asBytes(&font.id));
+        const key_tag: u8 = 0x72;
+        h.update(std.mem.asBytes(&key_tag));
+        h.update(std.mem.asBytes(&quantized_size));
+        break :blk h.final();
+    };
+    cw.fonts.cache.put(cw.gpa, cache_key, entry) catch entry.deinit(cw.gpa, cw.backend);
     cw.fonts.database.putAssumeCapacity(font.id, .{
         .name = name,
         .bytes = ttf_bytes,

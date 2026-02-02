@@ -386,7 +386,13 @@ pub const Cache = struct {
             h.update(std.mem.asBytes(&tag));
             return h.final();
         }
-        return font.hash();
+        const quantized_size: u32 = @intFromFloat(@max(1.0, @floor(font.size)));
+        var h = dvui.fnv.init();
+        h.update(std.mem.asBytes(&font.id));
+        const tag: u8 = 0x72;
+        h.update(std.mem.asBytes(&tag));
+        h.update(std.mem.asBytes(&quantized_size));
+        return h.final();
     }
 
     pub fn getOrCreate(self: *Cache, gpa: std.mem.Allocator, font: Font) std.mem.Allocator.Error!*Entry {
@@ -1096,6 +1102,13 @@ pub const FreeType = struct {
         };
     }
 };
+
+test "Font cache key quantizes raster size" {
+    var cache: Cache = .{};
+    const a = Font{ .id = .Inter, .size = 12.1 };
+    const b = Font{ .id = .Inter, .size = 12.9 };
+    try std.testing.expectEqual(cache.cacheKey(a), cache.cacheKey(b));
+}
 
 test {
     @import("std").testing.refAllDecls(@This());
