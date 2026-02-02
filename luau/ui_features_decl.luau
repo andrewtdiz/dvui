@@ -26,12 +26,12 @@ function require(path)
   return result
 end
 
-local content = require("luau/ui_features_decl/content")
+local app = require("luau/app")
 local renderer = require("luau/ui_features_decl/renderer")
 local animation = require("luau/ui_features_decl/animation")
 
 function init()
-  renderer.init(content)
+  renderer.init(app)
 end
 
 function update(dt, input)

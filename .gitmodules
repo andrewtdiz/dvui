@@ -8,3 +8,6 @@
 	path = deps/luaz
 	url = https://github.com/andrewtdiz/luaz
 	branch = mainline
+[submodule "deps/solidluau"]
+	path = deps/solidluau
+	url = https://github.com/andrewtdiz/solidluau
