@@ -91,10 +91,18 @@ pub fn build(b: *Build) !void {
     const raylib_input_mod = createRaylibBackendModule(b, target, optimize, linux_display_backend);
     raylib_input_mod.addImport("dvui", dvui_wgpu_mod);
     const webgpu_mod = b.createModule(.{
-        .root_source_file = b.path("src/backends/webgpu-zig.zig"),
+        .root_source_file = b.path("src/backends/webgpu.zig"),
         .target = target,
         .optimize = optimize,
     });
+    if (target.result.os.tag == .macos) {
+        webgpu_mod.addCSourceFiles(.{
+            .files = &.{"src/backends/webgpu/platform_macos_metal_layer.m"},
+            .flags = &.{"-fobjc-arc"},
+        });
+        webgpu_mod.linkFramework("QuartzCore", .{});
+        webgpu_mod.linkFramework("Metal", .{});
+    }
     webgpu_mod.addImport("dvui", dvui_wgpu_mod);
     webgpu_mod.addImport("wgpu", wgpu_mod);
     webgpu_mod.addImport("wgpu-backend", wgpu_backend_mod);
