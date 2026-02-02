@@ -269,11 +269,14 @@ local function createEffect(fn)
 
   owner.owned[#owner.owned + 1] = comp
   comp.run()
-  return destroy
 end
 
 local function createComputed(fn)
-  return createEffect(fn)
+  local get, set = createSignal(nil)
+  createEffect(function()
+    set(fn())
+  end)
+  return get
 end
 
 local function createMemo(fn)
@@ -507,7 +510,9 @@ local function createRoot(fn)
   current_owner = scope
   current_scope = scope
 
-  local ok, result = xpcall(fn, debug.traceback, destroy)
+  local ok, result = xpcall(function()
+    return fn(destroy)
+  end, debug.traceback)
 
   current_owner = prev_owner
   current_scope = prev_scope
@@ -518,7 +523,7 @@ local function createRoot(fn)
   end
 
   run_mounts(scope)
-  return destroy, result
+  return result
 end
 
 return {

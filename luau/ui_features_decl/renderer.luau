@@ -689,7 +689,8 @@ local function mount_root(component)
   local tree = nil
   local destroy_reactive = nil
 
-  destroy_reactive, tree = createRoot(function()
+  createRoot(function(dispose)
+    destroy_reactive = dispose
     tree = mount_any(component(), 0, nil)
     return tree
   end)
