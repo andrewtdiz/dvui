@@ -115,6 +115,13 @@ pub fn build(b: *Build) !void {
     native_module.addImport("wgpu-backend", wgpu_backend_mod);
     native_module.addImport("retained", retained_mod);
 
+    const solidluau_embedded_mod = b.createModule(.{
+        .root_source_file = b.path("solidluau_embedded.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    native_module.addImport("solidluau_embedded", solidluau_embedded_mod);
+
     const luau_ui_mod = b.createModule(.{
         .root_source_file = b.path("src/native_renderer/luau_ui.zig"),
         .target = target,

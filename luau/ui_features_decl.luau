@@ -1,43 +1,17 @@
-local module_cache = {}
+local SolidLuau = require("solidluau")
+local App = require("luau/app")
+local host_ui = ui
 
-function require(path)
-  if type(path) ~= "string" then
-    error("require path must be string", 0)
-  end
-
-  local key = path
-  if string.sub(key, -5) ~= ".luau" then
-    key = key .. ".luau"
-  end
-
-  local cached = module_cache[key]
-  if cached ~= nil then
-    return cached
-  end
-
-  local result, err = dvui_dofile(key)
-  if err ~= nil then
-    error(err, 0)
-  end
-  if result == nil then
-    result = true
-  end
-  module_cache[key] = result
-  return result
-end
-
-local app = require("luau/app")
-local renderer = require("luau/ui_features_decl/renderer")
-local animation = require("luau/ui_features_decl/animation")
+SolidLuau.ui.setAdapter(SolidLuau.ui.adapters.compat_ui(host_ui))
 
 function init()
-  renderer.init(app)
+  SolidLuau.ui.init(App)
 end
 
 function update(dt, input)
-  animation.step(dt)
+  SolidLuau.animation.step(dt)
 end
 
 function on_event(kind, id, payload)
-  renderer.dispatch_event(kind, id, payload)
+  SolidLuau.ui.dispatch_event(kind, id, payload)
 end

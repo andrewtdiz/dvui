@@ -1,6 +1,7 @@
-local dsl = require("luau/ui_features_decl/dsl")
-local reactivity = require("luau/ui_features_decl/reactivity")
-local animation = require("luau/ui_features_decl/animation")
+local SolidLuau = require("solidluau")
+local dsl = SolidLuau.ui
+local reactivity = SolidLuau
+local animation = SolidLuau.animation
 
 local Tag = dsl.Tag
 local For = dsl.For

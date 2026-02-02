@@ -4,6 +4,7 @@ const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
 
 const retained = @import("retained");
+const solidluau_embedded = @import("solidluau_embedded");
 const types = @import("types.zig");
 const utils = @import("utils.zig");
 const Renderer = types.Renderer;
@@ -16,6 +17,7 @@ const lua_script_paths = [_][]const u8{
 };
 const max_lua_script_bytes: usize = 1024 * 1024;
 const max_lua_error_len: usize = 120;
+var require_cache_key: u8 = 0;
 
 // ============================================================
 // Logging
@@ -191,10 +193,160 @@ fn dvuiDofile(state_opt: ?luaz.State.LuaState) callconv(.c) c_int {
     }
 }
 
+fn dvuiRequire(state_opt: ?luaz.State.LuaState) callconv(.c) c_int {
+    const lua = luaz.Lua.fromState(state_opt.?);
+    const base_top = lua.state.getTop();
+
+    const renderer_ptr = lua.state.toLightUserdata(luaz.State.upvalueIndex(1)) orelse {
+        lua.state.setTop(base_top);
+        lua.state.pushLString("require missing renderer");
+        lua.state.raiseError();
+    };
+    const renderer: *Renderer = @ptrCast(@alignCast(renderer_ptr));
+
+    const module_z = lua.state.checkString(1);
+    const module_full: []const u8 = module_z;
+    const module_id = if (std.mem.endsWith(u8, module_full, ".luau")) module_full[0 .. module_full.len - 5] else module_full;
+
+    lua.state.pushLightUserdata(@ptrCast(&require_cache_key));
+    _ = lua.state.getTable(luaz.State.REGISTRYINDEX);
+    if (lua.state.isNil(-1)) {
+        lua.state.pop(1);
+        lua.state.createTable(0, 64);
+        lua.state.pushLightUserdata(@ptrCast(&require_cache_key));
+        lua.state.pushValue(-2);
+        lua.state.setTable(luaz.State.REGISTRYINDEX);
+    }
+
+    lua.state.pushLString(module_id);
+    _ = lua.state.rawGet(-2);
+    if (!lua.state.isNil(-1)) {
+        lua.state.remove(-2);
+        return 1;
+    }
+    lua.state.pop(1);
+
+    const embedded_source = solidluau_embedded.get(module_id);
+    var owned_source: ?[]u8 = null;
+    defer if (owned_source) |bytes| renderer.allocator.free(bytes);
+
+    const source_bytes: []const u8 = blk: {
+        if (embedded_source) |src| break :blk src;
+
+        var path_buf: [512]u8 = undefined;
+        const path = if (std.mem.endsWith(u8, module_full, ".luau"))
+            module_full
+        else
+            std.fmt.bufPrint(&path_buf, "{s}.luau", .{module_full}) catch {
+                lua.state.setTop(base_top);
+                lua.state.pushLString("require invalid module id");
+                lua.state.raiseError();
+            };
+
+        var file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch |err| {
+            lua.state.setTop(base_top);
+            lua.state.pushLString("require(");
+            lua.state.pushLString(module_id);
+            lua.state.pushLString(") open failed: ");
+            lua.state.pushLString(@errorName(err));
+            lua.state.concat(4);
+            lua.state.raiseError();
+        };
+        defer file.close();
+
+        const bytes = file.readToEndAlloc(renderer.allocator, max_lua_script_bytes) catch |err| {
+            lua.state.setTop(base_top);
+            lua.state.pushLString("require(");
+            lua.state.pushLString(module_id);
+            lua.state.pushLString(") read failed: ");
+            lua.state.pushLString(@errorName(err));
+            lua.state.concat(4);
+            lua.state.raiseError();
+        };
+        owned_source = bytes;
+        break :blk bytes;
+    };
+
+    const compile_result = luaz.Compiler.compile(source_bytes, .{}) catch |err| {
+        lua.state.setTop(base_top);
+        lua.state.pushLString("require(");
+        lua.state.pushLString(module_id);
+        lua.state.pushLString(") compile failed: ");
+        lua.state.pushLString(@errorName(err));
+        lua.state.concat(4);
+        lua.state.raiseError();
+    };
+    defer compile_result.deinit();
+
+    if (compile_result == .err) {
+        const message = compile_result.err;
+        const trimmed = if (message.len > max_lua_error_len) message[0..max_lua_error_len] else message;
+        lua.state.setTop(base_top);
+        lua.state.pushLString("require(");
+        lua.state.pushLString(module_id);
+        lua.state.pushLString(") compile error: ");
+        lua.state.pushLString(trimmed);
+        lua.state.concat(4);
+        lua.state.raiseError();
+    }
+
+    const load_status = lua.state.load(module_z, compile_result.ok, 0);
+    switch (load_status) {
+        .ok => {},
+        else => {
+            lua.state.setTop(base_top);
+            lua.state.pushLString("require(");
+            lua.state.pushLString(module_id);
+            lua.state.pushLString(") load error: ");
+            lua.state.pushLString(@tagName(load_status));
+            lua.state.concat(4);
+            lua.state.raiseError();
+        },
+    }
+
+    const call_status = lua.state.pcall(0, 1, 0);
+    switch (call_status) {
+        .ok => {},
+        else => {
+            var err_message_buf: [max_lua_error_len]u8 = undefined;
+            var err_message: []const u8 = @tagName(call_status);
+            if (lua.state.getTop() > base_top) {
+                if (lua.state.toString(-1)) |err_z| {
+                    const err_raw: []const u8 = err_z;
+                    const n: usize = @min(err_raw.len, max_lua_error_len);
+                    std.mem.copyForwards(u8, err_message_buf[0..n], err_raw[0..n]);
+                    err_message = err_message_buf[0..n];
+                }
+            }
+            lua.state.setTop(base_top);
+            lua.state.pushLString("require(");
+            lua.state.pushLString(module_id);
+            lua.state.pushLString(") runtime error: ");
+            lua.state.pushLString(err_message);
+            lua.state.concat(4);
+            lua.state.raiseError();
+        },
+    }
+
+    if (lua.state.isNil(-1)) {
+        lua.state.pop(1);
+        lua.state.pushBoolean(true);
+    }
+
+    lua.state.pushLString(module_id);
+    lua.state.pushValue(-2);
+    lua.state.setTable(-4);
+    lua.state.remove(-2);
+    return 1;
+}
+
 fn registerLuaFileLoader(renderer: *Renderer, lua: *luaz.Lua) void {
     lua.state.pushLightUserdata(@ptrCast(renderer));
     lua.state.pushCClosureK(dvuiDofile, "dvui_dofile", 1, null);
     lua.state.setGlobal("dvui_dofile");
+    lua.state.pushLightUserdata(@ptrCast(renderer));
+    lua.state.pushCClosureK(dvuiRequire, "require", 1, null);
+    lua.state.setGlobal("require");
 }
 
 fn loadLuaScript(renderer: *Renderer) bool {

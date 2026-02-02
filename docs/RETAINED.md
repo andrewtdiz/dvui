@@ -1,6 +1,6 @@
 • Entry Points / Call Flow (Zig → Luau → retained)
 
-  - src/native_renderer/lifecycle.zig loads scripts/ui_features_decl.luau, installs dvui_dofile, calls global init() once, then marks lua_ready.
+  - src/native_renderer/lifecycle.zig loads luau/ui_features_decl.luau, installs dvui_dofile and a Zig-provided global require(), calls global init() once, then marks lua_ready.
   - Each frame in src/native_renderer/window.zig:
       - Drain retained events → Luau (drainLuaEvents() calls on_event(kind_int, id, payload_bytes)) before Luau update().
       - Call Luau update(dt, input_table) (if present).
@@ -8,19 +8,16 @@
 
   Luau “Declarative UI” Rendering Model
 
-  - scripts/ui_features_decl.luau is a tiny entrypoint: module-cached require(), init() delegates to renderer.init(content), update() advances animation (animation.step(dt)), and on_event()
-    delegates to renderer.dispatch_event(kind, id, payload).
-  - scripts/ui_features_decl/renderer.luau:
-      - Maintains a monotonically increasing next_id and allocates u32 node IDs for all nodes (alloc_id()).
-      - Mounts a tree once (mount_root(component)), then uses a reactive graph (scripts/ui_features_decl/reactivity.luau) to push incremental updates to Zig via ui.*.
-      - Control-flow nodes:
-          - For: creates a hidden slot sentinel node; mounts keyed children; on each reactive recompute it re-inserts every child via ui.insert(...) to match order. (scripts/ui_features_decl/
-            renderer.luau:363-371)
-          - Show: creates a hidden slot sentinel; mounts/unmounts a single branch under it.
-      - All node mutations are expressed as retained operations:
-          - Structure: ui.create(tag, id, parent, before), ui.insert(id, parent, before), ui.remove(id)
-          - Properties: ui.set_class, ui.set_text, ui.set_visual, ui.set_transform, ui.set_scroll, ui.set_anchor, ui.set_image, ui.set_src
-          - Events: ui.listen_kind(id, ui.EventKind.<kind>) + handler table in Luau.
+  - luau/ui_features_decl.luau is a tiny entrypoint:
+      - Loads SolidLuau via require("solidluau") (modules embedded in Zig).
+      - Installs the compat adapter: SolidLuau.ui.adapters.compat_ui(ui).
+      - init(): SolidLuau.ui.init(App)
+      - update(dt): SolidLuau.animation.step(dt)
+      - on_event(kind,id,payload): SolidLuau.ui.dispatch_event(kind,id,payload)
+  - SolidLuau is responsible for:
+      - Reactive graph + scheduling (core/reactivity/*)
+      - DSL (ui/dsl) and renderer (ui/renderer) that issues ui.* mutations
+      - Control-flow nodes (For, Show) and event handler wiring via ui.listen_kind + dispatch_event
 
   Zig Binding Layer (Luau ui.* → retained.NodeStore)
 
@@ -103,5 +100,5 @@ Here’s the same guidance with file references and no debug overlay suggestion:
 - Unify render‑space contract: document and enforce “all draw code consumes context‑space rects” in src/retained/render/internal/state.zig and update callers in src/retained/render/internal/renderers.zig and src/retained/render/cache.zig.
 - Reduce dual pipelines: consolidate text rendering so h1/p go through one path (either DVUI or direct) by refactoring src/retained/render/internal/renderers.zig and src/retained/render/direct.zig.
 - Tighten paint‑cache usage: limit painted_rect to cache/dirty logic only, and avoid using it for placement decisions in src/retained/render/cache.zig and src/retained/render/internal/renderers.zig.
-- Add a render regression: a small test scene covering scale + h1/p in a container, referenced in scripts/ui_features_decl/content.luau (or a dedicated sample scene file if you prefer).
+- Add a render regression: a small test scene covering scale + h1/p in a container, referenced in luau/app.luau (or a dedicated sample scene file if you prefer).
 - Write invariants: add a brief “text rendering invariants” section in ARCHITECTURE.md explaining layout rect vs context rect vs painted rect, and which modules may use each.
