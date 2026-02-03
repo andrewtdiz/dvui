@@ -28,13 +28,13 @@
             .lazy = true,
         },
         .wgpu_native_zig = .{
-            .path = "./deps/wgpu_native_zig",
+            .path = "../wgpu_native_zig",
         },
         .zig_yoga = .{
-            .path = "./deps/zig-yoga",
+            .path = "../zig-yoga",
         },
         .luaz = .{
-            .path = "./deps/luaz",
+            .path = "../luaz",
         },
         // for rendering tvg icons
         .svg2tvg = .{
