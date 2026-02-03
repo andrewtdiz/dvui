@@ -1,0 +1,16 @@
+{
+  "root": {
+    "tag": "div",
+    "class": "w-full h-full flex items-center justify-center bg-neutral-950",
+    "children": [
+      {
+        "cta": {
+          "tag": "button",
+          "key": "cta",
+          "class": "px-6 py-3 rounded-xl text-lg text-neutral-900 bg-amber-400 cursor-pointer",
+          "children": ["Hover Me"]
+        }
+      }
+    ]
+  }
+}
