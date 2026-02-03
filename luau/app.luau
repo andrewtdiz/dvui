@@ -8,6 +8,8 @@ local Tag = dsl.Tag
 
 local div = Tag.div
 local button = Tag.button
+local p = Tag.p
+local image = Tag.image
 
 local createSignal = reactivity.createSignal
 
@@ -22,9 +24,20 @@ local function App()
     div({
       class = "px-6 py-3 rounded-xl text-lg border-2 border-amber-600 bg-transparent text-white cursor-pointer flex flex-col gap-2",
     }){
-      button({ class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200" }){ "Item One" },
-      button({ class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200" }){ "Item Two" },
-      button({ class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200" }){ "Item Three" },
+      button({ class = "bg-neutral-700 hover:bg-neutral-800 hover:ml-2 ml-0 text-amber-200" }){ "Hover me" },
+      image({
+        class = "w-40 h-40 rounded-xl border-2 border-amber-600 bg-neutral-900",
+        scale = scale,
+        props = {
+          src = "assets/sprite.png",
+        },
+        onMouseEnter = function()
+          set_scale_target(1.15)
+        end,
+        onMouseLeave = function()
+          set_scale_target(1)
+        end,
+      })(),
     },
   }
 end

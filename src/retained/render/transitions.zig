@@ -139,9 +139,6 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
     if (hasAnyActiveAnimation(node, cfg)) {
         node.invalidatePaint();
     }
-    if (hasAnyActiveSpacingAnimation(node, cfg)) {
-        node.invalidateLayout();
-    }
 
     updatePrevTargets(node, class_spec);
 }

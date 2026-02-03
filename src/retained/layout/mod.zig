@@ -11,21 +11,25 @@ const use_yoga_layout = false;
 var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
 var layout_updated: bool = false;
+var layout_force_recompute: bool = false;
 
 pub fn init() void {
     last_screen_size = .{};
     last_natural_scale = 0;
     layout_updated = false;
+    layout_force_recompute = false;
 }
 
 pub fn deinit() void {
     last_screen_size = .{};
     last_natural_scale = 0;
     layout_updated = false;
+    layout_force_recompute = false;
 }
 
 pub fn updateLayouts(store: *types.NodeStore) void {
     layout_updated = false;
+    layout_force_recompute = false;
     const win = dvui.currentWindow();
     const screen_w = win.rect_pixels.w;
     const screen_h = win.rect_pixels.h;
@@ -52,16 +56,18 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     const tree_dirty = root.hasDirtySubtree();
     const layout_dirty = root.needsLayoutUpdate();
+    const has_layout_animation = hasActiveLayoutAnimations(store, root);
 
     if (!size_changed and !scale_changed and !layout_dirty) {
-        if (tree_dirty) return;
+        if (tree_dirty and !has_layout_animation) return;
         const missing_layout = hasMissingLayout(store, root);
-        const has_layout_animation = hasActiveLayoutAnimations(store, root);
         if (!missing_layout and !has_layout_animation) return;
     }
 
     layout_updated = true;
+    layout_force_recompute = has_layout_animation;
     updateLayoutIfDirty(store, root, root_rect);
+    layout_force_recompute = false;
 }
 
 pub fn didUpdateLayouts() bool {
@@ -87,7 +93,7 @@ fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_r
         return;
     }
 
-    if (!node.needsLayoutUpdate()) {
+    if (!layout_force_recompute and !node.needsLayoutUpdate()) {
         const layout_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
         for (node.children.items) |child_id| {
             if (store.node(child_id)) |child| {
