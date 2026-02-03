@@ -16,8 +16,7 @@ local function create(): Types.UINode
 
   local node_root = {
     tag = "div",
-    key = "root",
-    class = "w-full h-full flex items-center justify-center bg-neutral-950",
+    class = "w-full h-full bg-slate-950 text-slate-100 flex items-center justify-center",
     children = {
       node_cta,
     },

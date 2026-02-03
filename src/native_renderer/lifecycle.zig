@@ -564,7 +564,7 @@ pub fn deinitRenderer(renderer: *Renderer) void {
     const had_window = renderer.window != null;
     @import("window.zig").teardownWindow(renderer);
     if (!had_window) {
-        retained.deinit(null);
+        retained.deinit();
     }
     renderer.headers.deinit(renderer.allocator);
     renderer.payload.deinit(renderer.allocator);

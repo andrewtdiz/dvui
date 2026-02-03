@@ -768,21 +768,30 @@ pub const Cache = struct {
             }
 
             const gi: GlyphInfo = if (impl == .FreeType) blk: {
-                FreeType.intToError(c.FT_Load_Char(self.face, codepoint, @as(i32, @bitCast(FreeType.LoadFlags{ .render = false })))) catch |err| {
+                FreeType.intToError(c.FT_Load_Char(self.face, codepoint, @as(i32, @bitCast(FreeType.LoadFlags{ .render = true })))) catch |err| {
                     dvui.log.warn("glyphInfoGet freetype error {any} font {s} codepoint {d}\n", .{ err, self.name, codepoint });
                     return Error.FontError;
                 };
 
-                const m = self.face.*.glyph.*.metrics;
-                const minx = @as(f32, @floatFromInt(m.horiBearingX)) / 64.0;
-                const miny = self.ascent - @as(f32, @floatFromInt(m.horiBearingY)) / 64.0;
+                if (self.face.*.glyph.*.format != c.FT_GLYPH_FORMAT_BITMAP) {
+                    FreeType.intToError(c.FT_Render_Glyph(self.face.*.glyph, c.FT_RENDER_MODE_NORMAL)) catch |err| {
+                        dvui.log.warn("glyphInfoGet freetype error {any} font {s} codepoint {d}\n", .{ err, self.name, codepoint });
+                        return Error.FontError;
+                    };
+                }
+
+                const slot = self.face.*.glyph.*;
+                const m = slot.metrics;
+                const bitmap = slot.bitmap;
+                const bitmap_left: f32 = @floatFromInt(slot.bitmap_left);
+                const bitmap_top: f32 = @floatFromInt(slot.bitmap_top);
 
                 break :blk .{
                     .advance = @ceil(@as(f32, @floatFromInt(m.horiAdvance)) / 64.0),
-                    .leftBearing = @floor(minx),
-                    .topBearing = @floor(miny),
-                    .w = @ceil(minx + @as(f32, @floatFromInt(m.width)) / 64.0) - @floor(minx),
-                    .h = @ceil(miny + @as(f32, @floatFromInt(m.height)) / 64.0) - @floor(miny),
+                    .leftBearing = bitmap_left,
+                    .topBearing = self.ascent - bitmap_top,
+                    .w = @floatFromInt(bitmap.width),
+                    .h = @floatFromInt(bitmap.rows),
                     .uv = .{ 0, 0 },
                 };
             } else blk: {

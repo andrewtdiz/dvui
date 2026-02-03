@@ -85,7 +85,7 @@ pub fn ensureWindow(renderer: *Renderer) !void {
 
 pub fn teardownWindow(renderer: *Renderer) void {
     if (renderer.window) |*win| {
-        retained.deinit(win.backend);
+        retained.deinit();
         win.deinit();
         renderer.window = null;
     }

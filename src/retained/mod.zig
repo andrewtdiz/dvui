@@ -25,8 +25,8 @@ pub fn init() void {
     render_mod.init();
 }
 
-pub fn deinit(backend: ?dvui.Backend) void {
-    render_mod.deinit(backend);
+pub fn deinit() void {
+    render_mod.deinit();
     layout.deinit();
     tailwind.deinit();
 }

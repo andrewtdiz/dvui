@@ -39,13 +39,12 @@ pub const RenderRuntime = struct {
         self.* = .{};
     }
 
-    pub fn reset(self: *RenderRuntime, backend: ?dvui.Backend) void {
-        self.deinit(backend);
+    pub fn reset(self: *RenderRuntime) void {
+        self.deinit();
         self.* = .{};
     }
 
-    pub fn deinit(self: *RenderRuntime, backend: ?dvui.Backend) void {
-        _ = backend;
+    pub fn deinit(self: *RenderRuntime) void {
         if (self.portal_cache_allocator) |alloc| {
             self.cached_portal_ids.deinit(alloc);
         }
