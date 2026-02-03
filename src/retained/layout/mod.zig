@@ -62,7 +62,6 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     layout_updated = true;
     updateLayoutIfDirty(store, root, root_rect);
-    applyAnchoredPlacement(store, root, root_rect);
 }
 
 pub fn didUpdateLayouts() bool {
@@ -89,28 +88,7 @@ fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_r
     }
 
     if (!node.needsLayoutUpdate()) {
-        const base_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
-        var layout_rect = base_rect;
-        if (node.scroll.isEnabled()) {
-            const allow_x = node.scroll.allowX();
-            const allow_y = node.scroll.allowY();
-            if (allow_x) {
-                var content_w = base_rect.w;
-                if (node.scroll.canvas_width > 0) {
-                    content_w = @max(content_w, node.scroll.canvas_width);
-                }
-                layout_rect.w = content_w;
-                layout_rect.x -= node.scroll.offset_x;
-            }
-            if (allow_y) {
-                var content_h = base_rect.h;
-                if (node.scroll.canvas_height > 0) {
-                    content_h = @max(content_h, node.scroll.canvas_height);
-                }
-                layout_rect.h = content_h;
-                layout_rect.y -= node.scroll.offset_y;
-            }
-        }
+        const layout_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
         for (node.children.items) |child_id| {
             if (store.node(child_id)) |child| {
                 updateLayoutIfDirty(store, child, layout_rect);
@@ -132,10 +110,6 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     const prev_scale = node.layout.layout_scale;
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
-    const class_scroll_enabled = spec.scroll_x or spec.scroll_y;
-    node.scroll.class_enabled = class_scroll_enabled;
-    node.scroll.class_x = spec.scroll_x;
-    node.scroll.class_y = spec.scroll_y;
     const base_scale = dvui.windowNaturalScale();
     var parent_scale = base_scale;
     if (node.parent) |pid| {
@@ -315,28 +289,7 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         }
     }
 
-    var layout_rect = child_rect;
-    const scroll_enabled = node.scroll.isEnabled();
-    if (scroll_enabled) {
-        const allow_x = node.scroll.allowX();
-        const allow_y = node.scroll.allowY();
-        if (allow_x) {
-            var content_w = child_rect.w;
-            if (node.scroll.canvas_width > 0) {
-                content_w = @max(content_w, node.scroll.canvas_width);
-            }
-            layout_rect.w = content_w;
-            layout_rect.x -= node.scroll.offset_x;
-        }
-        if (allow_y) {
-            var content_h = child_rect.h;
-            if (node.scroll.canvas_height > 0) {
-                content_h = @max(content_h, node.scroll.canvas_height);
-            }
-            layout_rect.h = content_h;
-            layout_rect.y -= node.scroll.offset_y;
-        }
-    }
+    const layout_rect = child_rect;
 
     if (spec.is_flex) {
         if (use_yoga_layout) {
@@ -351,10 +304,6 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
                 updateLayoutIfDirty(store, child, layout_rect);
             }
         }
-    }
-
-    if (scroll_enabled) {
-        updateScrollContentSize(store, node, child_rect);
     }
 }
 

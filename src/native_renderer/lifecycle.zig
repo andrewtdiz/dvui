@@ -23,7 +23,7 @@ var require_cache_key: u8 = 0;
 pub fn logMessage(renderer: *Renderer, level: u8, comptime fmt: []const u8, args: anytype) void {
     if (renderer.pending_destroy or renderer.destroy_started) return;
     if (renderer.log_cb) |log_fn| {
-        var buffer: [160]u8 = undefined;
+        var buffer: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buffer, fmt, args) catch return;
         const msg_ptr: [*]const u8 = @ptrCast(msg.ptr);
         renderer.callback_depth += 1;
@@ -626,6 +626,7 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .pending_destroy = false,
         .destroy_started = false,
         .frame_count = 0,
+        .profiler = .{},
         .retained_store_ready = false,
         .retained_store_ptr = null,
         .retained_event_ring_ptr = null,

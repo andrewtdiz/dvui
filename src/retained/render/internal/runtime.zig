@@ -4,6 +4,18 @@ const dvui = @import("dvui");
 const types = @import("../../core/types.zig");
 const state = @import("state.zig");
 
+pub const FrameTimings = struct {
+    layout_ns: i128 = 0,
+    hover_ns: i128 = 0,
+    hit_test_ns: i128 = 0,
+    render_ns: i128 = 0,
+    focus_ns: i128 = 0,
+    draw_bg_ns: i128 = 0,
+    draw_text_ns: i128 = 0,
+    draw_image_ns: i128 = 0,
+    draw_icon_ns: i128 = 0,
+};
+
 pub const RenderRuntime = struct {
     gizmo_override_rect: ?types.GizmoRect = null,
     gizmo_rect_pending: ?types.GizmoRect = null,
@@ -34,6 +46,7 @@ pub const RenderRuntime = struct {
     overlay_cache_version: u64 = 0,
 
     pressed_node_id: u32 = 0,
+    timings: ?*FrameTimings = null,
 
     pub fn init(self: *RenderRuntime) void {
         self.* = .{};

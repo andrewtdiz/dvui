@@ -88,7 +88,7 @@ pub fn initWindows(hwnd: *anyopaque, hinstance: *anyopaque, width: u32, height: 
     const queue = device.getQueue().?;
 
     const format = pickSurfaceFormat(&caps);
-    const present_mode = if (caps.present_mode_count > 0) caps.present_modes[0] else wgpu.PresentMode.mailbox;
+    const present_mode = pickPresentMode(&caps);
     const alpha_mode = if (caps.alpha_mode_count > 0) caps.alpha_modes[0] else wgpu.CompositeAlphaMode.auto;
     surface.configure(&wgpu.SurfaceConfiguration{
         .device = device,
@@ -174,7 +174,7 @@ pub fn initMacos(layer: *anyopaque, width: u32, height: u32) !Resources {
     const queue = device.getQueue().?;
 
     const format = pickSurfaceFormat(&caps);
-    const present_mode = if (caps.present_mode_count > 0) caps.present_modes[0] else wgpu.PresentMode.mailbox;
+    const present_mode = pickPresentMode(&caps);
     const alpha_mode = if (caps.alpha_mode_count > 0) caps.alpha_modes[0] else wgpu.CompositeAlphaMode.auto;
     surface.configure(&wgpu.SurfaceConfiguration{
         .device = device,
@@ -213,6 +213,15 @@ fn pickSurfaceFormat(caps: *const wgpu.SurfaceCapabilities) wgpu.TextureFormat {
     }
     if (caps.format_count > 0) return caps.formats[0];
     return wgpu.TextureFormat.bgra8_unorm_srgb;
+}
+
+fn pickPresentMode(caps: *const wgpu.SurfaceCapabilities) wgpu.PresentMode {
+    var i: usize = 0;
+    while (i < caps.present_mode_count) : (i += 1) {
+        if (caps.present_modes[i] == .fifo) return .fifo;
+    }
+    if (caps.present_mode_count > 0) return caps.present_modes[0];
+    return .fifo;
 }
 
 pub fn deinit(self: *Resources) void {

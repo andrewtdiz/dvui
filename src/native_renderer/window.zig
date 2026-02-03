@@ -15,6 +15,7 @@ const logMessage = lifecycle.logMessage;
 const types = @import("types.zig");
 const utils = @import("utils.zig");
 const Renderer = types.Renderer;
+const profiling = @import("profiling.zig");
 
 // ============================================================
 // Window Initialization
@@ -199,6 +200,7 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
 pub fn renderFrame(renderer: *Renderer) void {
     if (!renderer.window_ready) return;
 
+    const frame_start_ns = profiling.mark();
     ray.pollInputEvents();
 
     if (ray.windowShouldClose()) {
@@ -219,9 +221,11 @@ pub fn renderFrame(renderer: *Renderer) void {
         };
         defer {
             if (renderer.webgpu) |*wgpu_renderer| {
+                const present_start_ns = profiling.mark();
                 wgpu_renderer.render() catch |err| {
                     logMessage(renderer, 3, "webgpu render failed: {s}", .{@errorName(err)});
                 };
+                profiling.addPresent(&renderer.profiler, present_start_ns);
             }
         }
         defer {
@@ -231,6 +235,7 @@ pub fn renderFrame(renderer: *Renderer) void {
         }
 
         if (renderer.backend) |*backend| {
+            const input_start_ns = profiling.mark();
             backend.addAllEvents(win) catch |err| {
                 logMessage(renderer, 2, "event pump failed: {s}", .{@errorName(err)});
             };
@@ -239,6 +244,7 @@ pub fn renderFrame(renderer: *Renderer) void {
             } else {
                 raygui.unlock();
             }
+            profiling.addInput(&renderer.profiler, input_start_ns);
         }
 
         var picture_opt: ?dvui.Picture = null;
@@ -256,7 +262,9 @@ pub fn renderFrame(renderer: *Renderer) void {
         if (renderer.lua_ready) {
             if (renderer.lua_state) |lua_state| {
                 if (retained_event_ring_ptr) |ring| {
+                    const lua_events_start_ns = profiling.mark();
                     drainLuaEvents(renderer, lua_state, ring);
+                    profiling.addLuaEvents(&renderer.profiler, lua_events_start_ns);
                 }
             }
         }
@@ -264,6 +272,7 @@ pub fn renderFrame(renderer: *Renderer) void {
         if (renderer.lua_ready) {
             if (renderer.lua_state) |lua_state| {
                 if (lifecycle.isLuaFuncPresent(lua_state, "update")) {
+                    const lua_update_start_ns = profiling.mark();
                     const globals = lua_state.globals();
                     const dt = dvui.secondsSinceLastFrame();
                     const window_rect = dvui.windowRect();
@@ -331,14 +340,20 @@ pub fn renderFrame(renderer: *Renderer) void {
                             return;
                         },
                     }
+                    profiling.addLuaUpdate(&renderer.profiler, lua_update_start_ns);
                 }
             }
         }
 
         const retained_store = utils.retainedStore(renderer);
-        const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true);
+        var retained_timings: retained.FrameTimings = .{};
+        const retained_start_ns = profiling.mark();
+        const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true, &retained_timings);
+        profiling.addRetained(&renderer.profiler, retained_start_ns, retained_timings);
         if (!drew_retained) {
+            const commands_start_ns = profiling.mark();
             commands.renderCommandsDvui(renderer, win);
+            profiling.addCommands(&renderer.profiler, commands_start_ns);
         }
 
         if (picture_opt) |*picture| {
@@ -358,6 +373,7 @@ pub fn renderFrame(renderer: *Renderer) void {
     }
 
     renderer.frame_count +%= 1;
+    profiling.endFrame(&renderer.profiler, logMessage, renderer, frame_start_ns);
     if (types.frame_event_interval == 0 or renderer.frame_count % types.frame_event_interval == 0) {
         lifecycle.sendFrameEvent(renderer);
     }

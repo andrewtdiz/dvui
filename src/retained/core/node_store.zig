@@ -622,6 +622,7 @@ pub const NodeStore = struct {
         if (self.nodes.getPtr(id)) |found_node| {
             const tag = found_node.tag;
             if (!std.mem.eql(u8, tag, "input") and !std.mem.eql(u8, tag, "slider")) return;
+            if (std.mem.eql(u8, found_node.currentInputValue(), value)) return;
             try found_node.setInputValue(self.allocator, value);
             self.markNodeChanged(id);
         }
@@ -630,6 +631,7 @@ pub const NodeStore = struct {
     pub fn setTextNode(self: *NodeStore, id: u32, content: []const u8) !void {
         if (self.nodes.getPtr(id)) |_node| {
             if (_node.kind == .text) {
+                if (std.mem.eql(u8, _node.text, content)) return;
                 try _node.setText(self.allocator, content);
                 self.markNodeChanged(id);
                 return;
@@ -683,6 +685,7 @@ pub const NodeStore = struct {
 
     pub fn setClassName(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
+        if (std.mem.eql(u8, target.class_name, value)) return;
         try target.setClassName(self.allocator, value);
         self.markNodeChanged(id);
     }
@@ -696,24 +699,31 @@ pub const NodeStore = struct {
 
     pub fn setImageSource(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
+        if (std.mem.eql(u8, target.image_src, value)) return;
         try target.setImageSource(self.allocator, value);
         self.markNodeChanged(id);
     }
 
     pub fn setImageTint(self: *NodeStore, id: u32, value: u32) !void {
         const target = self.nodes.getPtr(id) orelse return;
+        if (target.image_tint) |current| {
+            if (current.value == value) return;
+        }
         target.setImageTint(value);
         self.markNodePaintChanged(id);
     }
 
     pub fn setImageOpacity(self: *NodeStore, id: u32, value: f32) !void {
         const target = self.nodes.getPtr(id) orelse return;
-        target.setImageOpacity(value);
+        const clamped: f32 = if (value < 0.0) 0.0 else if (value > 1.0) 1.0 else value;
+        if (target.image_opacity == clamped) return;
+        target.setImageOpacity(clamped);
         self.markNodePaintChanged(id);
     }
 
     pub fn setIconGlyph(self: *NodeStore, id: u32, value: []const u8) !void {
         const target = self.nodes.getPtr(id) orelse return;
+        if (std.mem.eql(u8, target.icon_glyph, value)) return;
         try target.setIconGlyph(self.allocator, value);
         self.markNodeChanged(id);
     }

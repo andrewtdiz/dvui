@@ -231,6 +231,7 @@ pub const Cache = struct {
     database: std.AutoHashMapUnmanaged(FontId, TTFEntry) = .empty,
     msdf_fonts: std.AutoHashMapUnmanaged(FontId, MsdfFontResource) = .empty,
     cache: dvui.TrackingAutoHashMap(u64, Entry, .get_and_put) = .empty,
+    frame_index: u64 = 0,
 
     pub const TTFEntry = struct {
         bytes: []const u8,
@@ -371,9 +372,37 @@ pub const Cache = struct {
     }
 
     pub fn reset(self: *Cache, gpa: std.mem.Allocator, backend: Backend) void {
-        var it = self.cache.iterator();
-        while (it.next_resetting()) |kv| {
-            var fce = kv.value;
+        self.frame_index +%= 1;
+
+        const max_unused_frames: u64 = 600;
+        {
+            self.cache.map.lockPointers();
+            defer self.cache.map.unlockPointers();
+            var it = self.cache.map.iterator();
+            while (it.next()) |kv| {
+                const last_used = kv.value_ptr.inner.last_used_frame;
+                if (self.frame_index -% last_used <= max_unused_frames) continue;
+                var fce = kv.value_ptr.inner;
+                fce.deinit(gpa, backend);
+                self.cache.map.removeByPtr(kv.key_ptr);
+            }
+        }
+
+        const max_entries: usize = 128;
+        while (self.cache.count() > max_entries) {
+            var oldest_key: ?u64 = null;
+            var oldest_frame: u64 = std.math.maxInt(u64);
+            var it = self.cache.map.iterator();
+            while (it.next()) |kv| {
+                const last_used = kv.value_ptr.inner.last_used_frame;
+                if (last_used < oldest_frame) {
+                    oldest_frame = last_used;
+                    oldest_key = kv.key_ptr.*;
+                }
+            }
+            const key = oldest_key orelse break;
+            const removed = self.cache.map.fetchRemove(key) orelse break;
+            var fce = removed.value.inner;
             fce.deinit(gpa, backend);
         }
     }
@@ -397,13 +426,17 @@ pub const Cache = struct {
 
     pub fn getOrCreate(self: *Cache, gpa: std.mem.Allocator, font: Font) std.mem.Allocator.Error!*Entry {
         const entry = try self.cache.getOrPut(gpa, self.cacheKey(font));
-        if (entry.found_existing) return entry.value_ptr;
+        if (entry.found_existing) {
+            entry.value_ptr.last_used_frame = self.frame_index;
+            return entry.value_ptr;
+        }
 
         if (self.msdf_fonts.getPtr(font.id)) |msdf_res| {
             entry.value_ptr.* = Entry.initMsdf(msdf_res) catch {
                 self.cache.map.removeByPtr(entry.key_ptr);
                 return self.getOrCreate(gpa, font.switchFont(Font.default_font_id));
             };
+            entry.value_ptr.last_used_frame = self.frame_index;
             return entry.value_ptr;
         }
 
@@ -423,11 +456,13 @@ pub const Cache = struct {
             self.cache.map.removeByPtr(entry.key_ptr);
             return self.getOrCreate(gpa, font.switchFont(Font.default_font_id));
         };
+        entry.value_ptr.last_used_frame = self.frame_index;
         //log.debug("- size {d} ascent {d} height {d}", .{ font.size, entry.ascent, entry.height });
         return entry.value_ptr;
     }
 
     pub const Entry = struct {
+        last_used_frame: u64 = 0,
         kind: EntryKind,
         face: if (impl == .FreeType) c.FT_Face else c.stbtt_fontinfo,
         // This name should come from `Font.Cache.database` and lives as long as it does

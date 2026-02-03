@@ -16,6 +16,7 @@ pub const events = events_mod;
 pub const EventRing = events_mod.EventRing;
 pub const EventKind = events_mod.EventKind;
 pub const EventEntry = events_mod.EventEntry;
+pub const FrameTimings = render_mod.FrameTimings;
 const layout = @import("layout/mod.zig");
 const render_mod = @import("render/mod.zig");
 
@@ -38,8 +39,8 @@ pub const PickResult = struct {
     rect: types.Rect = .{},
 };
 
-pub fn render(event_ring: ?*EventRing, store: *types.NodeStore, input_enabled: bool) bool {
-    return render_mod.render(event_ring, store, input_enabled);
+pub fn render(event_ring: ?*EventRing, store: *types.NodeStore, input_enabled: bool, timings: ?*FrameTimings) bool {
+    return render_mod.render(event_ring, store, input_enabled, timings);
 }
 
 pub fn updateLayouts(store: *types.NodeStore) void {

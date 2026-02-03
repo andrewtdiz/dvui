@@ -56,6 +56,23 @@ fn rectUnion(a: types.Rect, b: types.Rect) types.Rect {
     return .{ .x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1 };
 }
 
+fn packedFromDvui(color: dvui.Color) types.PackedColor {
+    const value: u32 = (@as(u32, color.r) << 24) | (@as(u32, color.g) << 16) | (@as(u32, color.b) << 8) | @as(u32, color.a);
+    return .{ .value = value };
+}
+
+fn resolvedBorderColor(spec: *const tailwind.Spec) types.PackedColor {
+    const base = spec.border_color orelse (dvui.Options{}).color(.border);
+    return packedFromDvui(base);
+}
+
+fn effectiveBorderColor(node: *const types.SolidNode, spec: *const tailwind.Spec) types.PackedColor {
+    if (node.transition_state.enabled and node.transition_state.prev_initialized) {
+        return transitions.effectiveBorderColor(node);
+    }
+    return resolvedBorderColor(spec);
+}
+
 fn applyContextToVertexPos(ctx: state.RenderContext, pos: dvui.Point.Physical) dvui.Point.Physical {
     return .{
         .x = ctx.scale[0] * pos.x + ctx.offset[0],
@@ -120,7 +137,7 @@ pub fn renderCachedOrDirectBackground(
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
-    const border_color_packed = transitions.effectiveBorderColor(node);
+    const border_color_packed = effectiveBorderColor(node, &spec);
 
     const corner_radius = spec.corner_radius orelse visual_eff.corner_radius;
     const has_rounding = corner_radius != 0;
@@ -250,7 +267,7 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
-    const border_color_packed = transitions.effectiveBorderColor(node);
+    const border_color_packed = effectiveBorderColor(node, &spec);
     const version = @max(node.version, node.layout.version);
 
     if (!shouldCachePaint(node, spec) or rect == null) {

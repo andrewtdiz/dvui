@@ -20,7 +20,6 @@ pub fn scan(
     order: *u32,
     opts: HitTestOptions,
 ) void {
-    if (opts.skip_portals and state.isPortalNode(node)) return;
     if (ctx.clip) |clip| {
         if (!state.rectContains(clip, point)) return;
     }
@@ -44,8 +43,7 @@ pub fn scan(
                 }
 
                 const clip_children = spec.clip_children orelse node.visual_props.clip_children;
-                const scroll_enabled = node.scroll.enabled or spec.scroll_x or spec.scroll_y;
-                if (clip_children or scroll_enabled) {
+                if (clip_children) {
                     if (next_ctx.clip) |clip| {
                         next_ctx.clip = state.intersectRect(clip, rect);
                     } else {

@@ -184,10 +184,10 @@ pub fn renderText(opts: TextOptions) Backend.GenericError!void {
 
     const col: Color.PMA = if (is_msdf) Color.PMA.white else .fromColor(opts.color.opacity(cw.alpha));
 
-    const x_start: f32 = if (cw.snap_to_pixels) @round(opts.rs.r.x) else opts.rs.r.x;
+    const x_start: f32 = if (cw.snap_to_pixels and !is_msdf) @round(opts.rs.r.x) else opts.rs.r.x;
     var x = x_start;
     var max_x = x_start;
-    const y: f32 = if (cw.snap_to_pixels) @round(opts.rs.r.y) else opts.rs.r.y;
+    const y: f32 = if (cw.snap_to_pixels and !is_msdf) @round(opts.rs.r.y) else opts.rs.r.y;
 
     if (opts.debug) {
         dvui.log.debug("renderText x {d} y {d}\n", .{ x, y });

@@ -6,12 +6,9 @@ export type Patches = { [Key]: Types.NodePatch }
 
 local function create(): Types.UINode
   local node_cta = {
-    tag = "button",
+    tag = "div",
     key = "cta",
-    class = "px-6 py-3 rounded-xl text-lg text-neutral-900 bg-amber-400 cursor-pointer",
-    children = {
-      "Hover Me",
-    },
+    "class": "h-64 w-64 rounded-xl text-lg hover:scale[1.3] text-neutral-700 bg-amber-400 cursor-pointer",
   }
 
   local node_root = {

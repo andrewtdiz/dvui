@@ -12,7 +12,6 @@ const transitions = @import("../transitions.zig");
 const image_loader = @import("../image_loader.zig");
 const icon_registry = @import("../icon_registry.zig");
 const paint_cache = @import("../cache.zig");
-const drag_drop = @import("../../events/drag_drop.zig");
 const focus = @import("../../events/focus.zig");
 
 const interaction = @import("interaction.zig");
@@ -36,8 +35,6 @@ const renderCachedOrDirectBackground = paint_cache.renderCachedOrDirectBackgroun
 
 const nodeIdExtra = state.nodeIdExtra;
 const physicalToDvuiRect = state.physicalToDvuiRect;
-const scrollContentId = state.scrollContentId;
-const isPortalNode = state.isPortalNode;
 const sortOrderedNodes = state.sortOrderedNodes;
 const OrderedNode = state.OrderedNode;
 const RenderContext = state.RenderContext;
@@ -52,8 +49,6 @@ const applyAccessibilityState = visual_sync.applyAccessibilityState;
 
 const clickedExTopmost = interaction.clickedExTopmost;
 const clickedTopmost = interaction.clickedTopmost;
-const handleScrollInput = interaction.handleScrollInput;
-const renderScrollBars = interaction.renderScrollBars;
 
 const log = std.log.scoped(.retained);
 
@@ -209,9 +204,6 @@ pub fn renderNode(
             }
         }
     }
-    if (runtime.render_layer == .base and isPortalNode(node)) {
-        return;
-    }
     switch (node.kind) {
         .root => {
             const child_ctx = ctxForChildren(ctx, node, false);
@@ -223,7 +215,7 @@ pub fn renderNode(
             renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
             node.markRendered();
         },
-        .text => renderText(store, node, ctx),
+        .text => renderText(runtime, store, node, ctx),
         .element => renderElement(runtime, event_ring, store, node_id, node, allocator, tracker, ctx),
     }
 }
@@ -276,10 +268,6 @@ fn renderElementBody(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    if (node.scroll.isEnabled()) {
-        renderScrollFrame(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
-        return;
-    }
     if (std.mem.eql(u8, node.tag, "div")) {
         renderContainer(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
@@ -341,110 +329,6 @@ fn renderElementBody(
         return;
     }
     renderGeneric(runtime, event_ring, store, node, allocator, tracker, ctx);
-    node.markRendered();
-}
-
-fn renderScrollFrame(
-    runtime: *RenderRuntime,
-    event_ring: ?*events.EventRing,
-    store: *types.NodeStore,
-    node_id: u32,
-    node: *types.SolidNode,
-    allocator: std.mem.Allocator,
-    class_spec: tailwind.ClassSpec,
-    tracker: *DirtyRegionTracker,
-    ctx: RenderContext,
-) void {
-    _ = node_id;
-    var rect_opt = node.layout.rect;
-    if (rect_opt == null) {
-        const parent_rect = blk: {
-            if (node.parent) |pid| {
-                if (store.node(pid)) |parent| {
-                    if (parent.layout.rect) |pr| break :blk pr;
-                }
-            }
-            const win = dvui.currentWindow();
-            break :blk types.Rect{
-                .x = 0,
-                .y = 0,
-                .w = win.rect_pixels.w,
-                .h = win.rect_pixels.h,
-            };
-        };
-        layout.computeNodeLayout(store, node, parent_rect);
-        rect_opt = node.layout.rect;
-    }
-    const rect = rect_opt orelse return;
-    const base_rect = nodeBoundsInContext(ctx, node, rect);
-    node.visual.clip_children = true;
-
-    if (class_spec.background) |bg| {
-        if (node.visual.background == null) {
-            node.visual.background = dvuiColorToPacked(bg);
-        }
-    }
-    renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
-
-    const t = transitions.effectiveTransform(node);
-    const scale_x = @abs(ctx.scale[0] * t.scale[0]);
-    const scale_y = @abs(ctx.scale[1] * t.scale[1]);
-    const inv_scale_x: f32 = if (scale_x != 0) 1.0 / scale_x else 1.0;
-    const inv_scale_y: f32 = if (scale_y != 0) 1.0 / scale_y else 1.0;
-    const content_w = (if (node.scroll.content_width > 0) node.scroll.content_width else rect.w) * scale_x;
-    const content_h = (if (node.scroll.content_height > 0) node.scroll.content_height else rect.h) * scale_y;
-
-    const allow_v = node.scroll.allowY();
-    const allow_h = node.scroll.allowX();
-    const virtual_w = if (allow_h) content_w else base_rect.w;
-    const virtual_h = if (allow_v) content_h else base_rect.h;
-    const offset_x = if (allow_h) node.scroll.offset_x * scale_x else 0;
-    const offset_y = if (allow_v) node.scroll.offset_y * scale_y else 0;
-
-    var scroll_info = dvui.ScrollInfo{
-        .vertical = if (allow_v and virtual_h > base_rect.h) .auto else .none,
-        .horizontal = if (allow_h and virtual_w > base_rect.w) .auto else .none,
-        .virtual_size = .{ .w = virtual_w, .h = virtual_h },
-        .viewport = .{ .x = offset_x, .y = offset_y, .w = base_rect.w, .h = base_rect.h },
-    };
-    scroll_info.scrollToOffset(.vertical, scroll_info.viewport.y);
-    scroll_info.scrollToOffset(.horizontal, scroll_info.viewport.x);
-
-    const scroll_id = scrollContentId(node.id);
-    const hit_rect = nodeBoundsInContext(ctx, node, rect);
-    const prev_x = node.scroll.offset_x;
-    const prev_y = node.scroll.offset_y;
-
-    _ = handleScrollInput(runtime, node, hit_rect, &scroll_info, scroll_id);
-
-    const child_ctx = ctxForChildren(ctx, node, false);
-    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
-
-    _ = renderScrollBars(runtime, node, base_rect, &scroll_info, scroll_id, scale_x);
-
-    const x_changed = allow_h and scroll_info.viewport.x != prev_x * scale_x;
-    const y_changed = allow_v and scroll_info.viewport.y != prev_y * scale_y;
-    if (x_changed or y_changed) {
-        if (allow_h) node.scroll.offset_x = scroll_info.viewport.x * inv_scale_x;
-        if (allow_v) node.scroll.offset_y = scroll_info.viewport.y * inv_scale_y;
-        layout.invalidateLayoutSubtree(store, node);
-        store.markNodeChanged(node.id);
-
-        if (event_ring) |ring| {
-            if (node.hasListenerKind(.scroll)) {
-                const payload = events.ScrollPayload{
-                    .x = scroll_info.viewport.x,
-                    .y = scroll_info.viewport.y,
-                    .viewport_w = scroll_info.viewport.w,
-                    .viewport_h = scroll_info.viewport.h,
-                    .content_w = scroll_info.virtual_size.w,
-                    .content_h = scroll_info.virtual_size.h,
-                };
-                _ = ring.pushScroll(node.id, std.mem.asBytes(&payload));
-            }
-        }
-    }
-
     node.markRendered();
 }
 
@@ -513,7 +397,14 @@ fn renderContainerNormal(
 
     if (rect_layout_opt) |rect| {
         // Draw background ourselves so containers always show their fill.
+        var bg_start_ns: i128 = 0;
+        if (runtime.timings != null) {
+            bg_start_ns = std.time.nanoTimestamp();
+        }
         renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+        if (runtime.timings) |timings| {
+            timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+        }
     }
 
     const tab_info = focus.tabIndexForNode(store, node);
@@ -553,11 +444,34 @@ fn renderContainerNormal(
         focus.registerFocusable(store, node, box.data());
     }
 
+    if (runtime.input_enabled_state) {
+        if (node.hasListenerKind(.pointerdown) or node.hasListenerKind(.pointerup)) {
+            const rect = box.data().borderRectScale().r;
+            for (dvui.events()) |*event| {
+                if (!pointerEventAllowed(runtime, node.id, box.data().id, event)) continue;
+                if (!dvui.eventMatch(event, .{ .id = box.data().id, .r = rect })) continue;
+                switch (event.evt) {
+                    .mouse => |mouse| switch (mouse.action) {
+                        .press => {
+                            if (mouse.button.pointer() and node.hasListenerKind(.pointerdown)) {
+                                pushPointerEvent(event_ring, .pointerdown, node.id, mouse);
+                            }
+                        },
+                        .release => {
+                            if (mouse.button.pointer() and node.hasListenerKind(.pointerup)) {
+                                pushPointerEvent(event_ring, .pointerup, node.id, mouse);
+                            }
+                        },
+                        else => {},
+                    },
+                    else => {},
+                }
+            }
+        }
+    }
+
     const child_ctx = ctxForChildren(ctx, node, true);
     renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
-    if (runtime.input_enabled_state) {
-        drag_drop.handleDiv(event_ring, store, node, box.data());
-    }
     node.markRendered();
 }
 
@@ -658,7 +572,14 @@ fn renderNonInteractiveDirect(
     };
 
     if (std.mem.eql(u8, node.tag, "div")) {
+        var bg_start_ns: i128 = 0;
+        if (runtime.timings != null) {
+            bg_start_ns = std.time.nanoTimestamp();
+        }
         renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+        if (runtime.timings) |timings| {
+            timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+        }
         const child_ctx = ctxForChildren(ctx, node, false);
         renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
         node.markRendered();
@@ -714,7 +635,14 @@ fn renderTriangle(
         rect_opt = node.layout.rect;
     }
     const rect = rect_opt orelse return;
+    var bg_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        bg_start_ns = std.time.nanoTimestamp();
+    }
     drawTriangleDirect(rect, transitions.effectiveVisual(node), transitions.effectiveTransform(node), ctx.scale, ctx.offset, allocator, class_spec.background);
+    if (runtime.timings) |timings| {
+        timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+    }
     renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
@@ -735,7 +663,14 @@ fn renderParagraph(
         return;
     };
 
+    var bg_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        bg_start_ns = std.time.nanoTimestamp();
+    }
     renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+    if (runtime.timings) |timings| {
+        timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+    }
 
     var text_buffer: std.ArrayList(u8) = .empty;
     defer text_buffer.deinit(allocator);
@@ -779,6 +714,10 @@ fn renderParagraph(
     );
     const text_layout = node.layout.text_layout;
     const visual_eff = transitions.effectiveVisual(node);
+    var text_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        text_start_ns = std.time.nanoTimestamp();
+    }
     var line_index: usize = 0;
     while (line_index < text_layout.lines.items.len) : (line_index += 1) {
         const line = text_layout.lines.items[line_index];
@@ -800,6 +739,9 @@ fn renderParagraph(
             .h = text_layout.line_height,
         };
         drawTextDirect(line_rect, line_text, visual_eff, draw_font, font_scale);
+    }
+    if (runtime.timings) |timings| {
+        timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
     }
 
     renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
@@ -823,7 +765,7 @@ fn applyGizmoProp(runtime: *RenderRuntime, node: *types.SolidNode) void {
     }
 }
 
-fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContext) void {
+fn renderText(runtime: *RenderRuntime, store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContext) void {
     _ = derive.apply(node);
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
@@ -854,7 +796,14 @@ fn renderText(store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContex
         var lw = dvui.LabelWidget.initNoFmt(@src(), trimmed, .{}, options);
         lw.install();
         applyAccessibilityState(node, lw.data());
+        var text_start_ns: i128 = 0;
+        if (runtime.timings != null) {
+            text_start_ns = std.time.nanoTimestamp();
+        }
         lw.draw();
+        if (runtime.timings) |timings| {
+            timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
+        }
         lw.deinit();
     }
     node.markRendered();
@@ -967,7 +916,14 @@ fn renderButton(
         bw.hover = false;
         bw.click = clickedTopmost(runtime, bw.data(), node_id, .{ .hovered = &bw.hover });
     }
+    var bg_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        bg_start_ns = std.time.nanoTimestamp();
+    }
     bw.drawBackground();
+    if (runtime.timings) |timings| {
+        timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+    }
 
     // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
     // This fixes cases where button text doesn't appear until a later repaint.
@@ -986,6 +942,10 @@ fn renderButton(
 
     const prev_clip = dvui.clip(content_rs.r);
     defer dvui.clipSet(prev_clip);
+    var text_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        text_start_ns = std.time.nanoTimestamp();
+    }
     dvui.renderText(.{
         .font = font,
         .text = caption,
@@ -999,8 +959,18 @@ fn renderButton(
             log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
         }
     };
+    if (runtime.timings) |timings| {
+        timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
+    }
 
+    var focus_bg_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        focus_bg_start_ns = std.time.nanoTimestamp();
+    }
     bw.drawFocus();
+    if (runtime.timings) |timings| {
+        timings.draw_bg_ns += std.time.nanoTimestamp() - focus_bg_start_ns;
+    }
     const pressed = if (runtime.input_enabled_state) bw.clicked() else false;
     bw.deinit();
 
@@ -1095,19 +1065,40 @@ fn renderIcon(
             var iw = dvui.IconWidget.init(@src(), icon_name, tvg_bytes, .{}, options);
             iw.install();
             applyAccessibilityState(node, iw.data());
+            var icon_start_ns: i128 = 0;
+            if (runtime.timings != null) {
+                icon_start_ns = std.time.nanoTimestamp();
+            }
             iw.draw();
+            if (runtime.timings) |timings| {
+                timings.draw_icon_ns += std.time.nanoTimestamp() - icon_start_ns;
+            }
             iw.deinit();
         },
         .raster => |resource| {
             const image_source = image_loader.imageSource(resource);
+            var icon_start_ns: i128 = 0;
+            if (runtime.timings != null) {
+                icon_start_ns = std.time.nanoTimestamp();
+            }
             var wd = dvui.image(@src(), .{ .source = image_source }, options);
             applyAccessibilityState(node, &wd);
+            if (runtime.timings) |timings| {
+                timings.draw_icon_ns += std.time.nanoTimestamp() - icon_start_ns;
+            }
         },
         .glyph => |text| {
             var lw = dvui.LabelWidget.initNoFmt(@src(), text, .{}, options);
             lw.install();
             applyAccessibilityState(node, lw.data());
+            var text_start_ns: i128 = 0;
+            if (runtime.timings != null) {
+                text_start_ns = std.time.nanoTimestamp();
+            }
             lw.draw();
+            if (runtime.timings) |timings| {
+                timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
+            }
             lw.deinit();
         },
         .none, .failed => return,
@@ -1224,7 +1215,14 @@ fn renderImage(
 
     var render_background: ?dvui.Color = if (wd.options.backgroundGet()) wd.options.color(.fill) else null;
     if (wd.options.rotationGet() == 0.0) {
+        var bg_start_ns: i128 = 0;
+        if (runtime.timings != null) {
+            bg_start_ns = std.time.nanoTimestamp();
+        }
         wd.borderAndBackground(.{});
+        if (runtime.timings) |timings| {
+            timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
+        }
         render_background = null;
     } else {
         if (wd.options.borderGet().nonZero()) {
@@ -1240,9 +1238,16 @@ fn renderImage(
         .background_color = render_background,
     };
     const content_rs = wd.contentRectScale();
+    var image_start_ns: i128 = 0;
+    if (runtime.timings != null) {
+        image_start_ns = std.time.nanoTimestamp();
+    }
     dvui.renderImage(image_source, content_rs, render_tex_opts) catch |err| {
         log.err("Solid image render failed for node {d}: {s}", .{ node_id, @errorName(err) });
     };
+    if (runtime.timings) |timings| {
+        timings.draw_image_ns += std.time.nanoTimestamp() - image_start_ns;
+    }
     wd.minSizeSetAndRefresh();
     wd.minSizeReportToParent();
 

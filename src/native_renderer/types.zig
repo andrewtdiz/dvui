@@ -4,6 +4,7 @@ const RaylibBackend = @import("raylib-backend");
 const webgpu = @import("webgpu");
 const luaz = @import("luaz");
 const luau_ui = @import("luau_ui");
+const profiling = @import("profiling.zig");
 
 // ============================================================
 // Callback Types
@@ -56,6 +57,7 @@ pub const Renderer = struct {
     retained_store_ready: bool = false,
     retained_store_ptr: ?*anyopaque = null,
     frame_count: u64 = 0,
+    profiler: profiling.FrameProfiler = .{},
     // Event ring buffer for retained UI (Lua dispatch).
     retained_event_ring_ptr: ?*anyopaque = null,
     retained_event_ring_ready: bool = false,
