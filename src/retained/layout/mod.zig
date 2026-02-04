@@ -110,6 +110,16 @@ fn sideValue(value: ?f32) f32 {
     return value orelse 0;
 }
 
+fn insetOffset(value: ?tailwind.Inset, parent_axis_scaled: f32, scale: f32) f32 {
+    if (value) |inset| {
+        return switch (inset) {
+            .pixels => |px| px * scale,
+            .percent => |fraction| parent_axis_scaled * fraction,
+        };
+    }
+    return 0;
+}
+
 pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
     const prev_rect = node.layout.rect;
     const prev_child_rect = node.layout.child_rect;
@@ -149,10 +159,10 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
             .h = 0,
         };
 
-        const left_offset = sideValue(spec.left) * scale;
-        const right_offset = sideValue(spec.right) * scale;
-        const top_offset = sideValue(spec.top) * scale;
-        const bottom_offset = sideValue(spec.bottom) * scale;
+        const left_offset = insetOffset(spec.left, parent_w_scaled, scale);
+        const right_offset = insetOffset(spec.right, parent_w_scaled, scale);
+        const top_offset = insetOffset(spec.top, parent_h_scaled, scale);
+        const bottom_offset = insetOffset(spec.bottom, parent_h_scaled, scale);
 
         if (spec.width) |w| {
             switch (w) {

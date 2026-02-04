@@ -7,7 +7,6 @@ const tailwind = @import("style/tailwind.zig");
 pub const NodeStore = types.NodeStore;
 pub const SolidNode = types.SolidNode;
 pub const Rect = types.Rect;
-pub const GizmoRect = types.GizmoRect;
 pub const AnchorSide = types.AnchorSide;
 pub const AnchorAlign = types.AnchorAlign;
 pub const FontRenderMode = tailwind.FontRenderMode;
@@ -45,14 +44,6 @@ pub fn render(event_ring: ?*EventRing, store: *types.NodeStore, input_enabled: b
 
 pub fn updateLayouts(store: *types.NodeStore) void {
     layout.updateLayouts(store);
-}
-
-pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
-    render_mod.setGizmoRectOverride(rect);
-}
-
-pub fn takeGizmoRectUpdate() ?types.GizmoRect {
-    return render_mod.takeGizmoRectUpdate();
 }
 
 pub fn getNodeRect(store: *types.NodeStore, node_id: u32) ?types.Rect {

@@ -13,7 +13,7 @@ This module implements the fundamental data structures and state management for 
   - **Properties**: Visual styles, event listeners, and accessibility data.
 
 ### Geometry & Types
-- **`geometry.zig`**: Defines core geometric primitives like `Rect`, `Size`, `Transform`, and `GizmoRect`.
+- **`geometry.zig`**: Defines core geometric primitives like `Rect`, `Size`, `Transform`.
 - **`visual.zig`**: Defines styling primitives including `PackedColor`, `Gradient`, and `VisualProps`.
 - **`media.zig`**: Handles resources like icons (`IconKind`) and images (`CachedImage`).
 - **`layout.zig`**: Defines the caching structures (`LayoutCache`, `PaintCache`) used to store the results of layout and rendering passes.

@@ -20,7 +20,7 @@ pub fn measureTextCached(store: *types.NodeStore, node: *types.SolidNode) types.
     if (node.parent) |pid| {
         if (store.node(pid)) |parent| {
             var parent_spec = parent.prepareClassSpec();
-            style_apply.applyToOptions(&parent_spec, &options);
+            style_apply.applyToOptions(dvui.currentWindow(), &parent_spec, &options);
             style_apply.resolveFont(&parent_spec, &options);
         }
     }

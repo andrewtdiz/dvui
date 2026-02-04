@@ -17,8 +17,6 @@ pub const FrameTimings = struct {
 };
 
 pub const RenderRuntime = struct {
-    gizmo_override_rect: ?types.GizmoRect = null,
-    gizmo_rect_pending: ?types.GizmoRect = null,
     button_text_error_log_count: usize = 0,
     input_enabled_state: bool = true,
 

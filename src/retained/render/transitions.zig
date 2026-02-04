@@ -102,22 +102,22 @@ pub fn beginFrameForNode(node: *types.SolidNode, cfg: *const tailwind.Transition
     updateActiveFromAnimations(node);
 }
 
-pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
+pub fn updateNode(win: *dvui.Window, node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
     const cfg = &class_spec.transition;
     beginFrameForNode(node, cfg);
 
     if (!cfg.enabled) {
-        updatePrevTargets(node, class_spec);
+        updatePrevTargets(win, node, class_spec);
         return;
     }
 
     if (!node.transition_state.prev_initialized) {
-        updatePrevTargets(node, class_spec);
+        updatePrevTargets(win, node, class_spec);
     }
 
     if (cfg.duration_us <= 0 or (!cfg.props.layout and !cfg.props.transform and !cfg.props.colors and !cfg.props.opacity)) {
         clearOverrides(node);
-        updatePrevTargets(node, class_spec);
+        updatePrevTargets(win, node, class_spec);
         return;
     }
 
@@ -131,7 +131,7 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
     }
 
     if (cfg.props.opacity or cfg.props.colors) {
-        const target_border = resolvedBorderColor(class_spec);
+        const target_border = resolvedBorderColor(win, class_spec);
         scheduleOrUpdateVisualTweens(node, cfg, node.visual, target_border);
     }
 
@@ -140,10 +140,10 @@ pub fn updateNode(node: *types.SolidNode, class_spec: *const tailwind.Spec) void
         node.invalidatePaint();
     }
 
-    updatePrevTargets(node, class_spec);
+    updatePrevTargets(win, node, class_spec);
 }
 
-fn updatePrevTargets(node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
+fn updatePrevTargets(win: *dvui.Window, node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
     if (node.layout.rect) |rect| {
         node.transition_state.prev_layout_rect = rect;
     } else {
@@ -160,7 +160,7 @@ fn updatePrevTargets(node: *types.SolidNode, class_spec: *const tailwind.Spec) v
     node.transition_state.prev_bg = node.visual.background;
     node.transition_state.prev_text = node.visual.text_color;
     node.transition_state.prev_tint = node.image_tint;
-    node.transition_state.prev_border = resolvedBorderColor(class_spec);
+    node.transition_state.prev_border = resolvedBorderColor(win, class_spec);
     node.transition_state.prev_initialized = true;
 }
 
@@ -419,8 +419,8 @@ fn packedFromDvui(color: dvui.Color) types.PackedColor {
     return .{ .value = value };
 }
 
-fn resolvedBorderColor(spec: *const tailwind.Spec) types.PackedColor {
-    const base = spec.border_color orelse (dvui.Options{}).color(.border);
+fn resolvedBorderColor(win: *dvui.Window, spec: *const tailwind.Spec) types.PackedColor {
+    const base = tailwind.resolveColorOpt(win, spec.border_color) orelse (dvui.Options{}).color(.border);
     return packedFromDvui(base);
 }
 

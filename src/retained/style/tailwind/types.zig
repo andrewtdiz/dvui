@@ -2,6 +2,16 @@ const dvui = @import("dvui");
 const FontStyle = dvui.Options.FontStyle;
 const design_tokens = dvui.Theme.Tokens;
 
+pub const ThemeColorRef = struct {
+    style: dvui.Theme.Style.Name,
+    ask: dvui.Options.ColorAsk,
+};
+
+pub const ColorRef = union(enum) {
+    palette_packed: u32,
+    theme: ThemeColorRef,
+};
+
 pub const TextAlign = enum {
     left,
     center,
@@ -42,6 +52,11 @@ pub const Width = union(enum) {
 pub const Height = union(enum) {
     full,
     pixels: f32,
+};
+
+pub const Inset = union(enum) {
+    pixels: f32,
+    percent: f32,
 };
 
 pub const Position = enum {
@@ -188,9 +203,9 @@ pub const SideValues = struct {
 };
 
 pub const Spec = struct {
-    background: ?dvui.Color = null,
-    text: ?dvui.Color = null,
-    text_outline_color: ?dvui.Color = null,
+    background: ?ColorRef = null,
+    text: ?ColorRef = null,
+    text_outline_color: ?ColorRef = null,
     text_outline_thickness: ?f32 = null,
     width: ?Width = null,
     height: ?Height = null,
@@ -198,10 +213,10 @@ pub const Spec = struct {
     is_flex: bool = false,
     position: ?Position = null,
     layout_anchor: ?[2]f32 = null,
-    top: ?f32 = null,
-    right: ?f32 = null,
-    bottom: ?f32 = null,
-    left: ?f32 = null,
+    top: ?Inset = null,
+    right: ?Inset = null,
+    bottom: ?Inset = null,
+    left: ?Inset = null,
     direction: ?dvui.enums.Direction = null,
     justify: ?dvui.FlexBoxWidget.ContentPosition = null,
     align_items: ?dvui.FlexBoxWidget.AlignItems = null,
@@ -209,7 +224,7 @@ pub const Spec = struct {
     margin: SideValues = .{},
     padding: SideValues = .{},
     border: SideValues = .{},
-    border_color: ?dvui.Color = null,
+    border_color: ?ColorRef = null,
     font_style: ?FontStyle = null,
     font_family: ?FontFamily = .ui,
     font_weight: ?FontWeight = null,
@@ -228,12 +243,12 @@ pub const Spec = struct {
     text_wrap: bool = true,
     break_words: bool = false,
     cursor: ?dvui.enums.Cursor = null,
-    hover_background: ?dvui.Color = null,
-    hover_text: ?dvui.Color = null,
-    hover_text_outline_color: ?dvui.Color = null,
+    hover_background: ?ColorRef = null,
+    hover_text: ?ColorRef = null,
+    hover_text_outline_color: ?ColorRef = null,
     hover_text_outline_thickness: ?f32 = null,
     hover_border: SideValues = .{},
-    hover_border_color: ?dvui.Color = null,
+    hover_border_color: ?ColorRef = null,
     hover_margin: SideValues = .{},
     hover_padding: SideValues = .{},
     hover_opacity: ?f32 = null,

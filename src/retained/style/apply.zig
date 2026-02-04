@@ -21,14 +21,14 @@ pub fn packedColorToDvui(color: types.PackedColor, opacity: f32) dvui.Color {
     return .{ .r = r, .g = g, .b = b, .a = a };
 }
 
-pub fn applyClassSpecToVisual(node: *types.SolidNode, spec: *const tailwind.Spec) void {
-    if (spec.background) |bg| {
+pub fn applyClassSpecToVisual(win: *dvui.Window, node: *types.SolidNode, spec: *const tailwind.Spec) void {
+    if (tailwind.resolveColorOpt(win, spec.background)) |bg| {
         node.visual.background = dvuiColorToPacked(bg);
     }
-    if (spec.text) |tc| {
+    if (tailwind.resolveColorOpt(win, spec.text)) |tc| {
         node.visual.text_color = dvuiColorToPacked(tc);
     }
-    if (spec.text_outline_color) |tc| {
+    if (tailwind.resolveColorOpt(win, spec.text_outline_color)) |tc| {
         node.visual.text_outline_color = dvuiColorToPacked(tc);
     }
     if (spec.text_outline_thickness) |v| {
@@ -77,10 +77,10 @@ pub fn applyVisualPropsToOptions(visual: types.VisualProps, options: *dvui.Optio
     }
 }
 
-pub fn applyToOptions(spec: *const tailwind.Spec, options: *dvui.Options) void {
+pub fn applyToOptions(win: *dvui.Window, spec: *const tailwind.Spec, options: *dvui.Options) void {
     // Delegate to the full tailwind adapter so Solid nodes can pick up
     // backgrounds, text colors, spacing, sizing, etc.
-    tailwind.applyToOptions(spec, options);
+    tailwind.applyToOptions(win, spec, options);
 }
 
 pub fn resolveFont(spec: *const tailwind.Spec, options: *dvui.Options) void {

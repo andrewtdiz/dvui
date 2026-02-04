@@ -16,8 +16,6 @@ pub const CachedIcon = media.CachedIcon;
 pub const AccessToggled = node_store.AccessToggled;
 pub const AccessHasPopup = node_store.AccessHasPopup;
 pub const NodeKind = node_store.NodeKind;
-
-pub const GizmoRect = geometry.GizmoRect;
 pub const InputState = node_store.InputState;
 
 pub const Rect = geometry.Rect;

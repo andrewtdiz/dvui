@@ -121,6 +121,16 @@ fn effectiveNodeScale(ctx: RenderContext, node: *const types.SolidNode) Transfor
     return .{ .sx = sx, .sy = sy, .uniform = @min(sx, sy) };
 }
 
+fn shouldSkipTinyScaledNode(ctx: RenderContext, node: *const types.SolidNode, scale: TransformScale) bool {
+    if (scale.sx >= 1.0 and scale.sy >= 1.0) return false;
+    if (node.layout.rect) |rect| {
+        const bounds = nodeBoundsInContext(ctx, node, rect);
+        if (scale.sx < 1.0 and @abs(bounds.w) < 1.0) return true;
+        if (scale.sy < 1.0 and @abs(bounds.h) < 1.0) return true;
+    }
+    return false;
+}
+
 fn applyTransformScaleToOptions(scale: TransformScale, options: *dvui.Options) void {
     if (scale.sx == 1.0 and scale.sy == 1.0) return;
     if (options.margin) |m| options.margin = scaleRectXY(m, scale.sx, scale.sy);
@@ -230,7 +240,8 @@ fn renderElement(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    var class_spec = derive.apply(node);
+    const win = dvui.currentWindow();
+    var class_spec = derive.apply(win, node);
 
     // Skip rendering if element has 'hidden' class
     if (class_spec.hidden) {
@@ -239,11 +250,16 @@ fn renderElement(
     }
 
     if (class_spec.transition.enabled or node.transition_state.enabled) {
-        transitions.updateNode(node, &class_spec);
+        transitions.updateNode(win, node, &class_spec);
+    }
+
+    const scale = effectiveNodeScale(ctx, node);
+    if (shouldSkipTinyScaledNode(ctx, node, scale)) {
+        node.markRendered();
+        return;
     }
 
     if (dvui.snapToPixels()) {
-        const scale = effectiveNodeScale(ctx, node);
         if (scale.sx != 1.0 or scale.sy != 1.0) {
             const old_snap = dvui.snapToPixelsSet(false);
             defer _ = dvui.snapToPixelsSet(old_snap);
@@ -295,16 +311,6 @@ fn renderElementBody(
     }
     if (std.mem.eql(u8, node.tag, "icon")) {
         renderIcon(runtime, event_ring, store, node_id, node, class_spec, allocator, tracker, ctx);
-        node.markRendered();
-        return;
-    }
-    if (std.mem.eql(u8, node.tag, "gizmo")) {
-        renderGizmo(runtime, event_ring, store, node_id, node, class_spec);
-        node.markRendered();
-        return;
-    }
-    if (std.mem.eql(u8, node.tag, "triangle")) {
-        renderTriangle(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
         return;
     }
@@ -389,7 +395,8 @@ fn renderContainerNormal(
 ) void {
     const rect_layout_opt = node.layout.rect;
     // Ensure a background color is present for container nodes.
-    if (class_spec.background) |bg| {
+    if (class_spec.background) |bg_ref| {
+        const bg = tailwind.resolveColor(dvui.currentWindow(), bg_ref);
         if (node.visual.background == null) {
             node.visual.background = dvuiColorToPacked(bg);
         }
@@ -401,7 +408,7 @@ fn renderContainerNormal(
         if (runtime.timings != null) {
             bg_start_ns = std.time.nanoTimestamp();
         }
-        renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+        renderCachedOrDirectBackground(node, rect, ctx, allocator, tailwind.resolveColorOpt(dvui.currentWindow(), class_spec.background));
         if (runtime.timings) |timings| {
             timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
         }
@@ -416,7 +423,7 @@ fn renderContainerNormal(
         .id_extra = nodeIdExtra(node.id),
     };
     const scale = effectiveNodeScale(ctx, node);
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     options.background = false;
     options.border = dvui.Rect{};
@@ -576,7 +583,7 @@ fn renderNonInteractiveDirect(
         if (runtime.timings != null) {
             bg_start_ns = std.time.nanoTimestamp();
         }
-        renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+        renderCachedOrDirectBackground(node, rect, ctx, allocator, tailwind.resolveColorOpt(dvui.currentWindow(), class_spec.background));
         if (runtime.timings) |timings| {
             timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
         }
@@ -588,62 +595,6 @@ fn renderNonInteractiveDirect(
 
     // Fallback to DVUI path for tags without a direct draw handler.
     renderElementBody(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
-}
-
-fn renderGizmo(
-    runtime: *RenderRuntime,
-    event_ring: ?*events.EventRing,
-    store: *types.NodeStore,
-    node_id: u32,
-    node: *types.SolidNode,
-    class_spec: tailwind.Spec,
-) void {
-    _ = event_ring;
-    _ = store;
-    _ = node_id;
-    _ = class_spec;
-    applyGizmoProp(runtime, node);
-}
-
-fn renderTriangle(
-    runtime: *RenderRuntime,
-    event_ring: ?*events.EventRing,
-    store: *types.NodeStore,
-    node: *types.SolidNode,
-    allocator: std.mem.Allocator,
-    class_spec: tailwind.Spec,
-    tracker: *DirtyRegionTracker,
-    ctx: RenderContext,
-) void {
-    var rect_opt = node.layout.rect;
-    if (rect_opt == null) {
-        const parent_rect = blk: {
-            if (node.parent) |pid| {
-                if (store.node(pid)) |parent| {
-                    if (parent.layout.rect) |pr| break :blk pr;
-                }
-            }
-            const win = dvui.currentWindow();
-            break :blk types.Rect{
-                .x = 0,
-                .y = 0,
-                .w = win.rect_pixels.w,
-                .h = win.rect_pixels.h,
-            };
-        };
-        layout.computeNodeLayout(store, node, parent_rect);
-        rect_opt = node.layout.rect;
-    }
-    const rect = rect_opt orelse return;
-    var bg_start_ns: i128 = 0;
-    if (runtime.timings != null) {
-        bg_start_ns = std.time.nanoTimestamp();
-    }
-    drawTriangleDirect(rect, transitions.effectiveVisual(node), transitions.effectiveTransform(node), ctx.scale, ctx.offset, allocator, class_spec.background);
-    if (runtime.timings) |timings| {
-        timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
-    }
-    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
 fn renderParagraph(
@@ -667,7 +618,7 @@ fn renderParagraph(
     if (runtime.timings != null) {
         bg_start_ns = std.time.nanoTimestamp();
     }
-    renderCachedOrDirectBackground(node, rect, ctx, allocator, class_spec.background);
+    renderCachedOrDirectBackground(node, rect, ctx, allocator, tailwind.resolveColorOpt(dvui.currentWindow(), class_spec.background));
     if (runtime.timings) |timings| {
         timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
     }
@@ -693,7 +644,7 @@ fn renderParagraph(
     const effective_scale = layout_scale * scale_uniform;
 
     var options = dvui.Options{ .id_extra = nodeIdExtra(node_id) };
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     if (font_override) |style_name| {
         options.font_style = style_name;
     }
@@ -747,35 +698,22 @@ fn renderParagraph(
     renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
 }
 
-fn applyGizmoProp(runtime: *RenderRuntime, node: *types.SolidNode) void {
-    const override = runtime.gizmo_override_rect;
-    const attr_rect = node.gizmoRect();
-    const has_new_attr = attr_rect != null and node.lastAppliedGizmoRectSerial() != node.gizmoRectSerial();
-
-    const prop = if (has_new_attr)
-        attr_rect.?
-    else
-        override orelse attr_rect orelse return;
-
-    node.setGizmoRuntimeRect(prop);
-
-    if (has_new_attr) {
-        node.markGizmoRectApplied();
-        runtime.gizmo_rect_pending = prop;
-    }
-}
-
 fn renderText(runtime: *RenderRuntime, store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContext) void {
-    _ = derive.apply(node);
+    const win = dvui.currentWindow();
+    _ = derive.apply(win, node);
+    const scale = effectiveNodeScale(ctx, node);
+    if (shouldSkipTinyScaledNode(ctx, node, scale)) {
+        node.markRendered();
+        return;
+    }
     const trimmed = std.mem.trim(u8, node.text, " \n\r\t");
     if (trimmed.len > 0) {
         var options = dvui.Options{ .id_extra = nodeIdExtra(node.id) };
-        const scale = effectiveNodeScale(ctx, node);
         if (node.parent) |pid| {
             if (store.node(pid)) |parent| {
                 var parent_spec = parent.prepareClassSpec();
                 tailwind.applyHover(&parent_spec, parent.hovered);
-                style_apply.applyToOptions(&parent_spec, &options);
+                style_apply.applyToOptions(win, &parent_spec, &options);
                 style_apply.resolveFont(&parent_spec, &options);
             }
         }
@@ -859,7 +797,7 @@ fn renderButton(
         options_base.tab_index = tab_info.tab_index;
     }
     const visual_eff = transitions.effectiveVisual(node);
-    style_apply.applyToOptions(&class_spec, &options_base);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options_base);
     style_apply.resolveFont(&class_spec, &options_base);
     applyVisualPropsToOptions(visual_eff, &options_base);
     applyBorderColorToOptions(node, visual_eff, &options_base);
@@ -1042,7 +980,7 @@ fn renderIcon(
         .id_extra = nodeIdExtra(node_id),
     };
     const scale = effectiveNodeScale(ctx, node);
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1154,7 +1092,7 @@ fn renderImage(
         .role = .image,
     };
     const scale = effectiveNodeScale(ctx, node);
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1268,7 +1206,7 @@ fn renderSlider(
         .id_extra = nodeIdExtra(node_id),
     });
     const scale = effectiveNodeScale(ctx, node);
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1549,7 +1487,7 @@ fn renderInput(
         .background = true,
     };
     const scale = effectiveNodeScale(ctx, node);
-    style_apply.applyToOptions(&class_spec, &options);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);

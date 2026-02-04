@@ -61,16 +61,16 @@ fn packedFromDvui(color: dvui.Color) types.PackedColor {
     return .{ .value = value };
 }
 
-fn resolvedBorderColor(spec: *const tailwind.Spec) types.PackedColor {
-    const base = spec.border_color orelse (dvui.Options{}).color(.border);
+fn resolvedBorderColor(win: *dvui.Window, spec: *const tailwind.Spec) types.PackedColor {
+    const base = tailwind.resolveColorOpt(win, spec.border_color) orelse (dvui.Options{}).color(.border);
     return packedFromDvui(base);
 }
 
-fn effectiveBorderColor(node: *const types.SolidNode, spec: *const tailwind.Spec) types.PackedColor {
+fn effectiveBorderColor(win: *dvui.Window, node: *const types.SolidNode, spec: *const tailwind.Spec) types.PackedColor {
     if (node.transition_state.enabled and node.transition_state.prev_initialized) {
         return transitions.effectiveBorderColor(node);
     }
-    return resolvedBorderColor(spec);
+    return resolvedBorderColor(win, spec);
 }
 
 fn applyContextToVertexPos(ctx: state.RenderContext, pos: dvui.Point.Physical) dvui.Point.Physical {
@@ -127,6 +127,7 @@ pub fn renderCachedOrDirectBackground(
 
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
+    const win = dvui.currentWindow();
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
     const border_left = (spec.border.left orelse 0) * scale;
@@ -137,7 +138,7 @@ pub fn renderCachedOrDirectBackground(
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
-    const border_color_packed = effectiveBorderColor(node, &spec);
+    const border_color_packed = effectiveBorderColor(win, node, &spec);
 
     const corner_radius = spec.corner_radius orelse visual_eff.corner_radius;
     const has_rounding = corner_radius != 0;
@@ -175,12 +176,15 @@ pub fn renderCachedOrDirectBackground(
             const border_bottom_ctx = border_bottom * ctx_scale_y * @abs(transform_eff.scale[1]);
             const uniform = border_left_ctx == border_right_ctx and border_left_ctx == border_top_ctx and border_left_ctx == border_bottom_ctx;
             if (uniform and border_left_ctx > 0) {
+                outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
                 if (bg_color_opt) |bg_color| {
-                    outer_phys.fill(outer_radius, .{ .color = bg_color, .fade = fade });
+                    const inner_phys = outer_phys.insetAll(border_left_ctx);
+                    const inner_radius_val = @max(0.0, radius_phys_val - border_left_ctx);
+                    const inner_radius = dvui.Rect.Physical.all(inner_radius_val);
+                    if (!inner_phys.empty()) {
+                        inner_phys.fill(inner_radius, .{ .color = bg_color, .fade = fade });
+                    }
                 }
-                const stroke_rect = outer_phys.insetAll(border_left_ctx * 0.5);
-                // Normal borders should respect paint order; don't use `.after` which forces overlay.
-                stroke_rect.stroke(outer_radius, .{ .thickness = border_left_ctx, .color = border_color });
             } else {
                 // Non-uniform borders: fill outer with border color, then inner with background.
                 outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
@@ -261,13 +265,14 @@ fn regeneratePaintCache(store: *types.NodeStore, node: *types.SolidNode, tracker
 
     const rect = node.layout.rect;
 
-    const spec = derive.apply(node);
+    const win = dvui.currentWindow();
+    const spec = derive.apply(win, node);
     const base_scale = dvui.windowNaturalScale();
     const scale = if (node.layout.layout_scale != 0) node.layout.layout_scale else base_scale;
 
     const visual_eff = transitions.effectiveVisual(node);
     const transform_eff = transitions.effectiveTransform(node);
-    const border_color_packed = effectiveBorderColor(node, &spec);
+    const border_color_packed = effectiveBorderColor(win, node, &spec);
     const version = @max(node.version, node.layout.version);
 
     if (!shouldCachePaint(node, spec) or rect == null) {

@@ -362,11 +362,19 @@ fn parseBorderWidth(token: []const u8) ?f32 {
     return value;
 }
 
-fn parseInsetValue(token: []const u8) ?f32 {
+fn parseInsetValue(token: []const u8) ?types.Inset {
     if (token.len == 0) return null;
     if (token[0] == '[' and token[token.len - 1] == ']') {
         const inner = token[1 .. token.len - 1];
         if (inner.len == 0) return null;
+
+        if (std.mem.endsWith(u8, inner, "%")) {
+            const num_slice = inner[0 .. inner.len - 1];
+            if (num_slice.len == 0) return null;
+            const value = std.fmt.parseFloat(f32, num_slice) catch return null;
+            if (!std.math.isFinite(value)) return null;
+            return .{ .percent = value / 100.0 };
+        }
 
         var num_slice = inner;
         if (std.mem.endsWith(u8, inner, "px")) {
@@ -374,9 +382,10 @@ fn parseInsetValue(token: []const u8) ?f32 {
         }
         const value = std.fmt.parseFloat(f32, num_slice) catch return null;
         if (!std.math.isFinite(value)) return null;
-        return value;
+        return .{ .pixels = value };
     }
-    return parseSpacingValue(token);
+    const value = parseSpacingValue(token) orelse return null;
+    return .{ .pixels = value };
 }
 
 fn parseBracketValue(token: []const u8) ?f32 {

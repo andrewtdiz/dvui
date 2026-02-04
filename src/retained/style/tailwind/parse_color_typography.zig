@@ -189,7 +189,7 @@ pub fn resolveFont(spec: *const types.Spec, options: *dvui.Options) void {
     }
 }
 
-pub fn lookupColorToken(ask: dvui.Options.ColorAsk, name: []const u8) ?dvui.Color {
+pub fn lookupColorToken(ask: dvui.Options.ColorAsk, name: []const u8) ?types.ColorRef {
     return lookupThemeColor(ask, name) orelse lookupPaletteColor(name);
 }
 
@@ -216,19 +216,18 @@ fn parseOutlineThickness(token: []const u8) ?f32 {
     return value;
 }
 
-fn lookupThemeColor(ask: dvui.Options.ColorAsk, name: []const u8) ?dvui.Color {
-    const win = dvui.current_window orelse return null;
+fn lookupThemeColor(ask: dvui.Options.ColorAsk, name: []const u8) ?types.ColorRef {
     for (theme_color_roles) |role| {
         if (std.mem.eql(u8, name, role.token)) {
-            return win.theme.color(role.style, ask);
+            return .{ .theme = .{ .style = role.style, .ask = ask } };
         }
     }
     return null;
 }
 
-fn lookupPaletteColor(name: []const u8) ?dvui.Color {
-    if (ColorMap.get(name)) |_packed| {
-        return colorFromPacked(_packed);
+fn lookupPaletteColor(name: []const u8) ?types.ColorRef {
+    if (ColorMap.get(name)) |packed_value| {
+        return .{ .palette_packed = packed_value };
     }
     return null;
 }

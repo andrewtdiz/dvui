@@ -37,16 +37,6 @@ pub fn deinit() void {
     runtime.reset();
 }
 
-pub fn setGizmoRectOverride(rect: ?types.GizmoRect) void {
-    runtime.gizmo_override_rect = rect;
-}
-
-pub fn takeGizmoRectUpdate() ?types.GizmoRect {
-    const next = runtime.gizmo_rect_pending;
-    runtime.gizmo_rect_pending = null;
-    return next;
-}
-
 fn updateFrameState(runtime_ptr: *RenderRuntime, mouse: dvui.Point.Physical, input_enabled: bool, layer: state.RenderLayer) void {
     runtime_ptr.last_mouse_pt = mouse;
     runtime_ptr.last_input_enabled = input_enabled;

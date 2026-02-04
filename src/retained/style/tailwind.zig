@@ -64,6 +64,8 @@ pub const FontRenderMode = types.FontRenderMode;
 pub const FontFamily = types.FontFamily;
 pub const FontWeight = types.FontWeight;
 pub const FontSlant = types.FontSlant;
+pub const ThemeColorRef = types.ThemeColorRef;
+pub const ColorRef = types.ColorRef;
 pub const Spec = types.Spec;
 pub const ClassSpec = types.ClassSpec;
 pub const EasingStyle = types.EasingStyle;
@@ -72,9 +74,30 @@ pub const TransitionProps = types.TransitionProps;
 pub const TransitionConfig = types.TransitionConfig;
 pub const Width = types.Width;
 pub const Height = types.Height;
+pub const Inset = types.Inset;
 pub const Position = types.Position;
 
 pub const resolveFont = color_typography.resolveFont;
+
+fn colorFromPacked(value: u32) dvui.Color {
+    const r: u8 = @intCast((value >> 24) & 0xff);
+    const g: u8 = @intCast((value >> 16) & 0xff);
+    const b: u8 = @intCast((value >> 8) & 0xff);
+    const a: u8 = @intCast(value & 0xff);
+    return .{ .r = r, .g = g, .b = b, .a = a };
+}
+
+pub fn resolveColor(win: *dvui.Window, ref: types.ColorRef) dvui.Color {
+    return switch (ref) {
+        .palette_packed => |packed_value| colorFromPacked(packed_value),
+        .theme => |role| win.theme.color(role.style, role.ask),
+    };
+}
+
+pub fn resolveColorOpt(win: *dvui.Window, ref: ?types.ColorRef) ?dvui.Color {
+    if (ref) |value| return resolveColor(win, value);
+    return null;
+}
 
 pub fn init() void {
     ensureSpecCacheReady();
@@ -136,13 +159,13 @@ pub fn hasHoverLayout(spec: *const Spec) bool {
     return spec.hover_margin.any() or spec.hover_padding.any();
 }
 
-pub fn applyToOptions(spec: *const Spec, options: *dvui.Options) void {
-    if (spec.background) |color_value| {
-        options.color_fill = color_value;
+pub fn applyToOptions(win: *dvui.Window, spec: *const Spec, options: *dvui.Options) void {
+    if (spec.background) |color_ref| {
+        options.color_fill = resolveColor(win, color_ref);
         options.background = true;
     }
-    if (spec.text) |color_value| {
-        options.color_text = color_value;
+    if (spec.text) |color_ref| {
+        options.color_text = resolveColor(win, color_ref);
     }
     if (spec.width) |w| {
         switch (w) {
@@ -159,8 +182,8 @@ pub fn applyToOptions(spec: *const Spec, options: *dvui.Options) void {
     options.margin = applySideValues(&spec.margin, options.margin);
     options.padding = applySideValues(&spec.padding, options.padding);
     options.border = applySideValues(&spec.border, options.border);
-    if (spec.border_color) |color_value| {
-        options.color_border = color_value;
+    if (spec.border_color) |color_ref| {
+        options.color_border = resolveColor(win, color_ref);
     }
     if (spec.font_style) |style| {
         options.font_style = style;
@@ -293,4 +316,55 @@ test "tailwind overflow scroll parsing" {
     const c = parse("overflow-x-scroll");
     try std.testing.expect(c.scroll_x);
     try std.testing.expect(!c.scroll_y);
+}
+
+test "tailwind palette color refs" {
+    const color_data = @import("colors.zig");
+    const ColorMap = std.StaticStringMap(u32).initComptime(color_data.entries);
+    const expected = ColorMap.get("slate-900") orelse return error.TestUnexpectedResult;
+    const spec = parse("bg-slate-900");
+    const bg = spec.background orelse return error.TestUnexpectedResult;
+    switch (bg) {
+        .palette_packed => |packed_value| try std.testing.expectEqual(expected, packed_value),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "tailwind theme role refs" {
+    const bg_spec = parse("bg-content");
+    const bg = bg_spec.background orelse return error.TestUnexpectedResult;
+    switch (bg) {
+        .theme => |role| {
+            try std.testing.expectEqual(dvui.Theme.Style.Name.content, role.style);
+            try std.testing.expectEqual(dvui.Options.ColorAsk.fill, role.ask);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+
+    const text_spec = parse("text-content");
+    const text = text_spec.text orelse return error.TestUnexpectedResult;
+    switch (text) {
+        .theme => |role| {
+            try std.testing.expectEqual(dvui.Theme.Style.Name.content, role.style);
+            try std.testing.expectEqual(dvui.Options.ColorAsk.text, role.ask);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "tailwind hover theme role ask preserved" {
+    var spec = parse("hover:bg-content");
+    try std.testing.expect(spec.background == null);
+    const hover_bg = spec.hover_background orelse return error.TestUnexpectedResult;
+    switch (hover_bg) {
+        .theme => |role| try std.testing.expectEqual(dvui.Options.ColorAsk.fill_hover, role.ask),
+        else => return error.TestUnexpectedResult,
+    }
+
+    applyHover(&spec, true);
+    const bg = spec.background orelse return error.TestUnexpectedResult;
+    switch (bg) {
+        .theme => |role| try std.testing.expectEqual(dvui.Options.ColorAsk.fill_hover, role.ask),
+        else => return error.TestUnexpectedResult,
+    }
 }

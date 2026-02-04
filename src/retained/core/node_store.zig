@@ -10,7 +10,6 @@ const events = @import("../events/mod.zig");
 
 const Rect = geometry.Rect;
 const SideOffsets = geometry.SideOffsets;
-const GizmoRect = geometry.GizmoRect;
 const Transform = geometry.Transform;
 
 const PackedColor = visual.PackedColor;
@@ -263,9 +262,6 @@ pub const SolidNode = struct {
     class_spec_dirty: bool = true,
     font_render_mode_override: ?tailwind.FontRenderMode = null,
     input_state: ?InputState = null,
-    gizmo_rect: ?GizmoRect = null,
-    gizmo_rect_serial: u64 = 0,
-    gizmo_rect_applied: u64 = 0,
 
     fn initCommon(allocator: std.mem.Allocator, id: u32, kind: NodeKind) SolidNode {
         _ = allocator;
@@ -466,31 +462,6 @@ pub const SolidNode = struct {
 
     pub fn imageSource(self: *const SolidNode) []const u8 {
         return self.image_src;
-    }
-
-    pub fn gizmoRect(self: *const SolidNode) ?GizmoRect {
-        return self.gizmo_rect;
-    }
-
-    pub fn gizmoRectSerial(self: *const SolidNode) u64 {
-        return self.gizmo_rect_serial;
-    }
-
-    pub fn lastAppliedGizmoRectSerial(self: *const SolidNode) u64 {
-        return self.gizmo_rect_applied;
-    }
-
-    pub fn setGizmoRect(self: *SolidNode, rect: GizmoRect) void {
-        self.gizmo_rect = rect;
-        self.gizmo_rect_serial +%= 1;
-    }
-
-    pub fn setGizmoRuntimeRect(self: *SolidNode, rect: GizmoRect) void {
-        self.gizmo_rect = rect;
-    }
-
-    pub fn markGizmoRectApplied(self: *SolidNode) void {
-        self.gizmo_rect_applied = self.gizmo_rect_serial;
     }
 
     pub fn hasDirtySubtree(self: *const SolidNode) bool {
