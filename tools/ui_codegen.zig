@@ -24,6 +24,13 @@ const Node = struct {
     class: ?[]const u8,
     props: ?std.json.Value,
     scale: ?std.json.Value,
+    visual: ?std.json.Value,
+    transform: ?std.json.Value,
+    scroll: ?std.json.Value,
+    anchor: ?std.json.Value,
+    image: ?std.json.Value,
+    src: ?std.json.Value,
+    listen: ?std.json.Value,
     children: []Child,
 };
 
@@ -152,6 +159,7 @@ fn isKeyword(name: []const u8) bool {
 fn isReservedKey(name: []const u8) bool {
     const reserved = [_][]const u8{
         "__kind",
+        "parent",
         "children",
         "class",
         "key",
@@ -289,6 +297,48 @@ fn parseNodeSpec(
         scale_value = v;
     }
 
+    var visual_value: ?std.json.Value = null;
+    if (obj.get("visual")) |v| {
+        if (v != .object) return error.InvalidSchema;
+        visual_value = v;
+    }
+
+    var transform_value: ?std.json.Value = null;
+    if (obj.get("transform")) |v| {
+        if (v != .object) return error.InvalidSchema;
+        transform_value = v;
+    }
+
+    var scroll_value: ?std.json.Value = null;
+    if (obj.get("scroll")) |v| {
+        if (v != .object) return error.InvalidSchema;
+        scroll_value = v;
+    }
+
+    var anchor_value: ?std.json.Value = null;
+    if (obj.get("anchor")) |v| {
+        if (v != .object) return error.InvalidSchema;
+        anchor_value = v;
+    }
+
+    var image_value: ?std.json.Value = null;
+    if (obj.get("image")) |v| {
+        if (v != .object) return error.InvalidSchema;
+        image_value = v;
+    }
+
+    var src_value: ?std.json.Value = null;
+    if (obj.get("src")) |v| {
+        if (v != .string) return error.InvalidSchema;
+        src_value = v;
+    }
+
+    var listen_value: ?std.json.Value = null;
+    if (obj.get("listen")) |v| {
+        if (v != .array) return error.InvalidSchema;
+        listen_value = v;
+    }
+
     var children_list: std.ArrayList(Child) = .empty;
     defer children_list.deinit(allocator);
 
@@ -310,6 +360,13 @@ fn parseNodeSpec(
         if (std.mem.eql(u8, k, "class")) continue;
         if (std.mem.eql(u8, k, "props")) continue;
         if (std.mem.eql(u8, k, "scale")) continue;
+        if (std.mem.eql(u8, k, "visual")) continue;
+        if (std.mem.eql(u8, k, "transform")) continue;
+        if (std.mem.eql(u8, k, "scroll")) continue;
+        if (std.mem.eql(u8, k, "anchor")) continue;
+        if (std.mem.eql(u8, k, "image")) continue;
+        if (std.mem.eql(u8, k, "src")) continue;
+        if (std.mem.eql(u8, k, "listen")) continue;
         if (std.mem.eql(u8, k, "children")) continue;
         return error.UnknownField;
     }
@@ -321,6 +378,13 @@ fn parseNodeSpec(
         .class = class_value,
         .props = props_value,
         .scale = scale_value,
+        .visual = visual_value,
+        .transform = transform_value,
+        .scroll = scroll_value,
+        .anchor = anchor_value,
+        .image = image_value,
+        .src = src_value,
+        .listen = listen_value,
         .children = try children_list.toOwnedSlice(allocator),
     };
     return node_ptr;
@@ -333,12 +397,44 @@ fn emitModule(
     keys: []const []const u8,
     links: []const Link,
 ) CodegenError!void {
-    try writer.writeAll("local Types = require(\"luau/ui/types\")\n\n");
+    try writer.writeAll("local Types = require(\"ui/types\")\n\n");
     try emitKeyType(writer, keys);
     try writer.writeAll("\n");
-    try writer.writeAll("export type Patches = { [Key]: Types.NodePatch }\n\n");
+    var emitted_types: std.StringHashMapUnmanaged(void) = .empty;
+    defer emitted_types.deinit(allocator);
 
-    try writer.writeAll("local function create(): Types.UINode\n");
+    try emitNodeTypeDecls(allocator, writer, root, &emitted_types, links);
+
+    const root_key = root.key orelse return error.MissingRoot;
+    try writer.writeAll("export type UI = {\n");
+    try writer.writeAll("  root: Node_");
+    try writer.writeAll(root_key);
+    try writer.writeAll(",\n");
+    try writer.writeAll("}\n\n");
+
+    try writer.writeAll("export type Patches = { [Types.UINode]: Types.NodePatch }\n\n");
+
+    try writer.writeAll("local function link_parents(node: Types.UINode, parent: Types.UINode?)\n");
+    try writer.writeAll("  node.parent = parent\n");
+    try writer.writeAll("  local children = node.children\n");
+    try writer.writeAll("  if type(children) ~= \"table\" then\n");
+    try writer.writeAll("    return\n");
+    try writer.writeAll("  end\n");
+    try writer.writeAll("  if children.tag ~= nil then\n");
+    try writer.writeAll("    link_parents(children, node)\n");
+    try writer.writeAll("    return\n");
+    try writer.writeAll("  end\n");
+    try writer.writeAll("  if children.__kind ~= nil then\n");
+    try writer.writeAll("    return\n");
+    try writer.writeAll("  end\n");
+    try writer.writeAll("  for _, child in ipairs(children) do\n");
+    try writer.writeAll("    if type(child) == \"table\" and child.tag ~= nil then\n");
+    try writer.writeAll("      link_parents(child, node)\n");
+    try writer.writeAll("    end\n");
+    try writer.writeAll("  end\n");
+    try writer.writeAll("end\n\n");
+
+    try writer.writeAll("local function create(): UI\n");
 
     var emitted: std.StringHashMapUnmanaged(void) = .empty;
     defer emitted.deinit(allocator);
@@ -356,14 +452,18 @@ fn emitModule(
     }
 
     try emitIndent(writer, 1);
-    try writer.writeAll("return ");
-    const root_key = root.key orelse return error.MissingRoot;
+    try writer.writeAll("link_parents(");
     try emitNodeVar(writer, root_key);
-    try writer.writeAll("\nend\n\n");
+    try writer.writeAll(", nil)\n");
 
-    try writer.writeAll("return {\n");
-    try writer.writeAll("  create = create,\n");
-    try writer.writeAll("}\n");
+    try emitIndent(writer, 1);
+    try writer.writeAll("return { root = ");
+    try emitNodeVar(writer, root_key);
+    try writer.writeAll(" }\nend\n\n");
+
+    try writer.writeAll("local UI = create()\n");
+    try writer.writeAll("UI.create = create\n");
+    try writer.writeAll("return UI\n");
 }
 
 fn emitNodeDecls(
@@ -390,6 +490,41 @@ fn emitNodeDecls(
     try writer.writeAll(" = ");
     try emitNodeLua(allocator, writer, node, indent + 1);
     try writer.writeAll("\n\n");
+}
+
+fn emitNodeTypeDecls(
+    allocator: Allocator,
+    writer: anytype,
+    node: *Node,
+    emitted: *std.StringHashMapUnmanaged(void),
+    links: []const Link,
+) CodegenError!void {
+    for (node.children) |child| {
+        switch (child) {
+            .node => |child_node| try emitNodeTypeDecls(allocator, writer, child_node, emitted, links),
+            else => {},
+        }
+    }
+
+    const key = node.key orelse return;
+    if (emitted.contains(key)) return;
+    try emitted.putNoClobber(allocator, key, {});
+
+    try writer.writeAll("export type Node_");
+    try writer.writeAll(key);
+    try writer.writeAll(" = Types.UINode & {\n");
+    try writer.writeAll("  parent: Types.UINode?,\n");
+
+    for (links) |link| {
+        if (!std.mem.eql(u8, link.parent_key, key)) continue;
+        try writer.writeAll("  ");
+        try writer.writeAll(link.child_key);
+        try writer.writeAll(": Node_");
+        try writer.writeAll(link.child_key);
+        try writer.writeAll(",\n");
+    }
+
+    try writer.writeAll("}\n\n");
 }
 
 fn emitKeyType(writer: anytype, keys: []const []const u8) CodegenError!void {
@@ -448,6 +583,55 @@ fn emitNodeLua(allocator: Allocator, writer: anytype, node: *Node, indent: usize
         try emitIndent(writer, indent);
         try writer.writeAll("scale = ");
         try emitJsonToLua(allocator, writer, s, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.visual) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("visual = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.transform) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("transform = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.scroll) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("scroll = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.anchor) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("anchor = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.image) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("image = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.src) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("src = ");
+        try emitJsonToLua(allocator, writer, v, indent);
+        try writer.writeAll(",\n");
+    }
+
+    if (node.listen) |v| {
+        try emitIndent(writer, indent);
+        try writer.writeAll("listen = ");
+        try emitJsonToLua(allocator, writer, v, indent);
         try writer.writeAll(",\n");
     }
 

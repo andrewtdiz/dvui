@@ -1,14 +1,13 @@
 local SolidLuau = require("solidluau")
+local Bar = require("luau/components/bar")
 
 local dsl = SolidLuau.ui
 local reactivity = SolidLuau
-local animation = SolidLuau.animation
 
 local Tag = dsl.Tag
 
 local div = Tag.div
 local button = Tag.button
-local p = Tag.p
 local image = Tag.image
 
 local createSignal = reactivity.createSignal
@@ -16,13 +15,11 @@ local createSignal = reactivity.createSignal
 local scale_x_target, set_scale_x_target = createSignal(1)
 
 local function App()
-    local scale_x = animation.createTween(scale_x_target, { duration = 0.35, easing = animation.easing.outQuad })
-
   return div({
     class = "w-full h-full flex items-center justify-center bg-neutral-950",
   }){
     div({
-      class = "px-6 py-3 rounded-xl border-2 border-black text-lg text-white cursor-pointer flex flex-col gap-2",
+      class = "px-6 py-3 rounded-xl border-2 border-blue-500 text-lg text-white cursor-pointer flex flex-col gap-2",
     }){
       button({
         class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200",
@@ -32,26 +29,23 @@ local function App()
       }){ "Hover me" },
       image({
         class = "w-16 h-16",
-        props = {
-          src = "assets/sprite.png",
-        },
-      })(),
-      div({ class = "w-64 h-6 bg-red-500 rounded-full border-2 border-black"}) {
-          div({
-            class = "w-full h-full bg-green-500 rounded-full",
-            props = {
-              transform = {
-                scaleX = scale_x,
-                anchorX = 0,
-                anchorY = 0,
-              },
-            },
-          })(),
-          p({ class = "absolute left-[50%] top-[50%] anchor-center text-black font-bold"}){
-            function()
-              return string.format("%.1f%%", scale_x() * 100)
+        src = "assets/sprite.png",
+      }),
+      div({ class = "flex items-center gap-3" }){
+        Bar.Track({ class = "h-6 w-64 rounded-full bg-red-500 border-2 border-black" }){
+          Bar.Fill({
+            class = "bg-green-500 rounded-full",
+            percent = function()
+              return scale_x_target() * 100
             end,
-          }
+          }),
+          Bar.Label({
+            current = function()
+              return math.floor(scale_x_target() * 100)
+            end,
+            max = 100
+          }),
+        },
       },
     },
   }

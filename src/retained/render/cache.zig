@@ -169,6 +169,8 @@ pub fn renderCachedOrDirectBackground(
 
         const border_color = draw.packedColorToDvui(border_color_packed, opacity);
 
+        const bg_color = if (bg_color_opt) |c| if (c.a != 0) c else null else null;
+
         if (has_border) {
             const border_left_ctx = border_left * ctx_scale_x * @abs(transform_eff.scale[0]);
             const border_right_ctx = border_right * ctx_scale_x * @abs(transform_eff.scale[0]);
@@ -176,19 +178,22 @@ pub fn renderCachedOrDirectBackground(
             const border_bottom_ctx = border_bottom * ctx_scale_y * @abs(transform_eff.scale[1]);
             const uniform = border_left_ctx == border_right_ctx and border_left_ctx == border_top_ctx and border_left_ctx == border_bottom_ctx;
             if (uniform and border_left_ctx > 0) {
-                outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
-                if (bg_color_opt) |bg_color| {
+                if (bg_color) |bg| {
                     const inner_phys = outer_phys.insetAll(border_left_ctx);
                     const inner_radius_val = @max(0.0, radius_phys_val - border_left_ctx);
                     const inner_radius = dvui.Rect.Physical.all(inner_radius_val);
                     if (!inner_phys.empty()) {
-                        inner_phys.fill(inner_radius, .{ .color = bg_color, .fade = fade });
+                        inner_phys.fill(inner_radius, .{ .color = bg });
                     }
                 }
+
+                const stroke_rect = outer_phys.insetAll(border_left_ctx * 0.5);
+                const stroke_radius_val = @max(0.0, radius_phys_val - border_left_ctx * 0.5);
+                const stroke_radius = dvui.Rect.Physical.all(stroke_radius_val);
+                stroke_rect.stroke(stroke_radius, .{ .thickness = border_left_ctx, .color = border_color });
             } else {
-                // Non-uniform borders: fill outer with border color, then inner with background.
                 outer_phys.fill(outer_radius, .{ .color = border_color, .fade = fade });
-                if (bg_color_opt) |bg_color| {
+                if (bg_color) |bg| {
                     const inset_phys = dvui.Rect.Physical{
                         .x = border_left_ctx,
                         .y = border_top_ctx,
@@ -200,13 +205,13 @@ pub fn renderCachedOrDirectBackground(
                     const inner_radius_val = @max(0.0, radius_phys_val - min_border);
                     const inner_radius = dvui.Rect.Physical.all(inner_radius_val);
                     if (!inner_phys.empty()) {
-                        inner_phys.fill(inner_radius, .{ .color = bg_color, .fade = fade });
+                        inner_phys.fill(inner_radius, .{ .color = bg });
                     }
                 }
             }
         } else {
-            if (bg_color_opt) |bg_color| {
-                outer_phys.fill(outer_radius, .{ .color = bg_color, .fade = fade });
+            if (bg_color) |bg| {
+                outer_phys.fill(outer_radius, .{ .color = bg, .fade = fade });
             }
         }
         return;

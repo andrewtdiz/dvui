@@ -17,7 +17,13 @@ Common fields you can use:
 
 - `tag: string` (required for element nodes)
 - `class: string | () -> string` (optional)
-- `props: { ... }` (optional; see “Props reference”)
+- `visual: { ... }` (optional; see “Prop keys”)
+- `transform: { ... }` (optional)
+- `scroll: { ... }` (optional)
+- `anchor: { ... }` (optional)
+- `image: { ... }` (optional)
+- `src: string | () -> string` (optional)
+- `listen: {string} | () -> {string}` (optional)
 - `children`: strings/numbers/booleans, functions returning those, or nested nodes
 - `scale: number | () -> number` (optional; maps to transform scale)
 - Event handlers as fields on the node table (e.g. `onClick = function(payload, id, kind) ... end`)
@@ -53,7 +59,7 @@ These tags have dedicated rendering behavior:
 
 - `div`
   - Primary layout container.
-  - Draws background/border (via `bg-*`, `border*`, `rounded*`, or `props.visual.*`).
+  - Draws background/border (via `bg-*`, `border*`, `rounded*`, or `visual.*`).
   - Can emit `pointerdown`/`pointerup` events **when** you attach `onMouseDown`/`onMouseUp`.
 - `button`
   - Interactive button.
@@ -65,14 +71,14 @@ These tags have dedicated rendering behavior:
   - `h1`/`h2`/`h3` force a heading font style; `p` uses whatever typography classes you provide (or theme defaults).
 - `image`
   - Renders an image from a required source string.
-  - Source is `props.src` or `props.image.src` (stored in `SolidNode.image_src`).
-  - Supports `props.image.tint` and `props.image.opacity`.
+  - Source is `src` or `image.src` (stored in `SolidNode.image_src`).
+  - Supports `image.tint` and `image.opacity`.
 - `icon`
-  - Renders an icon from `props.src` (same underlying `SolidNode.image_src` field).
-  - Icon glyph/kind configuration exists in `SolidNode` but is **not currently exposed** to Luau (so `props.src` is the supported path).
+  - Renders an icon from `src` (same underlying `SolidNode.image_src` field).
+  - Icon glyph/kind configuration exists in `SolidNode` but is **not currently exposed** to Luau (so `src` is the supported path).
 - `triangle`
   - Draws an upward-pointing filled triangle within the node rect.
-  - Color comes from `bg-*` or `props.visual.background`.
+  - Color comes from `bg-*` or `visual.background`.
 - `input`
   - Interactive single-line text input.
   - Emits `input`, `focus`, `blur`, and `enter` events (see “Events”).
@@ -99,30 +105,32 @@ These tags are used internally by SolidLuau’s renderer:
 
 You generally should not create these directly.
 
-## Props reference (“attributes”)
+## Prop keys (“attributes”)
 
-SolidLuau forwards a small, explicit set of `props.*` keys to the DVUI binding (`src/native_renderer/luau_ui.zig`). Other keys in `props` are ignored by the adapter.
+UI nodes use a single flat table of keys; `props = { ... }` is not supported.
+
+SolidLuau forwards a small, explicit set of node keys to the DVUI binding (`src/native_renderer/luau_ui.zig`). Other keys are ignored by the adapter.
 
 ### `class`
 
 - `class = "..."` stores a whitespace-separated class string into `SolidNode.class_name`.
 - Classes are parsed on-demand into a `tailwind.Spec` (`src/retained/style/tailwind/parse.zig`) and applied in layout/render.
 
-### `props.src: string`
+### `src: string`
 
 Sets the node source string (used by `image` and `icon`).
 
 Example:
 
 ```luau
-Tag.image({ class = "w-16 h-16", props = { src = "assets/sprite.png" } })()
+Tag.image({ class = "w-16 h-16", src = "assets/sprite.png" })
 ```
 
-### `props.image: { src?: string, tint?: number, opacity?: number }`
+### `image: { src?: string, tint?: number, opacity?: number }`
 
 Image-specific configuration:
 
-- `src` (string): same as `props.src`
+- `src` (string): same as top-level `src`
 - `tint` (number): packed color `0xRRGGBBAA`
 - `opacity` (number): 0..1
 
@@ -131,11 +139,11 @@ Example:
 ```luau
 Tag.image({
   class = "w-16 h-16",
-  props = { image = { src = "assets/sprite.png", tint = 0xffffffff, opacity = 0.9 } },
-})()
+  image = { src = "assets/sprite.png", tint = 0xffffffff, opacity = 0.9 },
+})
 ```
 
-### `props.visual: { ... }`
+### `visual: { ... }`
 
 Explicit visual overrides. Supported keys:
 
@@ -151,10 +159,10 @@ Explicit visual overrides. Supported keys:
 Notes:
 
 - Tailwind classes override `background`, `textColor`, `textOutline*`, `cornerRadius`, `opacity`, and `clipChildren` **when present**.
-- Border color is currently **Tailwind-only** (`border-*`); there is no `props.visual.borderColor`.
+- Border color is currently **Tailwind-only** (`border-*`); there is no `visual.borderColor`.
 - `fontRenderMode` is an override stored separately from `visual`; `"auto"` clears the override.
 
-### `props.transform: { ... }` and `scale`
+### `transform: { ... }` and `scale`
 
 Transform affects rendering (and child coordinate space), not layout measurement.
 
@@ -169,11 +177,11 @@ Supported keys:
 - `translateX: number` (logical pixels)
 - `translateY: number` (logical pixels)
 
-You can also set a top-level `scale` on the node (outside `props`) which maps to `transform.scale`.
+You can also set a top-level `scale` on the node (outside `transform`) which maps to `transform.scale`.
 
 Note: Tailwind also supports a `scale-*` class which is a **layout scale** (it affects layout and sizing). Transform scale and layout scale are different and multiply together when both are used.
 
-### `props.scroll: { ... }` (accepted; currently not applied)
+### `scroll: { ... }` (accepted; currently not applied)
 
 Accepted keys:
 
@@ -186,7 +194,7 @@ Accepted keys:
 
 These values are stored on the node, but **scrolling is not currently wired into layout/render**.
 
-### `props.anchor: { ... }` (accepted; currently not applied)
+### `anchor: { ... }` (accepted; currently not applied)
 
 Accepted keys:
 
@@ -325,7 +333,7 @@ Layout scale (custom interpretation of Tailwind’s `scale-*`):
   - If `{N} < 10`, it’s treated as a direct factor: `scale-1.25` → `1.25`
   - Scale must be `> 0`
 
-This affects layout measurement and sizing/spacing under that node (it is not the same as `props.transform.scale`).
+This affects layout measurement and sizing/spacing under that node (it is not the same as `transform.scale`).
 
 Absolute positioning:
 

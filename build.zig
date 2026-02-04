@@ -182,6 +182,25 @@ pub fn build(b: *Build) !void {
 
     const luau_run_step = b.step("luau", "Run the Luau native renderer demo");
     luau_run_step.dependOn(&luau_run_cmd.step);
+
+    const luau_smoke_mod = b.createModule(.{
+        .root_source_file = b.path("tools/luau_smoke.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    luau_smoke_mod.addImport("luaz", luaz_dep.module("luaz"));
+    luau_smoke_mod.addImport("solidluau_embedded", solidluau_embedded_mod);
+
+    const luau_smoke_exe = b.addExecutable(.{
+        .name = "luau-smoke",
+        .root_module = luau_smoke_mod,
+        .use_lld = use_lld,
+    });
+
+    const luau_smoke_run_cmd = b.addRunArtifact(luau_smoke_exe);
+    const luau_smoke_step = b.step("luau-smoke", "Run headless Luau smoke tests");
+    luau_smoke_step.dependOn(&luau_smoke_run_cmd.step);
 }
 
 fn detectLinuxDisplayBackend(b: *Build, target: Build.ResolvedTarget) LinuxDisplayBackend {
