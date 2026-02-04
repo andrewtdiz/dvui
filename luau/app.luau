@@ -22,7 +22,7 @@ local function App()
     class = "w-full h-full flex items-center justify-center bg-neutral-950",
   }){
     div({
-      class = "px-6 py-3 rounded-xl text-lg bg-amber-700 text-white cursor-pointer flex flex-col gap-2",
+      class = "px-6 py-3 rounded-xl border-2 border-black text-lg text-white cursor-pointer flex flex-col gap-2",
     }){
       button({
         class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200",
@@ -36,14 +36,22 @@ local function App()
           src = "assets/sprite.png",
         },
       })(),
-      div({ class = "w-64 h-6 p-0.5 bg-red-500 rounded-full border-2 border-black"}) {
+      div({ class = "w-64 h-6 bg-red-500 rounded-full border-2 border-black"}) {
           div({
-            class = "w-full h-full bg-white rounded-full",
+            class = "w-full h-full bg-green-500 rounded-full",
             props = {
-              transform = { scaleX = scale_x, anchorX = 0, anchorY = 0 },
+              transform = {
+                scaleX = scale_x,
+                anchorX = 0,
+                anchorY = 0,
+              },
             },
           })(),
-          p({ class = "absolute left-[50%] top-[50%] anchor-center text-black font-bold"}){ scale_x }
+          p({ class = "absolute left-[50%] top-[50%] anchor-center text-black font-bold"}){
+            function()
+              return string.format("%.1f%%", scale_x() * 100)
+            end,
+          }
       },
     },
   }
