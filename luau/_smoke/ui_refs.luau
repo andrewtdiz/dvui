@@ -15,17 +15,18 @@ local card = root.card
 local root_children = root.children
 assert_ok(type(root_children) == "table" and #root_children == 1, "root children")
 assert_ok(root_children[1] == card, "card identity")
+assert_ok(card.parent == root, "parent link")
 
-Hydrate(root)({})
+Hydrate(root)()
 assert_ok(root.children == root_children, "no-op preserves children")
 
 local card_children = card.children
 assert_ok(type(card_children) == "table" and #card_children == 3, "card children")
+assert_ok(type(card.icon) == "table" and card.icon.tag == "image", "icon node")
+assert_ok(card.icon.src == "assets/sprite.png", "icon src")
 
-Hydrate(root){
-  Hydrate(card){
-    class = "x",
-  },
+Hydrate(card){
+  class = "x",
 }
 
 assert_ok(root.children == root_children and #root_children == 1, "root children kept")
@@ -39,8 +40,16 @@ Hydrate(card.button){
 }
 assert_ok(type(card.button.children) == "table" and card.button.children[1] == "X", "children patch")
 
-local replacement = { tag = "image", key = "icon", class = "z" }
-Hydrate(card){ replacement }
+local App = require("luau/app")
+local SolidLuau = require("solidluau")
+local app_root = SolidLuau.createRoot(function(destroy)
+  local node = App()
+  destroy()
+  return node
+end)
+local app_card = app_root.card
+local app_icon = app_card.icon
 
-assert_ok(card.icon == replacement, "named link replaced")
-assert_ok(replacement.parent == card, "parent set on replacement")
+assert_ok(type(app_icon) == "table" and app_icon.tag == "image", "app icon exists")
+assert_ok(app_icon.src == "assets/sprite.png", "app icon src")
+assert_ok(type(app_card.children) == "table" and #app_card.children == 3, "app card children kept")

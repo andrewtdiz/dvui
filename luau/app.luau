@@ -33,31 +33,27 @@ local function App()
   local row = card.row
   local track = row.track
 
-  return hydrate(root){
-    hydrate(card){
-        hydrate(card.button){
-        onClick = function()
-          set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
-        end,
-      },
-      hydrate(row){
-        hydrate(track){
-            hydrate(track.fill){
-            transform = {
-              scaleX = scaleX,
-              anchorX = 0,
-              anchorY = 0,
-            },
-          },
-          hydrate(track.label){
-            children = function()
-              return string.format("%s/%s", tostring(math.floor(scale_x_target() * 100)), tostring(100))
-            end,
-          },
-        },
-      },
+  hydrate(card.button){
+    onClick = function()
+      set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
+    end,
+  }
+
+  hydrate(track.fill){
+    transform = {
+      scaleX = scaleX,
+      anchorX = 0,
+      anchorY = 0,
     },
   }
+
+  hydrate(track.label){
+    children = function()
+      return string.format("%s/%s", tostring(math.floor(scale_x_target() * 100)), tostring(100))
+    end,
+  }
+
+  return root
 end
 
 return App
