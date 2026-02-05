@@ -13,6 +13,440 @@ const CodegenError = Allocator.Error || error{
     UnknownField,
 };
 
+const Json5Error = Allocator.Error || error{
+    UnterminatedString,
+    UnterminatedComment,
+    InvalidEscape,
+    InvalidUnicodeEscape,
+};
+
+const Json5ContainerKind = enum { object, array };
+const Json5Expect = enum { key_or_end, colon, value_or_end, comma_or_end };
+const Json5Container = struct { kind: Json5ContainerKind, expect: Json5Expect };
+
+fn json5SkipSpaceAndComments(src: []const u8, start: usize) Json5Error!usize {
+    var i = start;
+    while (i < src.len) {
+        const c = src[i];
+        if (std.ascii.isWhitespace(c)) {
+            i += 1;
+            continue;
+        }
+
+        if (c == '/' and i + 1 < src.len) {
+            const next = src[i + 1];
+            if (next == '/') {
+                i += 2;
+                while (i < src.len and src[i] != '\n' and src[i] != '\r') : (i += 1) {}
+                continue;
+            }
+            if (next == '*') {
+                i += 2;
+                while (i + 1 < src.len and !(src[i] == '*' and src[i + 1] == '/')) : (i += 1) {}
+                if (i + 1 >= src.len) return error.UnterminatedComment;
+                i += 2;
+                continue;
+            }
+        }
+        break;
+    }
+    return i;
+}
+
+fn json5IsIdentStart(c: u8) bool {
+    return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '_' or c == '$';
+}
+
+fn json5IsIdentContinue(c: u8) bool {
+    return json5IsIdentStart(c) or (c >= '0' and c <= '9');
+}
+
+fn json5IsHexDigit(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+}
+
+fn json5HexValue(c: u8) u4 {
+    if (c >= '0' and c <= '9') return @intCast(c - '0');
+    if (c >= 'a' and c <= 'f') return @intCast(10 + (c - 'a'));
+    return @intCast(10 + (c - 'A'));
+}
+
+fn json5EmitUnicodeScalar(out: *std.ArrayList(u8), allocator: std.mem.Allocator, scalar: u21) !void {
+    if (scalar == '"') {
+        try out.appendSlice(allocator, "\\\"");
+        return;
+    }
+    if (scalar == '\\') {
+        try out.appendSlice(allocator, "\\\\");
+        return;
+    }
+    if (scalar == '\n') {
+        try out.appendSlice(allocator, "\\n");
+        return;
+    }
+    if (scalar == '\r') {
+        try out.appendSlice(allocator, "\\r");
+        return;
+    }
+    if (scalar == '\t') {
+        try out.appendSlice(allocator, "\\t");
+        return;
+    }
+    if (scalar == 0x08) {
+        try out.appendSlice(allocator, "\\b");
+        return;
+    }
+    if (scalar == 0x0C) {
+        try out.appendSlice(allocator, "\\f");
+        return;
+    }
+    if (scalar < 0x20) {
+        try out.writer(allocator).print("\\u{X:0>4}", .{@as(u16, @intCast(scalar))});
+        return;
+    }
+
+    var buf: [4]u8 = undefined;
+    const len_u3 = std.unicode.utf8Encode(scalar, &buf) catch {
+        try out.appendSlice(allocator, "\xEF\xBF\xBD");
+        return;
+    };
+    const len: usize = @intCast(len_u3);
+    try out.appendSlice(allocator, buf[0..len]);
+}
+
+fn json5ParseHex(src: []const u8, start: usize, count: usize) Json5Error!struct { value: u32, end: usize } {
+    if (start + count > src.len) return error.InvalidUnicodeEscape;
+    var value: u32 = 0;
+    var i = start;
+    while (i < start + count) : (i += 1) {
+        const c = src[i];
+        if (!json5IsHexDigit(c)) return error.InvalidUnicodeEscape;
+        value = (value << 4) | json5HexValue(c);
+    }
+    return .{ .value = value, .end = start + count };
+}
+
+fn json5ParseUnicodeEscape(src: []const u8, start: usize) Json5Error!struct { scalar: u21, end: usize } {
+    if (start >= src.len) return error.InvalidUnicodeEscape;
+
+    if (src[start] == '{') {
+        var i = start + 1;
+        if (i >= src.len) return error.InvalidUnicodeEscape;
+        var value: u32 = 0;
+        var digits: usize = 0;
+        while (i < src.len and src[i] != '}') : (i += 1) {
+            const c = src[i];
+            if (!json5IsHexDigit(c)) return error.InvalidUnicodeEscape;
+            value = (value << 4) | json5HexValue(c);
+            digits += 1;
+            if (digits > 6) return error.InvalidUnicodeEscape;
+        }
+        if (i >= src.len or src[i] != '}') return error.InvalidUnicodeEscape;
+        const scalar: u21 = @intCast(value);
+        return .{ .scalar = scalar, .end = i + 1 };
+    }
+
+    const parsed = try json5ParseHex(src, start, 4);
+    const scalar: u21 = @intCast(parsed.value);
+    return .{ .scalar = scalar, .end = parsed.end };
+}
+
+fn json5ParseString(out: *std.ArrayList(u8), allocator: std.mem.Allocator, src: []const u8, start: usize) Json5Error!usize {
+    const delim = src[start];
+    var i = start + 1;
+    try out.append(allocator, '"');
+
+    while (i < src.len) {
+        const c = src[i];
+        if (c == delim) {
+            try out.append(allocator, '"');
+            return i + 1;
+        }
+        if (c == '\\') {
+            i += 1;
+            if (i >= src.len) return error.InvalidEscape;
+            const esc = src[i];
+            if (esc == '\n') {
+                i += 1;
+                continue;
+            }
+            if (esc == '\r') {
+                if (i + 1 < src.len and src[i + 1] == '\n') {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+
+            switch (esc) {
+                '"', '\\', '/' => try json5EmitUnicodeScalar(out, allocator, @intCast(esc)),
+                '\'' => try json5EmitUnicodeScalar(out, allocator, '\''),
+                'b' => try json5EmitUnicodeScalar(out, allocator, 0x08),
+                'f' => try json5EmitUnicodeScalar(out, allocator, 0x0C),
+                'n' => try json5EmitUnicodeScalar(out, allocator, '\n'),
+                'r' => try json5EmitUnicodeScalar(out, allocator, '\r'),
+                't' => try json5EmitUnicodeScalar(out, allocator, '\t'),
+                'v' => try json5EmitUnicodeScalar(out, allocator, 0x0B),
+                '0' => try json5EmitUnicodeScalar(out, allocator, 0x00),
+                'x' => {
+                    const parsed = try json5ParseHex(src, i + 1, 2);
+                    try json5EmitUnicodeScalar(out, allocator, @intCast(parsed.value));
+                    i = parsed.end - 1;
+                },
+                'u' => {
+                    const ustart = i + 1;
+                    const parsed = try json5ParseUnicodeEscape(src, ustart);
+                    var scalar = parsed.scalar;
+                    var end = parsed.end;
+
+                    if (scalar >= 0xD800 and scalar <= 0xDBFF and end + 1 < src.len and src[end] == '\\' and src[end + 1] == 'u') {
+                        const next_parsed = json5ParseUnicodeEscape(src, end + 2) catch null;
+                        if (next_parsed) |np| {
+                            const low = np.scalar;
+                            if (low >= 0xDC00 and low <= 0xDFFF) {
+                                const high_ten: u32 = @intCast(scalar - 0xD800);
+                                const low_ten: u32 = @intCast(low - 0xDC00);
+                                const combined: u32 = 0x10000 + ((high_ten << 10) | low_ten);
+                                scalar = @intCast(combined);
+                                end = np.end;
+                            }
+                        }
+                    }
+
+                    try json5EmitUnicodeScalar(out, allocator, scalar);
+                    i = end - 1;
+                },
+                else => try json5EmitUnicodeScalar(out, allocator, @intCast(esc)),
+            }
+
+            i += 1;
+            continue;
+        }
+
+        try json5EmitUnicodeScalar(out, allocator, @intCast(c));
+        i += 1;
+    }
+
+    return error.UnterminatedString;
+}
+
+fn json5ParseNumberToken(src: []const u8, start: usize) usize {
+    var i = start;
+    if (i < src.len and (src[i] == '+' or src[i] == '-')) i += 1;
+    if (i + 1 < src.len and src[i] == '0' and (src[i + 1] == 'x' or src[i + 1] == 'X')) {
+        i += 2;
+        while (i < src.len and json5IsHexDigit(src[i])) : (i += 1) {}
+        return i;
+    }
+    if (i < src.len and src[i] == '.') {
+        i += 1;
+        while (i < src.len and std.ascii.isDigit(src[i])) : (i += 1) {}
+    } else {
+        while (i < src.len and std.ascii.isDigit(src[i])) : (i += 1) {}
+        if (i < src.len and src[i] == '.') {
+            i += 1;
+            while (i < src.len and std.ascii.isDigit(src[i])) : (i += 1) {}
+        }
+    }
+    if (i < src.len and (src[i] == 'e' or src[i] == 'E')) {
+        i += 1;
+        if (i < src.len and (src[i] == '+' or src[i] == '-')) i += 1;
+        while (i < src.len and std.ascii.isDigit(src[i])) : (i += 1) {}
+    }
+    return i;
+}
+
+fn json5EmitNumber(out: *std.ArrayList(u8), allocator: std.mem.Allocator, token: []const u8) !void {
+    var s = token;
+    if (s.len == 0) {
+        try out.appendSlice(allocator, "0");
+        return;
+    }
+    if (s[0] == '+') s = s[1..];
+
+    var negative = false;
+    if (s.len > 0 and s[0] == '-') {
+        negative = true;
+        s = s[1..];
+    }
+
+    if (s.len >= 2 and s[0] == '0' and (s[1] == 'x' or s[1] == 'X')) {
+        const digits = s[2..];
+        const value = std.fmt.parseInt(u64, digits, 16) catch 0;
+        if (negative) {
+            try out.writer(allocator).print("-{d}", .{value});
+        } else {
+            try out.writer(allocator).print("{d}", .{value});
+        }
+        return;
+    }
+
+    if (s.len >= 1 and s[0] == '.') {
+        if (negative) {
+            try out.appendSlice(allocator, "-0");
+        } else {
+            try out.append(allocator, '0');
+        }
+        try out.appendSlice(allocator, s);
+        return;
+    }
+    if (s.len >= 2 and s[0] == '0' and s[1] == '.') {
+        if (negative) try out.append(allocator, '-');
+        try out.appendSlice(allocator, s);
+        if (s[s.len - 1] == '.') try out.append(allocator, '0');
+        return;
+    }
+
+    if (s.len > 0 and s[s.len - 1] == '.') {
+        if (negative) try out.append(allocator, '-');
+        try out.appendSlice(allocator, s);
+        try out.append(allocator, '0');
+        return;
+    }
+
+    const is_float = std.mem.indexOfScalar(u8, s, '.') != null or std.mem.indexOfAny(u8, s, "eE") != null;
+    if (is_float) {
+        const parsed = std.fmt.parseFloat(f64, if (negative) token else s) catch 0.0;
+        try out.writer(allocator).print("{d}", .{parsed});
+        return;
+    }
+
+    const full = if (negative) token else s;
+    const parsed = std.fmt.parseInt(i64, full, 10) catch 0;
+    try out.writer(allocator).print("{d}", .{parsed});
+}
+
+fn normalizeJson5(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    var stack: std.ArrayList(Json5Container) = .empty;
+    defer stack.deinit(allocator);
+
+    var i: usize = 0;
+    if (src.len >= 3 and src[0] == 0xEF and src[1] == 0xBB and src[2] == 0xBF) {
+        i = 3;
+    }
+
+    while (true) {
+        i = try json5SkipSpaceAndComments(src, i);
+        if (i >= src.len) break;
+        const c = src[i];
+
+        const has_ctx = stack.items.len > 0;
+        const top_index = if (has_ctx) stack.items.len - 1 else 0;
+        const in_object_key = has_ctx and stack.items[top_index].kind == .object and stack.items[top_index].expect == .key_or_end;
+
+        if (c == '"' or c == '\'') {
+            i = try json5ParseString(&out, allocator, src, i);
+            if (in_object_key) {
+                stack.items[top_index].expect = .colon;
+            } else if (has_ctx) {
+                stack.items[top_index].expect = .comma_or_end;
+            }
+            continue;
+        }
+
+        if (c == ',' and has_ctx) {
+            const next_i = try json5SkipSpaceAndComments(src, i + 1);
+            if (next_i < src.len and (src[next_i] == '}' or src[next_i] == ']')) {
+                i += 1;
+                continue;
+            }
+            try out.append(allocator, ',');
+            stack.items[top_index].expect = if (stack.items[top_index].kind == .object) .key_or_end else .value_or_end;
+            i += 1;
+            continue;
+        }
+
+        if (c == ':' and has_ctx and stack.items[top_index].kind == .object) {
+            try out.append(allocator, ':');
+            stack.items[top_index].expect = .value_or_end;
+            i += 1;
+            continue;
+        }
+
+        if (c == '{') {
+            if (has_ctx and !in_object_key) {
+                stack.items[top_index].expect = .comma_or_end;
+            }
+            try out.append(allocator, '{');
+            try stack.append(allocator, .{ .kind = .object, .expect = .key_or_end });
+            i += 1;
+            continue;
+        }
+
+        if (c == '[') {
+            if (has_ctx and !in_object_key) {
+                stack.items[top_index].expect = .comma_or_end;
+            }
+            try out.append(allocator, '[');
+            try stack.append(allocator, .{ .kind = .array, .expect = .value_or_end });
+            i += 1;
+            continue;
+        }
+
+        if (c == '}' or c == ']') {
+            try out.append(allocator, c);
+            if (has_ctx) {
+                _ = stack.pop();
+            }
+            i += 1;
+            continue;
+        }
+
+        if (c == '+' or c == '-' or c == '.' or std.ascii.isDigit(c)) {
+            const end = json5ParseNumberToken(src, i);
+            const token = src[i..end];
+            try json5EmitNumber(&out, allocator, token);
+            if (in_object_key) {
+                stack.items[top_index].expect = .colon;
+            } else if (has_ctx) {
+                stack.items[top_index].expect = .comma_or_end;
+            }
+            i = end;
+            continue;
+        }
+
+        if (json5IsIdentStart(c)) {
+            var end = i + 1;
+            while (end < src.len and json5IsIdentContinue(src[end])) : (end += 1) {}
+            const ident = src[i..end];
+
+            if (in_object_key) {
+                try out.append(allocator, '"');
+                try out.appendSlice(allocator, ident);
+                try out.append(allocator, '"');
+                stack.items[top_index].expect = .colon;
+                i = end;
+                continue;
+            }
+
+            if (std.mem.eql(u8, ident, "true") or std.mem.eql(u8, ident, "false") or std.mem.eql(u8, ident, "null")) {
+                try out.appendSlice(allocator, ident);
+            } else if (std.mem.eql(u8, ident, "Infinity") or std.mem.eql(u8, ident, "NaN") or std.mem.eql(u8, ident, "undefined")) {
+                try out.appendSlice(allocator, "null");
+            } else {
+                try out.append(allocator, '"');
+                try out.appendSlice(allocator, ident);
+                try out.append(allocator, '"');
+            }
+
+            if (has_ctx) {
+                stack.items[top_index].expect = .comma_or_end;
+            }
+            i = end;
+            continue;
+        }
+
+        try out.append(allocator, c);
+        i += 1;
+    }
+
+    return out.toOwnedSlice(allocator);
+}
+
 const Child = union(enum) {
     primitive: std.json.Value,
     node: *Node,
@@ -62,7 +496,10 @@ pub fn main() !void {
     const input_bytes = try std.fs.cwd().readFileAlloc(gpa_allocator, input_path, 1024 * 1024 * 8);
     defer gpa_allocator.free(input_bytes);
 
-    const parsed = try std.json.parseFromSlice(std.json.Value, gpa_allocator, input_bytes, .{ .allocate = .alloc_always });
+    const normalized = try normalizeJson5(gpa_allocator, input_bytes);
+    defer gpa_allocator.free(normalized);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa_allocator, normalized, .{ .allocate = .alloc_always });
     defer parsed.deinit();
 
     var key_set: std.StringHashMapUnmanaged(void) = .empty;
@@ -278,65 +715,73 @@ fn parseNodeSpec(
 
     var class_value: ?[]const u8 = null;
     if (obj.get("class")) |v| {
-        if (v != .string) return error.InvalidSchema;
-        class_value = v.string;
+        if (v == .string) {
+            class_value = v.string;
+        }
     }
 
     var props_value: ?std.json.Value = null;
     if (obj.get("props")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        props_value = v;
+        if (v == .object) {
+            props_value = v;
+        }
     }
 
     var scale_value: ?std.json.Value = null;
     if (obj.get("scale")) |v| {
         switch (v) {
-            .integer, .float, .number_string => {},
-            else => return error.InvalidSchema,
+            .integer, .float, .number_string => scale_value = v,
+            else => {},
         }
-        scale_value = v;
     }
 
     var visual_value: ?std.json.Value = null;
     if (obj.get("visual")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        visual_value = v;
+        if (v == .object) {
+            visual_value = v;
+        }
     }
 
     var transform_value: ?std.json.Value = null;
     if (obj.get("transform")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        transform_value = v;
+        if (v == .object) {
+            transform_value = v;
+        }
     }
 
     var scroll_value: ?std.json.Value = null;
     if (obj.get("scroll")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        scroll_value = v;
+        if (v == .object) {
+            scroll_value = v;
+        }
     }
 
     var anchor_value: ?std.json.Value = null;
     if (obj.get("anchor")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        anchor_value = v;
+        if (v == .object) {
+            anchor_value = v;
+        }
     }
 
     var image_value: ?std.json.Value = null;
     if (obj.get("image")) |v| {
-        if (v != .object) return error.InvalidSchema;
-        image_value = v;
+        if (v == .object) {
+            image_value = v;
+        }
     }
 
     var src_value: ?std.json.Value = null;
     if (obj.get("src")) |v| {
-        if (v != .string) return error.InvalidSchema;
-        src_value = v;
+        if (v == .string) {
+            src_value = v;
+        }
     }
 
     var listen_value: ?std.json.Value = null;
     if (obj.get("listen")) |v| {
-        if (v != .array) return error.InvalidSchema;
-        listen_value = v;
+        if (v == .array) {
+            listen_value = v;
+        }
     }
 
     var children_list: std.ArrayList(Child) = .empty;
@@ -350,25 +795,6 @@ fn parseNodeSpec(
                 try children_list.append(allocator, child);
             }
         }
-    }
-
-    var it = obj.iterator();
-    while (it.next()) |entry| {
-        const k = entry.key_ptr.*;
-        if (std.mem.eql(u8, k, "tag")) continue;
-        if (std.mem.eql(u8, k, "key")) continue;
-        if (std.mem.eql(u8, k, "class")) continue;
-        if (std.mem.eql(u8, k, "props")) continue;
-        if (std.mem.eql(u8, k, "scale")) continue;
-        if (std.mem.eql(u8, k, "visual")) continue;
-        if (std.mem.eql(u8, k, "transform")) continue;
-        if (std.mem.eql(u8, k, "scroll")) continue;
-        if (std.mem.eql(u8, k, "anchor")) continue;
-        if (std.mem.eql(u8, k, "image")) continue;
-        if (std.mem.eql(u8, k, "src")) continue;
-        if (std.mem.eql(u8, k, "listen")) continue;
-        if (std.mem.eql(u8, k, "children")) continue;
-        return error.UnknownField;
     }
 
     const node_ptr = try allocator.create(Node);
@@ -406,64 +832,10 @@ fn emitModule(
     try emitNodeTypeDecls(allocator, writer, root, &emitted_types, links);
 
     const root_key = root.key orelse return error.MissingRoot;
-    try writer.writeAll("export type UI = {\n");
-    try writer.writeAll("  root: Node_");
+    try writer.writeAll("export type Root = Node_");
     try writer.writeAll(root_key);
-    try writer.writeAll(",\n");
-    try writer.writeAll("}\n\n");
-
-    try writer.writeAll("export type Patches = { [Types.UINode]: Types.NodePatch }\n\n");
-
-    try writer.writeAll("local function link_parents(node: Types.UINode, parent: Types.UINode?)\n");
-    try writer.writeAll("  node.parent = parent\n");
-    try writer.writeAll("  local children = node.children\n");
-    try writer.writeAll("  if type(children) ~= \"table\" then\n");
-    try writer.writeAll("    return\n");
-    try writer.writeAll("  end\n");
-    try writer.writeAll("  if children.tag ~= nil then\n");
-    try writer.writeAll("    link_parents(children, node)\n");
-    try writer.writeAll("    return\n");
-    try writer.writeAll("  end\n");
-    try writer.writeAll("  if children.__kind ~= nil then\n");
-    try writer.writeAll("    return\n");
-    try writer.writeAll("  end\n");
-    try writer.writeAll("  for _, child in ipairs(children) do\n");
-    try writer.writeAll("    if type(child) == \"table\" and child.tag ~= nil then\n");
-    try writer.writeAll("      link_parents(child, node)\n");
-    try writer.writeAll("    end\n");
-    try writer.writeAll("  end\n");
-    try writer.writeAll("end\n\n");
-
-    try writer.writeAll("local function create(): UI\n");
-
-    var emitted: std.StringHashMapUnmanaged(void) = .empty;
-    defer emitted.deinit(allocator);
-
-    try emitNodeDecls(allocator, writer, root, &emitted, 1);
-
-    for (links) |link| {
-        try emitIndent(writer, 1);
-        try emitNodeVar(writer, link.parent_key);
-        try writer.writeAll(".");
-        try writer.writeAll(link.child_key);
-        try writer.writeAll(" = ");
-        try emitNodeVar(writer, link.child_key);
-        try writer.writeAll("\n");
-    }
-
-    try emitIndent(writer, 1);
-    try writer.writeAll("link_parents(");
-    try emitNodeVar(writer, root_key);
-    try writer.writeAll(", nil)\n");
-
-    try emitIndent(writer, 1);
-    try writer.writeAll("return { root = ");
-    try emitNodeVar(writer, root_key);
-    try writer.writeAll(" }\nend\n\n");
-
-    try writer.writeAll("local UI = create()\n");
-    try writer.writeAll("UI.create = create\n");
-    try writer.writeAll("return UI\n");
+    try writer.writeAll("\n\n");
+    try writer.writeAll("return {}\n");
 }
 
 fn emitNodeDecls(

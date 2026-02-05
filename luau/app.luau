@@ -1,50 +1,59 @@
 local SolidLuau = require("solidluau")
-local Bar = require("luau/components/bar")
 
-local dsl = SolidLuau.ui
 local reactivity = SolidLuau
+local animation = SolidLuau.animation
 
-local Tag = dsl.Tag
-
-local div = Tag.div
-local button = Tag.button
-local image = Tag.image
+local UI = require("luau/ui_gen/app_ui")
+local LoadUI = require("luau/ui/load_ui")
+local hydrate = require("ui/hydrate")
 
 local createSignal = reactivity.createSignal
 
 local scale_x_target, set_scale_x_target = createSignal(1)
 
+local function clamp01(n)
+  if n < 0 then
+    return 0
+  end
+  if n > 1 then
+    return 1
+  end
+  return n
+end
+
 local function App()
-  return div({
-    class = "w-full h-full flex items-center justify-center bg-neutral-950",
-  }){
-    div({
-      class = "px-6 py-3 rounded-xl border-2 border-blue-500 text-lg text-white cursor-pointer flex flex-col gap-2",
-    }){
-      button({
-        class = "bg-neutral-700 hover:bg-neutral-800 text-amber-200",
+  local function scale_value()
+    return clamp01(scale_x_target())
+  end
+
+  local scaleX = animation.createTween(scale_value, { duration = 0.3, easing = animation.easing.outCubic })
+
+  local root: UI.Node_root = LoadUI.from_json("luau/ui_json/app.json")
+  local card = root.card
+  local row = card.row
+  local track = row.track
+
+  return hydrate(root){
+    hydrate(card){
+        hydrate(card.button){
         onClick = function()
-            set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
+          set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
         end,
-      }){ "Hover me" },
-      image({
-        class = "w-16 h-16",
-        src = "assets/sprite.png",
-      }),
-      div({ class = "flex items-center gap-3" }){
-        Bar.Track({ class = "h-6 w-64 rounded-full bg-red-500 border-2 border-black" }){
-          Bar.Fill({
-            class = "bg-green-500 rounded-full",
-            percent = function()
-              return scale_x_target() * 100
+      },
+      hydrate(row){
+        hydrate(track){
+            hydrate(track.fill){
+            transform = {
+              scaleX = scaleX,
+              anchorX = 0,
+              anchorY = 0,
+            },
+          },
+          hydrate(track.label){
+            children = function()
+              return string.format("%s/%s", tostring(math.floor(scale_x_target() * 100)), tostring(100))
             end,
-          }),
-          Bar.Label({
-            current = function()
-              return math.floor(scale_x_target() * 100)
-            end,
-            max = 100
-          }),
+          },
         },
       },
     },
