@@ -348,7 +348,8 @@ pub fn renderFrame(renderer: *Renderer) void {
         const retained_store = utils.retainedStore(renderer);
         var retained_timings: retained.FrameTimings = .{};
         const retained_start_ns = profiling.mark();
-        const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_ptr, retained_store.?, true, &retained_timings);
+        const retained_event_ring_for_render = if (renderer.lua_ready) retained_event_ring_ptr else null;
+        const drew_retained = renderer.retained_store_ready and retained_store != null and retained.render(retained_event_ring_for_render, retained_store.?, true, &retained_timings);
         profiling.addRetained(&renderer.profiler, retained_start_ns, retained_timings);
         if (!drew_retained) {
             const commands_start_ns = profiling.mark();
