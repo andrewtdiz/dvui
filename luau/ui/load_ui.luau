@@ -2,6 +2,45 @@ local Types = require("ui/types")
 
 type UINode = Types.UINode
 
+local function compute_key_path(key: string?, parent: UINode?): string?
+  if type(key) ~= "string" or key == "" then
+    return nil
+  end
+  if parent == nil then
+    return key
+  end
+  local parent_path = parent.__keyPath
+  if type(parent_path) == "string" and parent_path ~= "" then
+    return parent_path .. "." .. key
+  end
+  local parent_key = parent.key
+  if type(parent_key) == "string" and parent_key ~= "" then
+    return parent_key .. "." .. key
+  end
+  return key
+end
+
+local function with_key_token(class_value: any, key_path: string): any
+  if type(class_value) == "string" then
+    if string.find(class_value, "__key=") ~= nil then
+      return class_value
+    end
+    if class_value == "" then
+      return "__key=" .. key_path
+    end
+    return class_value .. " __key=" .. key_path
+  end
+  if class_value == nil then
+    return "__key=" .. key_path
+  end
+  if type(class_value) == "function" then
+    return function()
+      return with_key_token(class_value(), key_path)
+    end
+  end
+  return class_value
+end
+
 local function build_node(spec: any, forced_key: string?, parent: UINode?): UINode
   if type(spec) ~= "table" then
     error("ui spec node must be table", 0)
@@ -33,6 +72,11 @@ local function build_node(spec: any, forced_key: string?, parent: UINode?): UINo
   node.tag = tag
   node.key = key
   node.parent = parent
+  local key_path = compute_key_path(key, parent)
+  node.__keyPath = key_path
+  if type(key_path) == "string" then
+    node.class = with_key_token(node.class, key_path)
+  end
 
   local children_spec = spec.children
   if type(children_spec) == "table" then

@@ -539,8 +539,9 @@ fn dumpLayout(allocator: std.mem.Allocator, cfg: RunConfig, store: *retained.Nod
     var seen_keys: std.StringHashMapUnmanaged(u32) = .empty;
     defer seen_keys.deinit(allocator);
 
-    try key_by_id.put(0, "root");
-    try seen_keys.putNoClobber(allocator, "root", 0);
+    const store_root_key = "$root";
+    try key_by_id.put(0, store_root_key);
+    try seen_keys.putNoClobber(allocator, store_root_key, 0);
 
     var stack: std.ArrayList(u32) = .empty;
     defer stack.deinit(allocator);
@@ -608,10 +609,17 @@ fn dumpLayout(allocator: std.mem.Allocator, cfg: RunConfig, store: *retained.Nod
     try w.writeAll("    \"scene\": ");
     try writeJsonString(&w, cfg.lua_entry);
     try w.writeAll(",\n");
-    try w.print("    \"width\": {d},\n", .{cfg.width});
-    try w.print("    \"height\": {d},\n", .{cfg.height});
-    try w.print("    \"pixelWidth\": {d},\n", .{cfg.pixel_width});
-    try w.print("    \"pixelHeight\": {d},\n", .{cfg.pixel_height});
+    const cw = dvui.currentWindow();
+    const win_size = cw.backend.windowSize();
+    const px_size = cw.backend.pixelSize();
+    const actual_width: u32 = @intFromFloat(@round(win_size.w));
+    const actual_height: u32 = @intFromFloat(@round(win_size.h));
+    const actual_pixel_width: u32 = @intFromFloat(@round(px_size.w));
+    const actual_pixel_height: u32 = @intFromFloat(@round(px_size.h));
+    try w.print("    \"width\": {d},\n", .{actual_width});
+    try w.print("    \"height\": {d},\n", .{actual_height});
+    try w.print("    \"pixelWidth\": {d},\n", .{actual_pixel_width});
+    try w.print("    \"pixelHeight\": {d},\n", .{actual_pixel_height});
     try w.print("    \"frame\": {d},\n", .{cfg.frames});
     try w.writeAll("    \"dt\": ");
     try writeFloatFixed(&w, cfg.dt, 6);
