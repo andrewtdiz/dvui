@@ -870,17 +870,32 @@ fn registerLuaFileLoader(renderer: *Renderer, lua: *luaz.Lua) void {
 fn loadLuaScript(renderer: *Renderer) bool {
     var file_opt: ?std.fs.File = null;
     var chosen_path: []const u8 = "";
-    for (lua_script_paths) |candidate| {
-        file_opt = std.fs.cwd().openFile(candidate, .{ .mode = .read_only }) catch null;
-        if (file_opt != null) {
-            chosen_path = candidate;
-            break;
-        }
-    }
 
-    if (file_opt == null) {
-        logMessage(renderer, 3, "lua script open failed (no candidate found)", .{});
-        return false;
+    if (renderer.lua_entry_path) |entry_path| {
+        file_opt = if (std.fs.path.isAbsolute(entry_path))
+            std.fs.openFileAbsolute(entry_path, .{ .mode = .read_only }) catch |err| {
+                logMessage(renderer, 3, "lua script open failed: {s} ({s})", .{ entry_path, @errorName(err) });
+                return false;
+            }
+        else
+            std.fs.cwd().openFile(entry_path, .{ .mode = .read_only }) catch |err| {
+                logMessage(renderer, 3, "lua script open failed: {s} ({s})", .{ entry_path, @errorName(err) });
+                return false;
+            };
+        chosen_path = entry_path;
+    } else {
+        for (lua_script_paths) |candidate| {
+            file_opt = std.fs.cwd().openFile(candidate, .{ .mode = .read_only }) catch null;
+            if (file_opt != null) {
+                chosen_path = candidate;
+                break;
+            }
+        }
+
+        if (file_opt == null) {
+            logMessage(renderer, 3, "lua script open failed (no candidate found)", .{});
+            return false;
+        }
     }
 
     var file = file_opt.?;
@@ -1126,6 +1141,10 @@ pub fn finalizeDestroy(renderer: *Renderer) void {
 // ============================================================
 
 pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.EventFn) ?*Renderer {
+    return createRendererWithLuaEntryImpl(log_cb, event_cb, null);
+}
+
+pub fn createRendererWithLuaEntryImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.EventFn, lua_entry_path: ?[]const u8) ?*Renderer {
     const renderer = std.heap.c_allocator.create(Renderer) catch return null;
 
     renderer.* = .{
@@ -1152,6 +1171,7 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
         .retained_store_ptr = null,
         .retained_event_ring_ptr = null,
         .retained_event_ring_ready = false,
+        .lua_entry_path = lua_entry_path,
         .lua_state = null,
         .lua_ui = null,
         .lua_ready = false,
@@ -1162,7 +1182,6 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
     renderer.allocator = renderer.gpa_instance.allocator();
     renderer.frame_arena = std.heap.ArenaAllocator.init(renderer.allocator);
 
-    // Initialize event ring buffer for retained Lua UI.
     const retained_ring_instance = renderer.allocator.create(retained.EventRing) catch {
         renderer.frame_arena.deinit();
         _ = renderer.gpa_instance.deinit();
@@ -1182,9 +1201,7 @@ pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.E
     renderer.retained_event_ring_ready = true;
 
     retained.init();
-
     initLua(renderer);
-
     return renderer;
 }
 

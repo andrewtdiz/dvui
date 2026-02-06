@@ -1,0 +1,13 @@
+{
+  "scenes": {
+    "app": {
+      "luaEntry": "luau/index.luau",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0,
+      "out": "artifacts/app.layout.json",
+      "baseline": "snapshots/app.layout.json"
+    }
+  }
+}

@@ -61,6 +61,7 @@ pub const Renderer = struct {
     // Event ring buffer for retained UI (Lua dispatch).
     retained_event_ring_ptr: ?*anyopaque = null,
     retained_event_ring_ready: bool = false,
+    lua_entry_path: ?[]const u8 = null,
     // Luau VM state for retained UI
     lua_state: ?*luaz.Lua = null,
     lua_ui: ?*luau_ui.LuaUi = null,

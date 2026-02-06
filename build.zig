@@ -213,6 +213,26 @@ pub fn build(b: *Build) !void {
     const luau_smoke_run_cmd = b.addRunArtifact(luau_smoke_exe);
     const luau_smoke_step = b.step("luau-smoke", "Run headless Luau smoke tests");
     luau_smoke_step.dependOn(&luau_smoke_run_cmd.step);
+
+    const luau_layout_dump_mod = b.createModule(.{
+        .root_source_file = b.path("tools/luau_layout_dump_main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    luau_layout_dump_mod.addImport("native_renderer", native_module);
+    luau_layout_dump_mod.addImport("dvui", dvui_wgpu_mod);
+    luau_layout_dump_mod.addImport("retained", retained_mod);
+
+    const luau_layout_dump_exe = b.addExecutable(.{
+        .name = "luau-layout-dump",
+        .root_module = luau_layout_dump_mod,
+        .use_lld = use_lld,
+    });
+    if (raylib_dep) |dep| {
+        luau_layout_dump_exe.linkLibrary(dep.artifact("raylib"));
+    }
+    b.installArtifact(luau_layout_dump_exe);
 }
 
 fn detectLinuxDisplayBackend(b: *Build, target: Build.ResolvedTarget) LinuxDisplayBackend {
