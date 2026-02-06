@@ -67,6 +67,7 @@ pub fn updateLayouts(store: *types.NodeStore) void {
     layout_updated = true;
     layout_force_recompute = has_layout_animation;
     updateLayoutIfDirty(store, root, root_rect);
+    applyAnchoredPlacement(store, root, root_rect);
     layout_force_recompute = false;
 }
 

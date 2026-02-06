@@ -1,6 +1,6 @@
 local Types = require("ui/types")
 
-export type Key = "button" | "card" | "fill" | "icon" | "label" | "root" | "row" | "track"
+export type Key = "button" | "card" | "fill" | "icon" | "label" | "root" | "row" | "tooltip" | "track"
 
 export type Node_button = Types.UINode & {
   parent: Types.UINode?,
@@ -36,9 +36,14 @@ export type Node_card = Types.UINode & {
   row: Node_row,
 }
 
+export type Node_tooltip = Types.UINode & {
+  parent: Types.UINode?,
+}
+
 export type Node_root = Types.UINode & {
   parent: Types.UINode?,
   card: Node_card,
+  tooltip: Node_tooltip,
 }
 
 export type Root = Node_root

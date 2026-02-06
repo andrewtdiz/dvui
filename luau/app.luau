@@ -32,11 +32,21 @@ local function App()
   local card = root.card
   local row = card.row
   local track = row.track
+  local tooltip = root.tooltip
 
   hydrate(card.button){
     onClick = function()
       set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
     end,
+  }
+
+  hydrate(tooltip){
+    anchor = {
+      anchorId = 3,
+      side = "top",
+      align = "center",
+      offset = 10,
+    },
   }
 
   hydrate(track.fill){

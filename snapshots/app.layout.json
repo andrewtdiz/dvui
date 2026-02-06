@@ -152,6 +152,32 @@
       "childRect": [753.41,521.76,93.18,29.95],
       "text": "100/100",
       "textHash": 973567294252186884
+    },
+    {
+      "id": 11,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-600 text-sm text-white z-tooltip __key=root.tooltip",
+      "keyPath": "root.tooltip",
+      "parentKeyPath": "root",
+      "rect": [572.00,278.40,184.08,50.54],
+      "childRect": [592.28,292.44,143.52,22.46],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 12,
+      "parent": 11,
+      "kind": "text",
+      "tag": "",
+      "class": "",
+      "keyPath": "root.tooltip/text[0]",
+      "parentKeyPath": "root.tooltip",
+      "rect": [592.28,292.44,143.52,22.46],
+      "childRect": [592.28,292.44,143.52,22.46],
+      "text": "Anchored tooltip",
+      "textHash": 10192710562516355780
     }
   ]
 }

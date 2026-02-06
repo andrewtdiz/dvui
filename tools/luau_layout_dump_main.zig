@@ -1130,6 +1130,10 @@ fn parseJsonU64(v: std.json.Value) !u64 {
             if (f < 0) return error.InvalidNumber;
             break :blk @intFromFloat(@round(f));
         },
+        .number_string => |s| blk: {
+            const parsed = std.fmt.parseInt(u64, s, 10) catch return error.InvalidNumber;
+            break :blk parsed;
+        },
         else => error.InvalidNumber,
     };
 }
