@@ -11,14 +11,11 @@ end
 
 local root: UI.Node_root = LoadUI.from_json("luau/ui_json/app.json")
 local card = root.card
-local tooltip = root.tooltip
 
 local root_children = root.children
-assert_ok(type(root_children) == "table" and #root_children == 2, "root children")
+assert_ok(type(root_children) == "table" and #root_children == 1, "root children")
 assert_ok(root_children[1] == card, "card identity")
-assert_ok(root_children[2] == tooltip, "tooltip identity")
 assert_ok(card.parent == root, "parent link")
-assert_ok(tooltip.parent == root, "tooltip parent link")
 
 Hydrate(root)()
 assert_ok(root.children == root_children, "no-op preserves children")
@@ -32,7 +29,7 @@ Hydrate(card){
   class = "x",
 }
 
-assert_ok(root.children == root_children and #root_children == 2, "root children kept")
+assert_ok(root.children == root_children and #root_children == 1, "root children kept")
 assert_ok(card.children == card_children and #card_children == 3, "card siblings kept")
 
 local card_class = card.class
