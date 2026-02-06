@@ -111,6 +111,16 @@ UI nodes use a single flat table of keys; `props = { ... }` is not supported.
 
 SolidLuau forwards a small, explicit set of node keys to the DVUI binding (`src/native_renderer/luau_ui.zig`). Other keys are ignored by the adapter.
 
+### Patch semantics
+
+When `ui.patch(id, ...)` is available, SolidLuau updates props by sending key/value pairs:
+
+- Key omitted: no change
+- Key present with table: apply partial update
+- Key present with `nil`: clear that prop bucket back to defaults
+
+`image = nil` clears `image.tint`/`image.opacity`, and clears the image source only if it was last set via `image.src` (not top-level `src`).
+
 ### `class`
 
 - `class = "..."` stores a whitespace-separated class string into `SolidNode.class_name`.

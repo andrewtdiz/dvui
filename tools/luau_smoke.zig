@@ -2,6 +2,8 @@ const std = @import("std");
 const luaz = @import("luaz");
 const solidluau_embedded = @import("solidluau_embedded");
 const event_payload = @import("event_payload");
+const retained = @import("retained");
+const luau_ui = @import("luau_ui");
 
 const RequireCtx = struct {
     allocator: std.mem.Allocator,
@@ -685,6 +687,109 @@ fn requireModule(lua: *luaz.Lua, id: []const u8) !void {
     }
 }
 
+fn runChunk(lua: *luaz.Lua, source: []const u8) !void {
+    const base_top = lua.state.getTop();
+    defer lua.state.setTop(base_top);
+
+    const compile_result = try luaz.Compiler.compile(source, .{});
+    defer compile_result.deinit();
+
+    if (compile_result == .err) {
+        std.debug.print("{s}\n", .{compile_result.err});
+        return error.LuaRuntime;
+    }
+
+    const load_status = lua.state.load("chunk", compile_result.ok, 0);
+    if (load_status != .ok) {
+        std.debug.print("load error: {s}\n", .{@tagName(load_status)});
+        return error.LuaRuntime;
+    }
+
+    const call_status = lua.state.pcall(0, 0, 0);
+    if (call_status != .ok) {
+        const err_z = lua.state.toString(-1) orelse "(non-string error)";
+        std.debug.print("{s}\n", .{err_z});
+        return error.LuaRuntime;
+    }
+}
+
+fn propClearSmoke(allocator: std.mem.Allocator) !void {
+    var store: retained.NodeStore = undefined;
+    try store.init(allocator);
+    defer store.deinit();
+
+    const allocator_ref = allocator;
+    var lua = try luaz.Lua.init(&allocator_ref);
+    defer lua.deinit();
+    lua.openLibs();
+
+    var ui: luau_ui.LuaUi = undefined;
+    try ui.init(&store, &lua, null);
+
+    try runChunk(&lua,
+        \\ui.create("div", 1, nil, nil)
+        \\ui.patch(1, ui.PropKey.Visual, { opacity = 0.5, clipChildren = true, fontRenderMode = "msdf" })
+        \\ui.patch(1, ui.PropKey.Visual, nil)
+        \\
+        \\ui.create("div", 2, nil, nil)
+        \\ui.patch(2, ui.PropKey.Transform, { scale = 2, translateX = 10 })
+        \\ui.patch(2, ui.PropKey.Transform, nil)
+        \\
+        \\ui.create("scroll", 3, nil, nil)
+        \\ui.patch(3, ui.PropKey.Scroll, { enabled = false, scrollX = 5, canvasWidth = 100, autoCanvas = false })
+        \\ui.patch(3, ui.PropKey.Scroll, nil)
+        \\
+        \\ui.create("div", 4, nil, nil)
+        \\ui.patch(4, ui.PropKey.Anchor, { anchorId = 99, side = "top", align = "center", offset = 12.5 })
+        \\ui.patch(4, ui.PropKey.Anchor, nil)
+        \\
+        \\ui.create("image", 5, nil, nil)
+        \\ui.patch(5, ui.PropKey.Src, "assets/sprite.png")
+        \\ui.patch(5, ui.PropKey.Image, { tint = 0x00ff00ff, opacity = 0.5 })
+        \\ui.patch(5, ui.PropKey.Image, nil)
+        \\
+        \\ui.create("image", 6, nil, nil)
+        \\ui.patch(6, ui.PropKey.Src, "assets/sprite.png")
+        \\ui.patch(6, ui.PropKey.Image, { src = "assets/other.png", tint = 0x00ff00ff, opacity = 0.5 })
+        \\ui.patch(6, ui.PropKey.Image, nil)
+    );
+
+    const n1 = store.node(1) orelse return error.SmokeFailed;
+    if (n1.visual_props.opacity != 1.0) return error.SmokeFailed;
+    if (n1.visual_props.clip_children) return error.SmokeFailed;
+    if (n1.font_render_mode_override != null) return error.SmokeFailed;
+
+    const n2 = store.node(2) orelse return error.SmokeFailed;
+    if (n2.transform.anchor[0] != 0.5 or n2.transform.anchor[1] != 0.5) return error.SmokeFailed;
+    if (n2.transform.scale[0] != 1 or n2.transform.scale[1] != 1) return error.SmokeFailed;
+    if (n2.transform.rotation != 0) return error.SmokeFailed;
+    if (n2.transform.translation[0] != 0 or n2.transform.translation[1] != 0) return error.SmokeFailed;
+
+    const n3 = store.node(3) orelse return error.SmokeFailed;
+    if (!n3.scroll.enabled) return error.SmokeFailed;
+    if (!n3.scroll.auto_canvas) return error.SmokeFailed;
+    if (n3.scroll.offset_x != 0 or n3.scroll.offset_y != 0) return error.SmokeFailed;
+    if (n3.scroll.canvas_width != 0 or n3.scroll.canvas_height != 0) return error.SmokeFailed;
+
+    const n4 = store.node(4) orelse return error.SmokeFailed;
+    if (n4.anchor_id != null) return error.SmokeFailed;
+    if (n4.anchor_side != .bottom) return error.SmokeFailed;
+    if (n4.anchor_align != .start) return error.SmokeFailed;
+    if (n4.anchor_offset != 0) return error.SmokeFailed;
+
+    const n5 = store.node(5) orelse return error.SmokeFailed;
+    if (!std.mem.eql(u8, n5.image_src, "assets/sprite.png")) return error.SmokeFailed;
+    if (n5.image_tint != null) return error.SmokeFailed;
+    if (n5.image_opacity != 1.0) return error.SmokeFailed;
+    if (n5.image_src_set_by_image_prop) return error.SmokeFailed;
+
+    const n6 = store.node(6) orelse return error.SmokeFailed;
+    if (n6.image_src.len != 0) return error.SmokeFailed;
+    if (n6.image_tint != null) return error.SmokeFailed;
+    if (n6.image_opacity != 1.0) return error.SmokeFailed;
+    if (n6.image_src_set_by_image_prop) return error.SmokeFailed;
+}
+
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
@@ -735,4 +840,5 @@ pub fn main() !void {
     lua.state.setGlobal("require");
 
     try requireModule(&lua, "luau/_smoke/ui_refs");
+    try propClearSmoke(allocator);
 }

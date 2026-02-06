@@ -217,6 +217,7 @@ pub const SolidNode = struct {
     image_src: []u8 = &.{},
     image_tint: ?PackedColor = null,
     image_opacity: f32 = 1.0,
+    image_src_set_by_image_prop: bool = false,
     icon_kind: IconKind = .auto,
     icon_glyph: []u8 = &.{},
     resolved_image_path: []u8 = &.{},

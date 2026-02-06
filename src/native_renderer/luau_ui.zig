@@ -214,7 +214,10 @@ fn applyPatch(self: *Self, id: u32, args: luaz.Lua.Varargs) !void {
             },
             @intFromEnum(PropKey.Transform) => {
                 const value_type = args.typeAt(index + 1) orelse return error.InvalidPatch;
-                if (value_type == .nil) continue;
+                if (value_type == .nil) {
+                    try self.clearTransform(id);
+                    continue;
+                }
                 const props_opt = args.at(luaz.Lua.Table, index + 1);
                 if (props_opt == null) return error.InvalidPatch;
                 var props = props_opt.?;
@@ -223,7 +226,10 @@ fn applyPatch(self: *Self, id: u32, args: luaz.Lua.Varargs) !void {
             },
             @intFromEnum(PropKey.Visual) => {
                 const value_type = args.typeAt(index + 1) orelse return error.InvalidPatch;
-                if (value_type == .nil) continue;
+                if (value_type == .nil) {
+                    try self.clearVisual(id);
+                    continue;
+                }
                 const props_opt = args.at(luaz.Lua.Table, index + 1);
                 if (props_opt == null) return error.InvalidPatch;
                 var props = props_opt.?;
@@ -232,7 +238,10 @@ fn applyPatch(self: *Self, id: u32, args: luaz.Lua.Varargs) !void {
             },
             @intFromEnum(PropKey.Scroll) => {
                 const value_type = args.typeAt(index + 1) orelse return error.InvalidPatch;
-                if (value_type == .nil) continue;
+                if (value_type == .nil) {
+                    try self.clearScroll(id);
+                    continue;
+                }
                 const props_opt = args.at(luaz.Lua.Table, index + 1);
                 if (props_opt == null) return error.InvalidPatch;
                 var props = props_opt.?;
@@ -241,7 +250,10 @@ fn applyPatch(self: *Self, id: u32, args: luaz.Lua.Varargs) !void {
             },
             @intFromEnum(PropKey.Anchor) => {
                 const value_type = args.typeAt(index + 1) orelse return error.InvalidPatch;
-                if (value_type == .nil) continue;
+                if (value_type == .nil) {
+                    try self.clearAnchor(id);
+                    continue;
+                }
                 const props_opt = args.at(luaz.Lua.Table, index + 1);
                 if (props_opt == null) return error.InvalidPatch;
                 var props = props_opt.?;
@@ -250,7 +262,10 @@ fn applyPatch(self: *Self, id: u32, args: luaz.Lua.Varargs) !void {
             },
             @intFromEnum(PropKey.Image) => {
                 const value_type = args.typeAt(index + 1) orelse return error.InvalidPatch;
-                if (value_type == .nil) continue;
+                if (value_type == .nil) {
+                    try self.clearImage(id);
+                    continue;
+                }
                 const props_opt = args.at(luaz.Lua.Table, index + 1);
                 if (props_opt == null) return error.InvalidPatch;
                 var props = props_opt.?;
@@ -316,13 +331,75 @@ fn setClass(self: *Self, id: u32, class_name: []const u8) !void {
 
 fn setSrc(self: *Self, id: u32, src: []const u8) !void {
     if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
     try self.store.setImageSource(id, src);
+    target.image_src_set_by_image_prop = false;
+}
+
+fn clearTransform(self: *Self, id: u32) !void {
+    if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
+    target.transform = .{};
+    self.store.markNodePaintChanged(id);
+}
+
+fn clearVisual(self: *Self, id: u32) !void {
+    if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
+    target.visual_props = .{};
+    self.store.setFontRenderMode(id, null);
+    self.store.markNodePaintChanged(id);
+}
+
+fn clearScroll(self: *Self, id: u32) !void {
+    if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
+    const enabled_default = std.mem.eql(u8, target.tag, "scrollframe") or std.mem.eql(u8, target.tag, "scroll");
+    target.scroll.enabled = enabled_default;
+    target.scroll.auto_canvas = enabled_default;
+    target.scroll.offset_x = 0;
+    target.scroll.offset_y = 0;
+    target.scroll.canvas_width = 0;
+    target.scroll.canvas_height = 0;
+    self.store.markNodeChanged(id);
+}
+
+fn clearAnchor(self: *Self, id: u32) !void {
+    if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
+    target.anchor_id = null;
+    target.anchor_side = .bottom;
+    target.anchor_align = .start;
+    target.anchor_offset = 0;
+    self.store.markNodeChanged(id);
+}
+
+fn clearImage(self: *Self, id: u32) !void {
+    if (id == 0) return error.MissingId;
+    const target = self.store.node(id) orelse return error.MissingId;
+    var paint_changed = false;
+    if (target.image_tint != null) {
+        target.image_tint = null;
+        paint_changed = true;
+    }
+    if (target.image_opacity != 1.0) {
+        target.image_opacity = 1.0;
+        paint_changed = true;
+    }
+    if (paint_changed) {
+        self.store.markNodePaintChanged(id);
+    }
+    if (target.image_src_set_by_image_prop) {
+        try self.store.setImageSource(id, "");
+        target.image_src_set_by_image_prop = false;
+    }
 }
 
 fn setImage(self: *Self, id: u32, props: luaz.Lua.Table) !void {
     if (id == 0) return error.MissingId;
     const target = self.store.node(id) orelse return error.MissingId;
     if (try readOptionalField([]const u8, props, "src")) |value| {
+        target.image_src_set_by_image_prop = true;
         if (!std.mem.eql(u8, target.image_src, value)) {
             try self.store.setImageSource(id, value);
         }

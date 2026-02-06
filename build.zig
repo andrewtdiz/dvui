@@ -201,6 +201,8 @@ pub fn build(b: *Build) !void {
     luau_smoke_mod.addImport("luaz", luaz_dep.module("luaz"));
     luau_smoke_mod.addImport("event_payload", event_payload_mod);
     luau_smoke_mod.addImport("solidluau_embedded", solidluau_embedded_mod);
+    luau_smoke_mod.addImport("retained", retained_mod);
+    luau_smoke_mod.addImport("luau_ui", luau_ui_mod);
 
     const luau_smoke_exe = b.addExecutable(.{
         .name = "luau-smoke",
