@@ -82,6 +82,14 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
     });
 
+    const event_payload_mod = b.createModule(.{
+        .root_source_file = b.path("src/native_renderer/event_payload.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    event_payload_mod.addImport("luaz", luaz_dep.module("luaz"));
+    event_payload_mod.addImport("retained", retained_mod);
+
     const native_module = b.createModule(.{
         .root_source_file = b.path("src/native_renderer/mod.zig"),
         .target = target,
@@ -114,6 +122,7 @@ pub fn build(b: *Build) !void {
     native_module.addImport("wgpu", wgpu_mod);
     native_module.addImport("wgpu-backend", wgpu_backend_mod);
     native_module.addImport("retained", retained_mod);
+    native_module.addImport("event_payload", event_payload_mod);
 
     const solidluau_embedded_mod = b.createModule(.{
         .root_source_file = b.path("solidluau_embedded.zig"),
@@ -190,6 +199,7 @@ pub fn build(b: *Build) !void {
         .link_libc = true,
     });
     luau_smoke_mod.addImport("luaz", luaz_dep.module("luaz"));
+    luau_smoke_mod.addImport("event_payload", event_payload_mod);
     luau_smoke_mod.addImport("solidluau_embedded", solidluau_embedded_mod);
 
     const luau_smoke_exe = b.addExecutable(.{

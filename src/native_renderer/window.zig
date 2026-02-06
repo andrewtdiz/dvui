@@ -8,6 +8,7 @@ const raygui = RaylibBackend.raygui;
 const webgpu = @import("webgpu");
 const retained = @import("retained");
 const luaz = @import("luaz");
+const event_payload = @import("event_payload");
 
 const commands = @import("commands.zig");
 const lifecycle = @import("lifecycle.zig");
@@ -177,12 +178,39 @@ fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.Eve
             }
         }
 
-        const kind_int: u32 = @intFromEnum(entry.kind);
+        const kind = entry.kind;
+        const kind_int: u32 = @intFromEnum(kind);
 
-        const call_result = globals.call("on_event", .{ kind_int, entry.node_id, detail }, void) catch |err| {
-            lifecycle.logLuaError(renderer, "on_event", err);
-            lifecycle.teardownLua(renderer);
-            return;
+        const call_result = switch (kind) {
+            .pointerdown,
+            .pointermove,
+            .pointerup,
+            .pointercancel,
+            .dragstart,
+            .drag,
+            .dragend,
+            .dragenter,
+            .dragleave,
+            .drop,
+            => blk: {
+                const payload_table = event_payload.pointerPayloadTable(lua_state, detail) catch |err| {
+                    lifecycle.logLuaError(renderer, "on_event payload", err);
+                    lifecycle.teardownLua(renderer);
+                    return;
+                };
+                defer payload_table.deinit();
+
+                break :blk globals.call("on_event", .{ kind_int, entry.node_id, payload_table }, void) catch |err| {
+                    lifecycle.logLuaError(renderer, "on_event", err);
+                    lifecycle.teardownLua(renderer);
+                    return;
+                };
+            },
+            else => globals.call("on_event", .{ kind_int, entry.node_id, detail }, void) catch |err| {
+                lifecycle.logLuaError(renderer, "on_event", err);
+                lifecycle.teardownLua(renderer);
+                return;
+            },
         };
         switch (call_result) {
             .ok => {},

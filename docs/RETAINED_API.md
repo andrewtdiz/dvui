@@ -227,10 +227,14 @@ function(payload, id, kind) ... end
 
 ### Payload format
 
-The payload passed to Luau is a string:
+The payload passed to Luau depends on event kind:
 
-- For `input`/`enter`: UTF-8 text content (string)
-- For `pointerdown`/`pointerup`: raw bytes of `events.PointerPayload` (12 bytes: `f32 x`, `f32 y`, `u8 button`, `u8 modifiers`, `u16 pad`)
+- For `input`/`enter`/`keydown`/`keyup`: UTF-8 text content (string)
+- For pointer/drag events (`pointerdown`/`pointermove`/`pointerup`/`pointercancel`/`dragstart`/`drag`/`dragend`/`dragenter`/`dragleave`/`drop`): a table
+  - `x: number`
+  - `y: number`
+  - `button: number`
+  - `modifiers: { shift: boolean, ctrl: boolean, alt: boolean, cmd: boolean }`
 - For `click`/`focus`/`blur`/`mouseenter`/`mouseleave`: empty string (`""`)
 
 ## Tailwind-like classes

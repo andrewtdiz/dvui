@@ -86,6 +86,7 @@ fn pointerModMask(mods: dvui.enums.Mod) u8 {
     if (mods.shift()) mask |= 1;
     if (mods.control()) mask |= 2;
     if (mods.alt()) mask |= 4;
+    if (mods.command()) mask |= 8;
     return mask;
 }
 

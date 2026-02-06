@@ -1,6 +1,7 @@
 const std = @import("std");
 const luaz = @import("luaz");
 const solidluau_embedded = @import("solidluau_embedded");
+const event_payload = @import("event_payload");
 
 const RequireCtx = struct {
     allocator: std.mem.Allocator,
@@ -691,6 +692,42 @@ pub fn main() !void {
     defer lua.deinit();
 
     lua.openLibs();
+
+    const PointerPayload = extern struct {
+        x: f32,
+        y: f32,
+        button: u8,
+        modifiers: u8,
+        pad: u16 = 0,
+    };
+
+    const payload = PointerPayload{
+        .x = 10.5,
+        .y = 20.25,
+        .button = 2,
+        .modifiers = 1 | 8,
+    };
+
+    const payload_table = try event_payload.pointerPayloadTable(&lua, std.mem.asBytes(&payload));
+    defer payload_table.deinit();
+
+    const x = try payload_table.get("x", f64);
+    if (x != 10.5) return error.SmokeFailed;
+    const y = try payload_table.get("y", f64);
+    if (y != 20.25) return error.SmokeFailed;
+    const button = try payload_table.get("button", u8);
+    if (button != 2) return error.SmokeFailed;
+
+    const modifiers_table = try payload_table.get("modifiers", luaz.Lua.Table);
+    defer modifiers_table.deinit();
+    const shift = try modifiers_table.get("shift", bool);
+    if (!shift) return error.SmokeFailed;
+    const ctrl = try modifiers_table.get("ctrl", bool);
+    if (ctrl) return error.SmokeFailed;
+    const alt = try modifiers_table.get("alt", bool);
+    if (alt) return error.SmokeFailed;
+    const cmd = try modifiers_table.get("cmd", bool);
+    if (!cmd) return error.SmokeFailed;
 
     var ctx: RequireCtx = .{ .allocator = allocator };
     lua.state.pushLightUserdata(@ptrCast(&ctx));
