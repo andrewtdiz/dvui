@@ -52,4 +52,32 @@ local app_icon = app_card.icon
 
 assert_ok(type(app_icon) == "table" and app_icon.tag == "image", "app icon exists")
 assert_ok(app_icon.src == "assets/sprite.png", "app icon src")
-assert_ok(type(app_card.children) == "table" and #app_card.children == 3, "app card children kept")
+assert_ok(type(app_card.children) == "table" and #app_card.children == 4, "app card children kept")
+
+local Toggle = require("luau/components/toggle")
+
+do
+  local called = 0
+  local last = nil
+  local function onChange(nextOn)
+    called = called + 1
+    last = nextOn
+  end
+
+  local on_node = Toggle({ on = true, onChange = onChange })
+  local on_class = on_node.class
+  local on_class_text = if type(on_class) == "function" then on_class() else on_class
+  assert_ok(type(on_class_text) == "string" and string.find(on_class_text, "bg-blue-600", 1, true) ~= nil, "toggle on track class")
+  assert_ok(type(on_node.onClick) == "function", "toggle onClick")
+  on_node.onClick(nil, 0, "click")
+  assert_ok(called == 1 and last == false, "toggle click inverts on")
+
+  called = 0
+  last = nil
+  local off_node = Toggle({ on = false, onChange = onChange })
+  local off_class = off_node.class
+  local off_class_text = if type(off_class) == "function" then off_class() else off_class
+  assert_ok(type(off_class_text) == "string" and string.find(off_class_text, "bg-neutral-900", 1, true) ~= nil, "toggle off track class")
+  off_node.onClick(nil, 0, "click")
+  assert_ok(called == 1 and last == true, "toggle click inverts off")
+end

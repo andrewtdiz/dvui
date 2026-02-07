@@ -121,13 +121,23 @@ end
 
 cn.props = function(spec, ...)
   local out = copy_spec(spec, { class = true })
-  out.class = cn_impl(..., if spec then spec.class else nil)
+  local args = table.pack(...)
+  if spec and spec.class ~= nil then
+    args.n = args.n + 1
+    args[args.n] = spec.class
+  end
+  out.class = cn_impl(table.unpack(args, 1, args.n))
   return out
 end
 
 cn.props_omit = function(spec, omit, ...)
   local out = copy_spec(spec, omit_with_class(omit))
-  out.class = cn_impl(..., if spec then spec.class else nil)
+  local args = table.pack(...)
+  if spec and spec.class ~= nil then
+    args.n = args.n + 1
+    args[args.n] = spec.class
+  end
+  out.class = cn_impl(table.unpack(args, 1, args.n))
   return out
 end
 

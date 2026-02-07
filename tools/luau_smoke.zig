@@ -840,5 +840,6 @@ pub fn main() !void {
     lua.state.setGlobal("require");
 
     try requireModule(&lua, "luau/_smoke/ui_refs");
+    try requireModule(&lua, "luau/_smoke/checkbox");
     try propClearSmoke(allocator);
 }

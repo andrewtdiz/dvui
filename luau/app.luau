@@ -2,10 +2,12 @@ local SolidLuau = require("solidluau")
 
 local reactivity = SolidLuau
 local animation = SolidLuau.animation
+local Tag = SolidLuau.ui.Tag
 
 local UI = require("luau/ui_gen/app_ui")
 local LoadUI = require("luau/ui/load_ui")
 local hydrate = require("ui/hydrate")
+local Toggle = require("luau/components/toggle")
 
 local createSignal = reactivity.createSignal
 
@@ -22,6 +24,8 @@ local function clamp01(n)
 end
 
 local function App()
+  local function noop() end
+
   local function scale_value()
     return clamp01(scale_x_target())
   end
@@ -51,6 +55,18 @@ local function App()
     children = function()
       return string.format("%s/%s", tostring(math.floor(scale_x_target() * 100)), tostring(100))
     end,
+  }
+
+  hydrate(card){
+    children = {
+      card.button,
+      card.icon,
+      card.row,
+      Tag.div({ class = "flex items-center gap-3 __key=root.card.toggles" }) {
+        Toggle({ on = false, onChange = noop, class = "__key=root.card.toggles.off" }),
+        Toggle({ on = true, onChange = noop, class = "__key=root.card.toggles.on" }),
+      },
+    },
   }
 
   return root
