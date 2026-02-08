@@ -4,6 +4,7 @@ const wgpu = @import("wgpu");
 const msdf_zig = @import("msdf_zig");
 
 const globals_stride: usize = 256;
+const msdf_stride: usize = 256;
 
 pub const kind: dvui.enums.Backend = .wgpu;
 
@@ -29,6 +30,11 @@ pub const InitOptions = struct {
 };
 
 const DrawPipeline = enum { raster, msdf };
+
+const RetiredFrame = struct {
+    buffers: std.ArrayListUnmanaged(*wgpu.Buffer) = .{},
+    bind_groups: std.ArrayListUnmanaged(*wgpu.BindGroup) = .{},
+};
 
 const MsdfParams = extern struct {
     fill_color: [4]f32,
@@ -136,6 +142,12 @@ msdf_buffer: ?*wgpu.Buffer = null,
 msdf_bind_group: ?*wgpu.BindGroup = null,
 vertex_buffer: ?*wgpu.Buffer = null,
 index_buffer: ?*wgpu.Buffer = null,
+vertex_upload_head_bytes: u64 = 0,
+index_upload_head_bytes: u64 = 0,
+globals_upload_head_bytes: u64 = 0,
+msdf_upload_head_bytes: u64 = 0,
+retired_frames: []RetiredFrame = &.{},
+retired_frame_index: usize = 0,
 pending_msdf_params: MsdfParams = default_msdf_params,
 pending_msdf_params_valid: bool = false,
 
@@ -160,6 +172,13 @@ pub fn init(options: InitOptions) !WgpuBackend {
         .max_frames_in_flight = options.max_frames_in_flight,
         .preferred_color_scheme = options.preferred_color_scheme,
     };
+    errdefer wgpu_backend.deinit();
+
+    const retired_len: usize = @intCast(@as(u64, options.max_frames_in_flight) + 1);
+    wgpu_backend.retired_frames = try wgpu_backend.gpa.alloc(RetiredFrame, retired_len);
+    for (wgpu_backend.retired_frames) |*frame| {
+        frame.* = .{};
+    }
 
     try wgpu_backend.ensurePipeline();
     wgpu_backend.default_texture = try wgpu_backend.createSolidTexture(.linear, 0xffffffff);
@@ -172,6 +191,22 @@ pub fn deinit(self: *WgpuBackend) void {
         texture.deinit();
         self.gpa.destroy(texture);
         self.default_texture = null;
+    }
+
+    if (self.retired_frames.len > 0) {
+        for (self.retired_frames) |*frame| {
+            for (frame.buffers.items) |buf| {
+                buf.release();
+            }
+            for (frame.bind_groups.items) |group| {
+                group.release();
+            }
+            frame.buffers.deinit(self.gpa);
+            frame.bind_groups.deinit(self.gpa);
+        }
+        self.gpa.free(self.retired_frames);
+        self.retired_frames = &.{};
+        self.retired_frame_index = 0;
     }
 
     if (self.vertex_buffer) |buf| {
@@ -272,17 +307,21 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
         }
         break :blk count;
     };
-    try self.ensureGlobals(pass_count);
-    try self.uploadGeometry();
-    var needs_msdf = false;
+    const globals_base = try self.reserveGlobals(pass_count);
+    const upload = try self.uploadGeometry();
+
+    var msdf_cmd_count: usize = 0;
     for (self.draw_commands.items) |cmd| {
         if (cmd.pipeline == .msdf) {
-            needs_msdf = true;
-            break;
+            msdf_cmd_count += 1;
         }
     }
-    if (needs_msdf) {
+
+    var msdf_base: u64 = 0;
+    var msdf_cmd_index: usize = 0;
+    if (msdf_cmd_count > 0) {
         try self.ensureMsdfPipeline();
+        msdf_base = try self.reserveMsdf(msdf_cmd_count);
     }
 
     var pass_index: usize = 0;
@@ -301,9 +340,10 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
             .surface_size = .{ target_width, target_height },
             .viewport_origin = .{ origin_x, origin_y },
         };
-        const globals_offset: u32 = @intCast(pass_index * globals_stride);
+        const globals_offset_u64 = globals_base + @as(u64, @intCast(pass_index)) * globals_stride;
+        const globals_offset: u32 = @intCast(globals_offset_u64);
         pass_index += 1;
-        self.queue.writeBuffer(self.globals_buffer.?, globals_offset, &globals_data, @sizeOf(Globals));
+        self.queue.writeBuffer(self.globals_buffer.?, globals_offset_u64, &globals_data, @sizeOf(Globals));
 
         const viewport: ViewportRect = if (target) |t|
             .{ .x = 0, .y = 0, .width = @as(i32, @intCast(t.width)), .height = @as(i32, @intCast(t.height)) }
@@ -336,8 +376,8 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
         defer pass.release();
 
         pass.setPipeline(self.render_pipeline.?);
-        pass.setVertexBuffer(0, self.vertex_buffer.?, 0, wgpu.WGPU_WHOLE_SIZE);
-        pass.setIndexBuffer(self.index_buffer.?, .uint16, 0, wgpu.WGPU_WHOLE_SIZE);
+        pass.setVertexBuffer(0, self.vertex_buffer.?, upload.vertex_base_bytes, wgpu.WGPU_WHOLE_SIZE);
+        pass.setIndexBuffer(self.index_buffer.?, .uint16, upload.index_base_bytes, wgpu.WGPU_WHOLE_SIZE);
         pass.setBindGroup(0, self.globals_bind_group.?, 1, &[_]u32{globals_offset});
 
         pass.setViewport(0.0, 0.0, target_width, target_height, 0.0, 1.0);
@@ -361,8 +401,11 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
             }
 
             if (cmd.pipeline == .msdf) {
-                self.queue.writeBuffer(self.msdf_buffer.?, 0, &cmd.msdf_params, @sizeOf(MsdfParams));
-                pass.setBindGroup(2, self.msdf_bind_group.?, 0, &[_]u32{});
+                const msdf_offset_u64 = msdf_base + @as(u64, @intCast(msdf_cmd_index)) * msdf_stride;
+                const msdf_offset: u32 = @intCast(msdf_offset_u64);
+                msdf_cmd_index += 1;
+                self.queue.writeBuffer(self.msdf_buffer.?, msdf_offset_u64, &cmd.msdf_params, @sizeOf(MsdfParams));
+                pass.setBindGroup(2, self.msdf_bind_group.?, 1, &[_]u32{msdf_offset});
             }
 
             pass.setBindGroup(1, cmd.texture.bind_group, 0, &[_]u32{});
@@ -377,6 +420,11 @@ pub fn encode(self: *WgpuBackend, encoder: *wgpu.CommandEncoder, color_view: *wg
 
 pub fn begin(self: *WgpuBackend, arena: std.mem.Allocator) !void {
     self.frame_arena = arena;
+    self.rotateRetiredFrames();
+    self.vertex_upload_head_bytes = 0;
+    self.index_upload_head_bytes = 0;
+    self.globals_upload_head_bytes = 0;
+    self.msdf_upload_head_bytes = 0;
     self.clearFrameData();
 }
 
@@ -748,8 +796,6 @@ fn ensurePipeline(self: *WgpuBackend) !void {
 }
 
 fn ensureMsdfPipeline(self: *WgpuBackend) !void {
-    if (self.msdf_pipeline != null) return;
-
     try self.ensurePipeline();
 
     if (self.msdf_bind_group_layout == null) {
@@ -762,7 +808,7 @@ fn ensureMsdfPipeline(self: *WgpuBackend) !void {
                     .visibility = wgpu.ShaderStages.fragment,
                     .buffer = wgpu.BufferBindingLayout{
                         .type = .uniform,
-                        .has_dynamic_offset = 0,
+                        .has_dynamic_offset = 1,
                         .min_binding_size = @sizeOf(MsdfParams),
                     },
                 },
@@ -819,33 +865,34 @@ fn ensureMsdfPipeline(self: *WgpuBackend) !void {
         .alpha_to_coverage_enabled = 0,
     };
 
-    const pipeline = self.device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
-        .label = wgpu.StringView.fromSlice("dvui msdf pipeline"),
-        .layout = self.msdf_pipeline_layout.?,
-        .vertex = wgpu.VertexState{
-            .module = self.msdf_shader_module.?,
-            .entry_point = wgpu.StringView.fromSlice("vs_main"),
-            .buffer_count = vertex_buffers.len,
-            .buffers = &vertex_buffers,
-        },
-        .primitive = wgpu.PrimitiveState{ .topology = .triangle_list, .cull_mode = .none },
-        .depth_stencil = null,
-        .multisample = multisample,
-        .fragment = &wgpu.FragmentState{
-            .module = self.msdf_shader_module.?,
-            .entry_point = wgpu.StringView.fromSlice("fs_main"),
-            .target_count = 1,
-            .targets = &[_]wgpu.ColorTargetState{ color_target },
-        },
-    }) orelse return dvui.Backend.GenericError.BackendError;
-
-    self.msdf_pipeline = pipeline;
+    if (self.msdf_pipeline == null) {
+        const pipeline = self.device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui msdf pipeline"),
+            .layout = self.msdf_pipeline_layout.?,
+            .vertex = wgpu.VertexState{
+                .module = self.msdf_shader_module.?,
+                .entry_point = wgpu.StringView.fromSlice("vs_main"),
+                .buffer_count = vertex_buffers.len,
+                .buffers = &vertex_buffers,
+            },
+            .primitive = wgpu.PrimitiveState{ .topology = .triangle_list, .cull_mode = .none },
+            .depth_stencil = null,
+            .multisample = multisample,
+            .fragment = &wgpu.FragmentState{
+                .module = self.msdf_shader_module.?,
+                .entry_point = wgpu.StringView.fromSlice("fs_main"),
+                .target_count = 1,
+                .targets = &[_]wgpu.ColorTargetState{ color_target },
+            },
+        }) orelse return dvui.Backend.GenericError.BackendError;
+        self.msdf_pipeline = pipeline;
+    }
 
     if (self.msdf_buffer == null) {
         const buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("dvui msdf params"),
             .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
-            .size = @sizeOf(MsdfParams),
+            .size = msdf_stride,
             .mapped_at_creation = @intFromBool(false),
         }) orelse return dvui.Backend.GenericError.BackendError;
         self.msdf_buffer = buffer;
@@ -869,18 +916,26 @@ fn ensureMsdfPipeline(self: *WgpuBackend) !void {
     }
 }
 
-fn ensureGlobals(self: *WgpuBackend, pass_count: usize) !void {
+fn reserveGlobals(self: *WgpuBackend, pass_count: usize) !u64 {
     const min_count: usize = if (pass_count == 0) 1 else pass_count;
-    const required_size: u64 = @intCast(globals_stride * min_count);
+    const globals_stride_u64: u64 = globals_stride;
+
+    var base: u64 = std.mem.alignForward(u64, self.globals_upload_head_bytes, globals_stride_u64);
+    var end_bytes: u64 = base + @as(u64, @intCast(min_count)) * globals_stride_u64;
 
     if (self.globals_buffer) |buffer| {
-        if (buffer.getSize() < required_size) {
-            buffer.release();
+        if (buffer.getSize() < end_bytes) {
+            try self.retireBuffer(buffer);
             self.globals_buffer = null;
+
             if (self.globals_bind_group) |group| {
-                group.release();
+                try self.retireBindGroup(group);
                 self.globals_bind_group = null;
             }
+
+            self.globals_upload_head_bytes = 0;
+            base = 0;
+            end_bytes = @as(u64, @intCast(min_count)) * globals_stride_u64;
         }
     }
 
@@ -888,7 +943,7 @@ fn ensureGlobals(self: *WgpuBackend, pass_count: usize) !void {
         const buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("dvui globals"),
             .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
-            .size = required_size,
+            .size = end_bytes,
             .mapped_at_creation = @intFromBool(false),
         }) orelse return dvui.Backend.GenericError.BackendError;
         self.globals_buffer = buffer;
@@ -910,26 +965,102 @@ fn ensureGlobals(self: *WgpuBackend, pass_count: usize) !void {
         }) orelse return dvui.Backend.GenericError.BackendError;
         self.globals_bind_group = bind_group;
     }
+
+    self.globals_upload_head_bytes = end_bytes;
+    return base;
 }
 
-fn uploadGeometry(self: *WgpuBackend) !void {
-    if (self.vertex_data.items.len == 0 or self.index_data.items.len == 0) return;
+fn reserveMsdf(self: *WgpuBackend, cmd_count: usize) !u64 {
+    if (cmd_count == 0) return 0;
+
+    const msdf_stride_u64: u64 = msdf_stride;
+
+    var base: u64 = std.mem.alignForward(u64, self.msdf_upload_head_bytes, msdf_stride_u64);
+    var end_bytes: u64 = base + @as(u64, @intCast(cmd_count)) * msdf_stride_u64;
+
+    if (self.msdf_buffer) |buffer| {
+        if (buffer.getSize() < end_bytes) {
+            try self.retireBuffer(buffer);
+            self.msdf_buffer = null;
+
+            if (self.msdf_bind_group) |group| {
+                try self.retireBindGroup(group);
+                self.msdf_bind_group = null;
+            }
+
+            self.msdf_upload_head_bytes = 0;
+            base = 0;
+            end_bytes = @as(u64, @intCast(cmd_count)) * msdf_stride_u64;
+        }
+    }
+
+    if (self.msdf_buffer == null) {
+        const buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui msdf params"),
+            .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+            .size = end_bytes,
+            .mapped_at_creation = @intFromBool(false),
+        }) orelse return dvui.Backend.GenericError.BackendError;
+        self.msdf_buffer = buffer;
+    }
+
+    if (self.msdf_bind_group == null) {
+        const bind_group = self.device.createBindGroup(&wgpu.BindGroupDescriptor{
+            .label = wgpu.StringView.fromSlice("dvui msdf params"),
+            .layout = self.msdf_bind_group_layout.?,
+            .entry_count = 1,
+            .entries = &[_]wgpu.BindGroupEntry{
+                .{
+                    .binding = 0,
+                    .buffer = self.msdf_buffer.?,
+                    .offset = 0,
+                    .size = @sizeOf(MsdfParams),
+                },
+            },
+        }) orelse return dvui.Backend.GenericError.BackendError;
+        self.msdf_bind_group = bind_group;
+    }
+
+    self.msdf_upload_head_bytes = end_bytes;
+    return base;
+}
+
+const GeometryUpload = struct {
+    vertex_base_bytes: u64,
+    index_base_bytes: u64,
+};
+
+fn uploadGeometry(self: *WgpuBackend) !GeometryUpload {
+    if (self.vertex_data.items.len == 0 or self.index_data.items.len == 0) {
+        return .{ .vertex_base_bytes = 0, .index_base_bytes = 0 };
+    }
 
     const vertex_bytes: usize = self.vertex_data.items.len * @sizeOf(Vertex);
     const index_bytes: usize = self.index_data.items.len * @sizeOf(u16);
-    const vertex_buffer_size: u64 = @intCast(std.mem.alignForward(usize, vertex_bytes, 4));
-    const index_buffer_size: u64 = @intCast(std.mem.alignForward(usize, index_bytes, 4));
+    const vertex_size: u64 = @intCast(std.mem.alignForward(usize, vertex_bytes, 4));
+    const index_size: u64 = @intCast(std.mem.alignForward(usize, index_bytes, 4));
 
+    var vertex_base: u64 = std.mem.alignForward(u64, self.vertex_upload_head_bytes, 4);
+    var vertex_end: u64 = vertex_base + vertex_size;
     if (self.vertex_buffer) |buffer| {
-        if (buffer.getSize() < vertex_buffer_size) {
-            buffer.release();
+        if (buffer.getSize() < vertex_end) {
+            try self.retireBuffer(buffer);
             self.vertex_buffer = null;
+            self.vertex_upload_head_bytes = 0;
+            vertex_base = 0;
+            vertex_end = vertex_size;
         }
     }
+
+    var index_base: u64 = std.mem.alignForward(u64, self.index_upload_head_bytes, 4);
+    var index_end: u64 = index_base + index_size;
     if (self.index_buffer) |buffer| {
-        if (buffer.getSize() < index_buffer_size) {
-            buffer.release();
+        if (buffer.getSize() < index_end) {
+            try self.retireBuffer(buffer);
             self.index_buffer = null;
+            self.index_upload_head_bytes = 0;
+            index_base = 0;
+            index_end = index_size;
         }
     }
 
@@ -937,7 +1068,7 @@ fn uploadGeometry(self: *WgpuBackend) !void {
         self.vertex_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("dvui vertices"),
             .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
-            .size = vertex_buffer_size,
+            .size = vertex_end,
             .mapped_at_creation = @intFromBool(false),
         }) orelse return dvui.Backend.GenericError.BackendError;
     }
@@ -946,16 +1077,20 @@ fn uploadGeometry(self: *WgpuBackend) !void {
         self.index_buffer = self.device.createBuffer(&wgpu.BufferDescriptor{
             .label = wgpu.StringView.fromSlice("dvui indices"),
             .usage = wgpu.BufferUsages.index | wgpu.BufferUsages.copy_dst,
-            .size = index_buffer_size,
+            .size = index_end,
             .mapped_at_creation = @intFromBool(false),
         }) orelse return dvui.Backend.GenericError.BackendError;
     }
 
     const vertex_bytes_slice = std.mem.sliceAsBytes(self.vertex_data.items);
-    try self.writeBufferAligned(self.vertex_buffer.?, vertex_bytes_slice);
+    try self.writeBufferAligned(self.vertex_buffer.?, vertex_base, vertex_bytes_slice);
 
     const index_bytes_slice = std.mem.sliceAsBytes(self.index_data.items);
-    try self.writeBufferAligned(self.index_buffer.?, index_bytes_slice);
+    try self.writeBufferAligned(self.index_buffer.?, index_base, index_bytes_slice);
+
+    self.vertex_upload_head_bytes = vertex_end;
+    self.index_upload_head_bytes = index_end;
+    return .{ .vertex_base_bytes = vertex_base, .index_base_bytes = index_base };
 }
 
 fn clearFrameData(self: *WgpuBackend) void {
@@ -963,6 +1098,39 @@ fn clearFrameData(self: *WgpuBackend) void {
     self.index_data.clearRetainingCapacity();
     self.draw_commands.clearRetainingCapacity();
     self.pending_msdf_params_valid = false;
+}
+
+fn rotateRetiredFrames(self: *WgpuBackend) void {
+    if (self.retired_frames.len == 0) return;
+
+    self.retired_frame_index = (self.retired_frame_index + 1) % self.retired_frames.len;
+    var frame = &self.retired_frames[self.retired_frame_index];
+
+    for (frame.buffers.items) |buf| {
+        buf.release();
+    }
+    frame.buffers.clearRetainingCapacity();
+
+    for (frame.bind_groups.items) |group| {
+        group.release();
+    }
+    frame.bind_groups.clearRetainingCapacity();
+}
+
+fn retireBuffer(self: *WgpuBackend, buffer: *wgpu.Buffer) !void {
+    if (self.retired_frames.len == 0) {
+        buffer.release();
+        return;
+    }
+    try self.retired_frames[self.retired_frame_index].buffers.append(self.gpa, buffer);
+}
+
+fn retireBindGroup(self: *WgpuBackend, group: *wgpu.BindGroup) !void {
+    if (self.retired_frames.len == 0) {
+        group.release();
+        return;
+    }
+    try self.retired_frames[self.retired_frame_index].bind_groups.append(self.gpa, group);
 }
 
 fn destroyMsaaResources(self: *WgpuBackend) void {
@@ -1066,14 +1234,15 @@ fn computeClipRect(self: *const WgpuBackend, rect: dvui.Rect.Physical) ClipRect 
     };
 }
 
-fn writeBufferAligned(self: *WgpuBackend, buffer: *wgpu.Buffer, data: []const u8) !void {
+fn writeBufferAligned(self: *WgpuBackend, buffer: *wgpu.Buffer, base_bytes: u64, data: []const u8) !void {
     if (data.len == 0) return;
+    std.debug.assert(base_bytes % 4 == 0);
 
     const remainder = data.len % 4;
     const main_len = data.len - remainder;
 
     if (main_len > 0) {
-        self.queue.writeBuffer(buffer, 0, data.ptr, main_len);
+        self.queue.writeBuffer(buffer, base_bytes, data.ptr, main_len);
     }
 
     if (remainder == 0) {
@@ -1082,7 +1251,7 @@ fn writeBufferAligned(self: *WgpuBackend, buffer: *wgpu.Buffer, data: []const u8
 
     var tail: [4]u8 = .{ 0, 0, 0, 0 };
     @memcpy(tail[0..remainder], data[main_len..]);
-    self.queue.writeBuffer(buffer, main_len, &tail, 4);
+    self.queue.writeBuffer(buffer, base_bytes + @as(u64, @intCast(main_len)), &tail, 4);
 }
 
 fn createTextureResourceKind(
