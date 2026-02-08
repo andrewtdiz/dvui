@@ -149,6 +149,7 @@ pub fn init(gpa: std.mem.Allocator) RaylibBackend {
         .frame_buffers = std.AutoArrayHashMap(u32, u32).init(gpa),
         .shader = raylib.cdef.LoadShaderFromMemory(vertexSource, fragSource),
         .VAO = @intCast(raylib.gl.cdef.rlLoadVertexArray()),
+        .arena = gpa,
     };
 }
 
@@ -1020,10 +1021,16 @@ pub fn main() !void {
     var win = try dvui.Window.init(@src(), gpa, b.backend(), init_opts.window_init_options);
     defer win.deinit();
 
+    var frame_arena = std.heap.ArenaAllocator.init(gpa);
+    defer frame_arena.deinit();
+
     if (app.initFn) |initFn| {
+        _ = frame_arena.reset(.retain_capacity);
+        try b.backend().beginFrame(frame_arena.allocator());
         try win.begin(win.frame_time_ns);
         try initFn(&win);
         _ = try win.end(.{});
+        try b.backend().endFrame();
     }
     defer if (app.deinitFn) |deinitFn| deinitFn();
 
@@ -1038,6 +1045,8 @@ pub fn main() !void {
         const nstime = win.beginWait(true);
 
         // marks the beginning of a frame for dvui, can call dvui functions after this
+        _ = frame_arena.reset(.retain_capacity);
+        try b.backend().beginFrame(frame_arena.allocator());
         try win.begin(nstime);
 
         // send all events to dvui for processing
@@ -1060,6 +1069,7 @@ pub fn main() !void {
         // marks end of dvui frame, don't call dvui functions after this
         // - sends all dvui stuff to backend for rendering, must be called before renderPresent()
         const end_micros = try win.end(.{});
+        try b.backend().endFrame();
 
         // cursor management
         b.setCursor(win.cursorRequested());

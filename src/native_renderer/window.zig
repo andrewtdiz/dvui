@@ -243,6 +243,16 @@ pub fn renderFrame(renderer: *Renderer) void {
     _ = renderer.frame_arena.reset(.retain_capacity);
 
     if (renderer.window) |*win| {
+        win.backend.beginFrame(renderer.frame_arena.allocator()) catch |err| {
+            logMessage(renderer, 3, "backend beginFrame failed: {s}", .{@errorName(err)});
+            return;
+        };
+        defer {
+            win.backend.endFrame() catch |err| {
+                logMessage(renderer, 3, "backend endFrame failed: {s}", .{@errorName(err)});
+            };
+        }
+
         win.begin(std.time.nanoTimestamp()) catch |err| {
             logMessage(renderer, 3, "window begin failed: {s}", .{@errorName(err)});
             return;

@@ -1085,7 +1085,6 @@ pub fn begin(
 
     self.layout = .{};
 
-    try self.backend.begin(self.arena());
 }
 
 fn positionMouseEventAdd(self: *Self) std.mem.Allocator.Error!void {
@@ -1301,9 +1300,6 @@ pub fn end(self: *Self, opts: endOptions) !?u32 {
     if (!self.end_rendering_done) {
         self.endRendering(opts);
     }
-
-    // Call this before freeing data so backend can use data allocated during frame.
-    try self.backend.end();
 
     // events may have been tagged with a focus widget that never showed up
     const evts = dvui.events();

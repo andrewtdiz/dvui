@@ -28,18 +28,28 @@ pub fn nanoTime(self: Backend) i128 {
 pub fn sleep(self: Backend, ns: u64) void {
     return self.impl.sleep(ns);
 }
-/// Called by dvui during `dvui.Window.begin`, so prior to any dvui
-/// rendering.  Use to setup anything needed for this frame.  The arena
-/// arg is cleared before `dvui.Window.begin` is called next, useful for any
-/// temporary allocations needed only for this frame.
-pub fn begin(self: Backend, arena: std.mem.Allocator) GenericError!void {
-    return self.impl.begin(arena);
-}
+    /// Called once per frame prior to any dvui rendering.
+    pub fn beginFrame(self: Backend, arena: std.mem.Allocator) GenericError!void {
+        if (comptime @hasDecl(Implementation, "beginFrame")) {
+            return self.impl.beginFrame(arena);
+        }
+        return self.impl.begin(arena);
+    }
 
-/// Called during `dvui.Window.end` before freeing any memory for the current frame.
-pub fn end(self: Backend) GenericError!void {
-    return self.impl.end();
-}
+    pub fn begin(self: Backend, arena: std.mem.Allocator) GenericError!void {
+        return self.beginFrame(arena);
+    }
+
+    pub fn endFrame(self: Backend) GenericError!void {
+        if (comptime @hasDecl(Implementation, "endFrame")) {
+            return self.impl.endFrame();
+        }
+        return self.impl.end();
+    }
+
+    pub fn end(self: Backend) GenericError!void {
+        return self.endFrame();
+    }
 
 /// Return size of the window in physical pixels.  For a 300x200 retina
 /// window (so actually 600x400), this should return 600x400.

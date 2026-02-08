@@ -9,6 +9,9 @@ snapshot_index: u8 = 0,
 /// Used to hash widget data during a frame for snapshot testing
 pub var widget_hasher: ?dvui.fnv = null;
 
+var frame_arena: std.heap.ArenaAllocator = undefined;
+var frame_arena_ready: bool = false;
+
 /// Moves the mouse to the center of the widget
 pub fn moveTo(tag: []const u8) !void {
     const tag_data = dvui.tagGet(tag) orelse {
@@ -65,9 +68,13 @@ pub fn settle(frame: dvui.App.frameFunction) !void {
 /// Useful when you know the frame will not settle, but you need the frame
 /// to handle events.
 pub fn step(frame: dvui.App.frameFunction) !?u32 {
+    std.debug.assert(frame_arena_ready);
     const cw = dvui.currentWindow();
     if (try frame() == .close) return error.closed;
     const wait_time = try cw.end(.{});
+    try cw.backend.endFrame();
+    _ = frame_arena.reset(.retain_capacity);
+    try cw.backend.beginFrame(frame_arena.allocator());
     try cw.begin(cw.frame_time_ns + 100 * std.time.ns_per_ms);
     return wait_time;
 }
@@ -96,6 +103,14 @@ pub fn init(options: InitOptions) !Self {
         },
     };
 
+    std.debug.assert(!frame_arena_ready);
+    frame_arena = std.heap.ArenaAllocator.init(options.allocator);
+    frame_arena_ready = true;
+    errdefer {
+        frame_arena.deinit();
+        frame_arena_ready = false;
+    }
+
     if (should_write_snapshots()) {
         // ensure snapshot directory exists
         // NOTE: do fs operation through cwd to handle relative and absolute paths
@@ -118,6 +133,8 @@ pub fn init(options: InitOptions) !Self {
     const window = try options.allocator.create(Window);
     window.* = try dvui.Window.init(@src(), options.allocator, backend.backend(), window_init_opts);
 
+    _ = frame_arena.reset(.retain_capacity);
+    try backend.backend().beginFrame(frame_arena.allocator());
     window.begin(0) catch unreachable;
 
     return .{
@@ -133,10 +150,17 @@ pub fn deinit(self: *Self) void {
     _ = self.window.end(.{}) catch |err| {
         std.debug.print("window.end() returned {any}\n", .{err});
     };
+    self.window.backend.endFrame() catch |err| {
+        std.debug.print("backend.endFrame() returned {any}\n", .{err});
+    };
     self.window.deinit();
     self.backend.deinit();
     self.allocator.destroy(self.window);
     self.allocator.destroy(self.backend);
+    if (frame_arena_ready) {
+        frame_arena.deinit();
+        frame_arena_ready = false;
+    }
 }
 
 pub fn expectFocused(tag: []const u8) !void {
@@ -178,6 +202,7 @@ pub const SnapshotError = error{
 ///
 /// The returned data is allocated by `Self.allocator` and should be freed by the caller.
 pub fn capturePng(frame: dvui.App.frameFunction, rect: ?dvui.Rect.Physical, writer: *std.Io.Writer) !void {
+    std.debug.assert(frame_arena_ready);
     var picture = dvui.Picture.start(rect orelse dvui.windowRectPixels()) orelse {
         std.debug.print("Current backend does not support capturing images\n", .{});
         return error.Unsupported;
@@ -200,6 +225,9 @@ pub fn capturePng(frame: dvui.App.frameFunction, rect: ?dvui.Rect.Physical, writ
     const cw = dvui.currentWindow();
 
     _ = try cw.end(.{});
+    try cw.backend.endFrame();
+    _ = frame_arena.reset(.retain_capacity);
+    try cw.backend.beginFrame(frame_arena.allocator());
     try cw.begin(cw.frame_time_ns + 100 * std.time.ns_per_ms);
 }
 
