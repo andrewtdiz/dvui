@@ -841,5 +841,6 @@ pub fn main() !void {
 
     try requireModule(&lua, "luau/_smoke/ui_refs");
     try requireModule(&lua, "luau/_smoke/checkbox");
+    try requireModule(&lua, "luau/_tests/reconciler");
     try propClearSmoke(allocator);
 }

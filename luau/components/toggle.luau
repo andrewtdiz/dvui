@@ -47,12 +47,12 @@ local function Toggle(props: ToggleProps): UINode
 
   local knob = div({
     class = cn(
-      "absolute top-[50%] anchor-center w-4 h-4 rounded-full bg-white",
+      "absolute top-[50%] w-4 h-4 rounded-full bg-white",
       function()
         if is_on() then
-          return "right-1"
+          return "right-1 anchor-right"
         end
-        return "left-1"
+        return "left-1 anchor-left"
       end
     ),
   })
@@ -63,4 +63,3 @@ local function Toggle(props: ToggleProps): UINode
 end
 
 return Toggle
-
