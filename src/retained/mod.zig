@@ -38,6 +38,27 @@ pub const PickResult = struct {
     rect: types.Rect = .{},
 };
 
+pub const PickStackEntry = struct {
+    id: u32,
+    z_index: i16,
+    order: u32,
+    rect: types.Rect,
+};
+
+pub const PickStackOptions = struct {
+    ignore_min: ?u32 = null,
+    ignore_max: ?u32 = null,
+    frames_only: bool = false,
+    max_results: usize = 0,
+};
+
+fn pickStackEntryLessThan(_: void, lhs: PickStackEntry, rhs: PickStackEntry) bool {
+    if (lhs.z_index == rhs.z_index) {
+        return lhs.order > rhs.order;
+    }
+    return lhs.z_index > rhs.z_index;
+}
+
 pub fn render(event_ring: ?*EventRing, store: *types.NodeStore, input_enabled: bool, timings: ?*FrameTimings) bool {
     return render_mod.render(event_ring, store, input_enabled, timings);
 }
@@ -191,6 +212,106 @@ pub fn pickFrameAt(store: *types.NodeStore, x_pos: f32, y_pos: f32) ?PickResult 
     hit_test.scan(store, root, point, ctx, &visitor, &order, .{ .skip_portals = false });
     if (result.id == 0) return null;
     return result;
+}
+
+pub fn pickNodeStackAtInto(
+    store: *types.NodeStore,
+    x_pos: f32,
+    y_pos: f32,
+    out: *std.ArrayListUnmanaged(PickStackEntry),
+    allocator: std.mem.Allocator,
+    opts: PickStackOptions,
+) void {
+    if (dvui.current_window != null) {
+        layout.updateLayouts(store);
+    }
+
+    out.clearRetainingCapacity();
+
+    const root = store.node(0) orelse return;
+    const ctx = hit_test.RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
+    var order: u32 = 0;
+    const point = dvui.Point.Physical{ .x = x_pos, .y = y_pos };
+
+    var visitor = struct {
+        out: *std.ArrayListUnmanaged(PickStackEntry),
+        allocator: std.mem.Allocator,
+        opts: PickStackOptions,
+
+        pub fn count(self: *@This(), node: *types.SolidNode, spec: tailwind.Spec) bool {
+            _ = self;
+            _ = node;
+            _ = spec;
+            return true;
+        }
+
+        pub fn hit(self: *@This(), node: *types.SolidNode, spec: tailwind.Spec, rect: types.Rect, ord: u32) void {
+            if (self.opts.ignore_min) |min_id| {
+                if (self.opts.ignore_max) |max_id| {
+                    if (node.id >= min_id and node.id <= max_id) return;
+                }
+            }
+            if (self.opts.frames_only and !isFrameNode(node)) return;
+            self.out.append(self.allocator, .{ .id = node.id, .z_index = spec.z_index, .order = ord, .rect = rect }) catch {};
+        }
+    }{ .out = out, .allocator = allocator, .opts = opts };
+
+    hit_test.scan(store, root, point, ctx, &visitor, &order, .{ .skip_portals = false });
+
+    if (out.items.len > 1) {
+        std.sort.pdq(PickStackEntry, out.items, {}, pickStackEntryLessThan);
+    }
+
+    if (opts.max_results > 0 and out.items.len > opts.max_results) {
+        out.items.len = opts.max_results;
+    }
+}
+
+pub fn pickNodePathAtInto(
+    store: *types.NodeStore,
+    x_pos: f32,
+    y_pos: f32,
+    out_ids: *std.ArrayListUnmanaged(u32),
+    allocator: std.mem.Allocator,
+    opts: PickStackOptions,
+) bool {
+    out_ids.clearRetainingCapacity();
+
+    const leaf = if (opts.frames_only) blk: {
+        if (opts.ignore_min) |min_id| {
+            if (opts.ignore_max) |max_id| {
+                break :blk pickFrameAtRange(store, x_pos, y_pos, min_id, max_id);
+            }
+        }
+        break :blk pickFrameAt(store, x_pos, y_pos);
+    } else blk: {
+        if (opts.ignore_min) |min_id| {
+            if (opts.ignore_max) |max_id| {
+                break :blk pickNodeAtRange(store, x_pos, y_pos, min_id, max_id);
+            }
+        }
+        break :blk pickNodeAt(store, x_pos, y_pos);
+    };
+
+    const leaf_id = (leaf orelse return false).id;
+
+    var current_id: u32 = leaf_id;
+    while (current_id != 0) {
+        out_ids.append(allocator, current_id) catch break;
+        const node = store.node(current_id) orelse break;
+        current_id = node.parent orelse 0;
+    }
+
+    var i: usize = 0;
+    var j: usize = out_ids.items.len;
+    while (i < j) : (i += 1) {
+        j -= 1;
+        const tmp = out_ids.items[i];
+        out_ids.items[i] = out_ids.items[j];
+        out_ids.items[j] = tmp;
+    }
+
+    return out_ids.items.len != 0;
 }
 
 fn isFrameNode(node: *types.SolidNode) bool {

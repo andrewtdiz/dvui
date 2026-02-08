@@ -20,6 +20,8 @@ pub fn scan(
     order: *u32,
     opts: HitTestOptions,
 ) void {
+    if (opts.skip_portals and state.isPortalNode(node)) return;
+
     if (ctx.clip) |clip| {
         if (!state.rectContains(clip, point)) return;
     }
