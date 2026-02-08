@@ -3,7 +3,37 @@ local Scheduler = require("core/scheduler")
 local MockUi = require("luau/_tests/mock_ui")
 local TestScheduler = require("luau/_tests/test_scheduler")
 
+local function getAssertLocation()
+  if debug == nil then
+    return nil
+  end
+  if type(debug) ~= "table" then
+    return nil
+  end
+  local info = debug.info
+  if type(info) ~= "function" then
+    return nil
+  end
+
+  local ok_source, source = pcall(info, 4, "s")
+  if not ok_source then
+    return nil
+  end
+  local ok_line, line = pcall(info, 4, "l")
+  if not ok_line then
+    return nil
+  end
+  if source == nil or line == nil then
+    return nil
+  end
+  return tostring(source) .. ":" .. tostring(line)
+end
+
 local function fail(msg)
+  local prefix = getAssertLocation()
+  if prefix ~= nil then
+    error(prefix .. ": " .. (msg or "assert"), 0)
+  end
   error(msg or "assert", 0)
 end
 
@@ -139,6 +169,18 @@ local function filterLog(log, op)
   return out
 end
 
+local function run(name, fn)
+  local ok, err = pcall(fn)
+  if ok then
+    return
+  end
+  local msg = tostring(err)
+  if type(name) == "string" and name ~= "" then
+    error(name .. ": " .. msg, 0)
+  end
+  error(msg, 0)
+end
+
 local function newEnv()
   local scheduler = TestScheduler.newTestScheduler()
   Scheduler.setScheduler(scheduler)
@@ -164,5 +206,5 @@ end
 
 return {
   newEnv = newEnv,
+  run = run,
 }
-

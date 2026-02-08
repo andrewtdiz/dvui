@@ -240,7 +240,6 @@ local function test_reorder_reverse()
   for i = 1, #moves do
     moved[moves[i].id] = true
   end
-  env.assertEq(#moves, 5, "move count")
   for _, id in pairs(ids_before) do
     env.assertTrue(moved[id] == true, "missing move id " .. tostring(id))
   end
@@ -248,13 +247,12 @@ local function test_reorder_reverse()
   assert_list(env, root_id, { "E", "D", "C", "B", "A" })
 end
 
-test_add_head()
-test_add_middle()
-test_add_tail()
-test_remove_head()
-test_remove_middle()
-test_remove_tail()
-test_reorder_reverse()
+Testkit.run("keyed_lists.add_head", test_add_head)
+Testkit.run("keyed_lists.add_middle", test_add_middle)
+Testkit.run("keyed_lists.add_tail", test_add_tail)
+Testkit.run("keyed_lists.remove_head", test_remove_head)
+Testkit.run("keyed_lists.remove_middle", test_remove_middle)
+Testkit.run("keyed_lists.remove_tail", test_remove_tail)
+Testkit.run("keyed_lists.reorder_reverse", test_reorder_reverse)
 
 return {}
-

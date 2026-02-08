@@ -549,30 +549,7 @@ pub fn textureUpdate(
 ) dvui.Backend.TextureError!void {
     if (@intFromPtr(texture.ptr) == 0) return dvui.Backend.TextureError.TextureUpdate;
     const resource: *TextureResource = @ptrCast(@alignCast(texture.ptr));
-    const texture_bytes: usize = @intCast(@as(u64, texture.width) * @as(u64, texture.height) * 4);
-    const copy_texture = wgpu.TexelCopyTextureInfo{
-        .texture = resource.texture,
-        .mip_level = 0,
-        .origin = .{ .x = 0, .y = 0, .z = 0 },
-        .aspect = .all,
-    };
-    const layout = wgpu.TexelCopyBufferLayout{
-        .offset = 0,
-        .bytes_per_row = texture.width * 4,
-        .rows_per_image = texture.height,
-    };
-    const extent = wgpu.Extent3D{
-        .width = texture.width,
-        .height = texture.height,
-        .depth_or_array_layers = 1,
-    };
-    self.queue.writeTexture(
-        &copy_texture,
-        pixels,
-        texture_bytes,
-        &layout,
-        &extent,
-    );
+    try self.writeTextureRgba8(resource.texture, texture.width, texture.height, pixels);
 }
 
 pub fn textureCreateTarget(
@@ -1254,6 +1231,52 @@ fn writeBufferAligned(self: *WgpuBackend, buffer: *wgpu.Buffer, base_bytes: u64,
     self.queue.writeBuffer(buffer, base_bytes + @as(u64, @intCast(main_len)), &tail, 4);
 }
 
+fn writeTextureRgba8(self: *WgpuBackend, texture: *wgpu.Texture, width: u32, height: u32, pixels: [*]const u8) !void {
+    const src_bytes_per_row: usize = @as(usize, @intCast(width)) * 4;
+    const dst_bytes_per_row: usize = std.mem.alignForward(usize, src_bytes_per_row, 256);
+
+    const copy_texture = wgpu.TexelCopyTextureInfo{
+        .texture = texture,
+        .mip_level = 0,
+        .origin = .{ .x = 0, .y = 0, .z = 0 },
+        .aspect = .all,
+    };
+    const layout = wgpu.TexelCopyBufferLayout{
+        .offset = 0,
+        .bytes_per_row = @intCast(dst_bytes_per_row),
+        .rows_per_image = height,
+    };
+    const extent = wgpu.Extent3D{
+        .width = width,
+        .height = height,
+        .depth_or_array_layers = 1,
+    };
+
+    const height_usize: usize = @intCast(height);
+    if (src_bytes_per_row == dst_bytes_per_row) {
+        const src_size: usize = src_bytes_per_row * height_usize;
+        self.queue.writeTexture(&copy_texture, pixels, src_size, &layout, &extent);
+        return;
+    }
+
+    const dst_size: usize = dst_bytes_per_row * height_usize;
+    const tmp = try self.gpa.alloc(u8, dst_size);
+    defer self.gpa.free(tmp);
+    @memset(tmp, 0);
+
+    const src_size: usize = src_bytes_per_row * height_usize;
+    const src = pixels[0..src_size];
+
+    var y: usize = 0;
+    while (y < height_usize) : (y += 1) {
+        const src_start = y * src_bytes_per_row;
+        const dst_start = y * dst_bytes_per_row;
+        @memcpy(tmp[dst_start .. dst_start + src_bytes_per_row], src[src_start .. src_start + src_bytes_per_row]);
+    }
+
+    self.queue.writeTexture(&copy_texture, tmp.ptr, dst_size, &layout, &extent);
+}
+
 fn createTextureResourceKind(
     self: *WgpuBackend,
     width: u32,
@@ -1277,25 +1300,7 @@ fn createTextureResourceKind(
     const texture = self.device.createTexture(&descriptor) orelse return dvui.Backend.TextureError.TextureCreate;
     errdefer texture.release();
 
-    const texture_bytes: usize = @intCast(@as(u64, width) * @as(u64, height) * 4);
-    const copy_texture = wgpu.TexelCopyTextureInfo{
-        .texture = texture,
-        .mip_level = 0,
-        .origin = .{ .x = 0, .y = 0, .z = 0 },
-        .aspect = .all,
-    };
-    const layout = wgpu.TexelCopyBufferLayout{
-        .offset = 0,
-        .bytes_per_row = width * 4,
-        .rows_per_image = height,
-    };
-    self.queue.writeTexture(
-        &copy_texture,
-        pixels,
-        texture_bytes,
-        &layout,
-        &descriptor.size,
-    );
+    try self.writeTextureRgba8(texture, width, height, pixels);
 
     const sampler = self.device.createSampler(&wgpu.SamplerDescriptor{
         .label = wgpu.StringView.fromSlice("dvui sampler"),

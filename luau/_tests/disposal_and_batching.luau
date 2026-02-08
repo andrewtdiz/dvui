@@ -105,9 +105,8 @@ local function test_batching_one_update()
   env.assertEq(log[1].props.Text, "25", "final value")
 end
 
-test_single_effect_disposed()
-test_nested_effects_disposed()
-test_batching_one_update()
+Testkit.run("disposal_and_batching.single_effect_disposed", test_single_effect_disposed)
+Testkit.run("disposal_and_batching.nested_effects_disposed", test_nested_effects_disposed)
+Testkit.run("disposal_and_batching.batching_one_update", test_batching_one_update)
 
 return {}
-

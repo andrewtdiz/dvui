@@ -34,7 +34,7 @@ local function newMockUi()
     return node
   end
 
-  local function child_index(children, id)
+  local function find_child_pos(children, id)
     for i = 1, #children do
       if children[i] == id then
         return i
@@ -43,28 +43,28 @@ local function newMockUi()
     return nil
   end
 
-  local function insert_child(parent, id, before_id)
+  local function insert_child_index0(parent, id, before_id)
     local children = parent.children
-    local pos = #children + 1
+    local pos1 = #children + 1
     if before_id ~= nil then
-      local found = child_index(children, before_id)
-      if found == nil then
+      local before_pos = find_child_pos(children, before_id)
+      if before_pos == nil then
         error("beforeId not a child", 0)
       end
-      pos = found
+      pos1 = before_pos
     end
-    table.insert(children, pos, id)
-    return pos - 1
+    table.insert(children, pos1, id)
+    return pos1 - 1
   end
 
-  local function remove_child(parent, id)
+  local function remove_child_index0(parent, id)
     local children = parent.children
-    local found = child_index(children, id)
-    if found == nil then
+    local pos = find_child_pos(children, id)
+    if pos == nil then
       return nil
     end
-    table.remove(children, found)
-    return found - 1
+    table.remove(children, pos)
+    return pos - 1
   end
 
   local function append_log(entry)
@@ -96,7 +96,7 @@ local function newMockUi()
       children = {},
       props = {},
     }
-    local index = insert_child(parent, id, before_id)
+    local index = insert_child_index0(parent, id, before_id)
     append_log({ op = "CREATE", tag = tag, id = id, parent = parent_id, index = index })
   end
 
@@ -107,7 +107,7 @@ local function newMockUi()
       return nil, nil
     end
     local parent = require_node(from_parent_id)
-    local from_index = remove_child(parent, id)
+    local from_index = remove_child_index0(parent, id)
     node.parent = nil
     return from_parent_id, from_index
   end
@@ -117,7 +117,7 @@ local function newMockUi()
     local parent = require_node(parent_id)
     local node = require_node(id)
     node.parent = parent_id
-    local index = insert_child(parent, id, before_id)
+    local index = insert_child_index0(parent, id, before_id)
     append_log({
       op = "MOVE",
       id = id,
@@ -137,7 +137,7 @@ local function newMockUi()
     local parent_id = node.parent
     if parent_id ~= nil then
       local parent = require_node(parent_id)
-      _ = remove_child(parent, id)
+      remove_child_index0(parent, id)
     end
 
     nodes[id] = nil

@@ -123,8 +123,7 @@ local function test_toggle_off_on_same_frame()
   env.assertTrue(env.deepEqual(before_snapshot, after_snapshot), "tree changed")
 end
 
-test_toggle_off_on()
-test_toggle_off_on_same_frame()
+Testkit.run("conditional_visibility.toggle_off_on", test_toggle_off_on)
+Testkit.run("conditional_visibility.toggle_off_on_same_frame", test_toggle_off_on_same_frame)
 
 return {}
-
