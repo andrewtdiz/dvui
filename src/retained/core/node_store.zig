@@ -551,12 +551,14 @@ pub const VersionTracker = struct {
 pub const NodeStore = struct {
     allocator: std.mem.Allocator,
     nodes: std.AutoHashMap(u32, SolidNode),
+    active_spacing_anim_ids: std.AutoHashMap(u32, u8),
     versions: VersionTracker = .{},
 
     pub fn init(self: *NodeStore, allocator: std.mem.Allocator) !void {
         self.* = .{
             .allocator = allocator,
             .nodes = std.AutoHashMap(u32, SolidNode).init(allocator),
+            .active_spacing_anim_ids = std.AutoHashMap(u32, u8).init(allocator),
             .versions = .{},
         };
         try self.ensureRoot(0);
@@ -568,6 +570,7 @@ pub const NodeStore = struct {
             entry.value_ptr.deinit(self.allocator);
         }
         self.nodes.deinit();
+        self.active_spacing_anim_ids.deinit();
     }
 
     fn ensureRoot(self: *NodeStore, id: u32) !void {
@@ -653,6 +656,10 @@ pub const NodeStore = struct {
 
     pub fn node(self: *NodeStore, id: u32) ?*SolidNode {
         return self.nodes.getPtr(id);
+    }
+
+    pub fn noteActiveSpacingAnimation(self: *NodeStore, id: u32) void {
+        self.active_spacing_anim_ids.put(id, 1) catch {};
     }
 
     pub fn setClassName(self: *NodeStore, id: u32, value: []const u8) !void {

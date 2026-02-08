@@ -102,7 +102,7 @@ pub fn beginFrameForNode(node: *types.SolidNode, cfg: *const tailwind.Transition
     updateActiveFromAnimations(node);
 }
 
-pub fn updateNode(win: *dvui.Window, node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
+pub fn updateNode(win: *dvui.Window, store: *types.NodeStore, node: *types.SolidNode, class_spec: *const tailwind.Spec) void {
     const cfg = &class_spec.transition;
     beginFrameForNode(node, cfg);
 
@@ -138,6 +138,9 @@ pub fn updateNode(win: *dvui.Window, node: *types.SolidNode, class_spec: *const 
     updateActiveFromAnimations(node);
     if (hasAnyActiveAnimation(node, cfg)) {
         node.invalidatePaint();
+    }
+    if (hasAnyActiveSpacingAnimation(node, cfg)) {
+        store.noteActiveSpacingAnimation(node.id);
     }
 
     updatePrevTargets(win, node, class_spec);

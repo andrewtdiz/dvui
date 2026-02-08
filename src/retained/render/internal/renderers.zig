@@ -251,7 +251,7 @@ fn renderElement(
     }
 
     if (class_spec.transition.enabled or node.transition_state.enabled) {
-        transitions.updateNode(win, node, &class_spec);
+        transitions.updateNode(win, store, node, &class_spec);
     }
 
     const scale = effectiveNodeScale(ctx, node);

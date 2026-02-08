@@ -1,3 +1,4 @@
+const std = @import("std");
 const dvui = @import("dvui");
 
 const types = @import("../core/types.zig");
@@ -12,12 +13,14 @@ var last_screen_size: types.Size = .{};
 var last_natural_scale: f32 = 0;
 var layout_updated: bool = false;
 var layout_force_recompute: bool = false;
+var layout_subtree_invalidated: bool = false;
 
 pub fn init() void {
     last_screen_size = .{};
     last_natural_scale = 0;
     layout_updated = false;
     layout_force_recompute = false;
+    layout_subtree_invalidated = false;
 }
 
 pub fn deinit() void {
@@ -25,6 +28,34 @@ pub fn deinit() void {
     last_natural_scale = 0;
     layout_updated = false;
     layout_force_recompute = false;
+    layout_subtree_invalidated = false;
+}
+
+fn hasAnyActiveSpacingAnimations(store: *types.NodeStore) bool {
+    if (store.active_spacing_anim_ids.count() == 0) return false;
+    var to_remove: std.ArrayListUnmanaged(u32) = .{};
+    defer to_remove.deinit(store.allocator);
+
+    var found_active = false;
+    var it = store.active_spacing_anim_ids.iterator();
+    while (it.next()) |entry| {
+        const id = entry.key_ptr.*;
+        const node = store.node(id) orelse {
+            to_remove.append(store.allocator, id) catch {};
+            continue;
+        };
+        if (transitions.hasActiveSpacingAnimation(node)) {
+            found_active = true;
+        } else {
+            to_remove.append(store.allocator, id) catch {};
+        }
+    }
+
+    for (to_remove.items) |id| {
+        _ = store.active_spacing_anim_ids.remove(id);
+    }
+
+    return found_active;
 }
 
 pub fn updateLayouts(store: *types.NodeStore) void {
@@ -56,18 +87,18 @@ pub fn updateLayouts(store: *types.NodeStore) void {
 
     const tree_dirty = root.hasDirtySubtree();
     const layout_dirty = root.needsLayoutUpdate();
-    const has_layout_animation = hasActiveLayoutAnimations(store, root);
+    const has_layout_animation = hasAnyActiveSpacingAnimations(store);
 
     if (!size_changed and !scale_changed and !layout_dirty) {
         if (tree_dirty and !has_layout_animation) return;
-        const missing_layout = hasMissingLayout(store, root);
-        if (!missing_layout and !has_layout_animation) return;
+        if (!layout_subtree_invalidated and !has_layout_animation) return;
     }
 
     layout_updated = true;
     layout_force_recompute = has_layout_animation;
     updateLayoutIfDirty(store, root, root_rect);
     applyAnchoredPlacement(store, root, root_rect);
+    layout_subtree_invalidated = false;
     layout_force_recompute = false;
 }
 
@@ -76,6 +107,7 @@ pub fn didUpdateLayouts() bool {
 }
 
 pub fn invalidateLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode) void {
+    layout_subtree_invalidated = true;
     node.invalidateLayout();
     node.invalidatePaint();
     for (node.children.items) |child_id| {
@@ -443,24 +475,4 @@ fn computeScrollAutoSize(store: *types.NodeStore, node: *types.SolidNode, viewpo
         .w = @max(0.0, max_x - min_x),
         .h = @max(0.0, max_y - min_y),
     };
-}
-
-fn hasMissingLayout(store: *types.NodeStore, node: *types.SolidNode) bool {
-    if (node.layout.rect == null) return true;
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            if (hasMissingLayout(store, child)) return true;
-        }
-    }
-    return false;
-}
-
-fn hasActiveLayoutAnimations(store: *types.NodeStore, node: *types.SolidNode) bool {
-    if (transitions.hasActiveSpacingAnimation(node)) return true;
-    for (node.children.items) |child_id| {
-        if (store.node(child_id)) |child| {
-            if (hasActiveLayoutAnimations(store, child)) return true;
-        }
-    }
-    return false;
 }
