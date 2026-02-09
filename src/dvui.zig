@@ -102,6 +102,7 @@ pub const renderImage = render.renderImage;
 pub const ScrollInfo = layout_mod.ScrollInfo;
 pub const selection = text_mod.selection;
 pub const Size = core.Size;
+pub const alloc = utils_mod.alloc;
 pub const struct_ui = utils_mod.struct_ui;
 pub const Subwindows = window_mod.Subwindows;
 pub const Texture = render_mod.Texture;
@@ -369,8 +370,8 @@ pub fn currentWindow() *Window {
 /// Only valid between `Window.begin`and `Window.end`.
 pub fn widgetAlloc(comptime T: type) *T {
     const cw = currentWindow();
-    const alloc = cw._widget_stack.allocator();
-    const ptr = alloc.create(T) catch @panic("OOM");
+    const allocator = cw._widget_stack.allocator();
+    const ptr = allocator.create(T) catch @panic("OOM");
     return ptr;
 }
 
@@ -3264,13 +3265,13 @@ pub fn toUtf8(allocator: std.mem.Allocator, text: []const u8) std.mem.Allocator.
 }
 
 test toUtf8 {
-    const alloc = std.testing.allocator;
+    const allocator = std.testing.allocator;
     const some_text = "This is some maybe utf8 text";
     try std.testing.expect(std.unicode.utf8ValidateSlice(some_text));
 
-    const utf8_text = try toUtf8(alloc, some_text);
+    const utf8_text = try toUtf8(allocator, some_text);
     // Detect if the text needs to be freed by checking the
-    defer if (utf8_text.ptr != some_text.ptr) alloc.free(utf8_text);
+    defer if (utf8_text.ptr != some_text.ptr) allocator.free(utf8_text);
 
     try std.testing.expect(some_text.ptr == utf8_text.ptr);
     try std.testing.expect(std.unicode.utf8ValidateSlice(utf8_text));
@@ -3279,9 +3280,9 @@ test toUtf8 {
     const invalid_utf8 = "This \xFF is some\xFF invalid utf8\xFF";
     try std.testing.expect(!std.unicode.utf8ValidateSlice(invalid_utf8));
 
-    const corrected_text = try toUtf8(alloc, invalid_utf8);
+    const corrected_text = try toUtf8(allocator, invalid_utf8);
     // Detect if the text needs to be freed by checking the
-    defer if (corrected_text.ptr != invalid_utf8.ptr) alloc.free(corrected_text);
+    defer if (corrected_text.ptr != invalid_utf8.ptr) allocator.free(corrected_text);
 
     try std.testing.expect(invalid_utf8.ptr != corrected_text.ptr);
     try std.testing.expect(std.unicode.utf8ValidateSlice(corrected_text));

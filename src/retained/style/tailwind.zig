@@ -18,45 +18,93 @@
 //! - Transitions: `transition*`, `duration-*`, `ease-*`.
 const std = @import("std");
 const dvui = @import("dvui");
+const alloc_mod = dvui.alloc;
 
 const types = @import("tailwind/types.zig");
 const parser = @import("tailwind/parse.zig");
 const color_typography = @import("tailwind/parse_color_typography.zig");
 
-const spec_cache_allocator = std.heap.c_allocator;
+const spec_cache_max_entries: usize = 4096;
+const spec_cache_evict_batch: usize = 64;
+
 const SpecCache = std.StringHashMap(types.Spec);
 var spec_cache: SpecCache = undefined;
 var spec_cache_ready: bool = false;
 
+fn specCacheAllocator() std.mem.Allocator {
+    return alloc_mod.allocator();
+}
+
 fn ensureSpecCacheReady() void {
     if (spec_cache_ready) return;
-    spec_cache = SpecCache.init(spec_cache_allocator);
+    spec_cache = SpecCache.init(specCacheAllocator());
     spec_cache_ready = true;
 }
 
 fn releaseSpecCache() void {
     if (!spec_cache_ready) return;
+    const allocator = specCacheAllocator();
     var iter = spec_cache.iterator();
     while (iter.next()) |entry| {
-        spec_cache_allocator.free(entry.key_ptr.*);
+        allocator.free(entry.key_ptr.*);
     }
     spec_cache.deinit();
     spec_cache_ready = false;
 }
 
+fn evictSpecCacheIfNeeded() void {
+    if (!spec_cache_ready) return;
+    const count = spec_cache.count();
+    if (count <= spec_cache_max_entries) return;
+
+    var to_remove: usize = count - spec_cache_max_entries;
+    if (to_remove < spec_cache_evict_batch) to_remove = spec_cache_evict_batch;
+    if (to_remove > count) to_remove = count;
+
+    const allocator = specCacheAllocator();
+
+    var keys: [spec_cache_evict_batch][]const u8 = undefined;
+    while (to_remove > 0) {
+        const batch: usize = @min(to_remove, keys.len);
+
+        var iter = spec_cache.iterator();
+        var key_count: usize = 0;
+        while (key_count < batch) {
+            const entry = iter.next() orelse break;
+            keys[key_count] = entry.key_ptr.*;
+            key_count += 1;
+        }
+
+        if (key_count == 0) break;
+
+        var i: usize = 0;
+        while (i < key_count) : (i += 1) {
+            if (spec_cache.fetchRemove(keys[i])) |kv| {
+                allocator.free(kv.key);
+            }
+        }
+
+        to_remove -= key_count;
+    }
+}
+
 fn cacheSpec(classes: []const u8, spec: types.Spec) void {
     if (!spec_cache_ready or classes.len == 0) return;
-    const key = spec_cache_allocator.dupe(u8, classes) catch return;
+    if (spec_cache_max_entries == 0) return;
+
+    const allocator = specCacheAllocator();
+    const key = allocator.dupe(u8, classes) catch return;
     const gop = spec_cache.getOrPut(key) catch {
-        spec_cache_allocator.free(key);
+        allocator.free(key);
         return;
     };
     if (gop.found_existing) {
-        spec_cache_allocator.free(key);
+        allocator.free(key);
         return;
     }
     gop.key_ptr.* = key;
     gop.value_ptr.* = spec;
+    evictSpecCacheIfNeeded();
 }
 
 pub const TextAlign = types.TextAlign;
