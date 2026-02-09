@@ -18,6 +18,7 @@ pub const EventEntry = events_mod.EventEntry;
 pub const FrameTimings = render_mod.FrameTimings;
 const layout = @import("layout/mod.zig");
 const render_mod = @import("render/mod.zig");
+pub const ui_json = @import("loaders/ui_json.zig");
 
 pub fn init() void {
     tailwind.init();

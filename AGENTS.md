@@ -1,7 +1,5 @@
 # DVUI
 
-See ARCHITECTURE.md for high-level project context.
-
 ## CRITICAL RULES (Always Follow)
 
 1. **NO COMMENTS** - Code must be self-documenting through clear names
