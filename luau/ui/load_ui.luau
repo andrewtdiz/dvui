@@ -20,22 +20,23 @@ local function compute_key_path(key: string?, parent: UINode?): string?
   return key
 end
 
-local function with_key_token(class_value: any, key_path: string): any
+local function with_path_token(class_value: any, key_path: string): any
+  local tok = "ui-path-" .. key_path
   if type(class_value) == "string" then
-    if string.find(class_value, "__key=") ~= nil then
+    if string.find(class_value, "__key=") ~= nil or string.find(class_value, "ui%-path%-") ~= nil then
       return class_value
     end
     if class_value == "" then
-      return "__key=" .. key_path
+      return tok
     end
-    return class_value .. " __key=" .. key_path
+    return class_value .. " " .. tok
   end
   if class_value == nil then
-    return "__key=" .. key_path
+    return tok
   end
   if type(class_value) == "function" then
     return function()
-      return with_key_token(class_value(), key_path)
+      return with_path_token(class_value(), key_path)
     end
   end
   return class_value
@@ -75,7 +76,7 @@ local function build_node(spec: any, forced_key: string?, parent: UINode?): UINo
   local key_path = compute_key_path(key, parent)
   node.__keyPath = key_path
   if type(key_path) == "string" then
-    node.class = with_key_token(node.class, key_path)
+    node.class = with_path_token(node.class, key_path)
   end
 
   local children_spec = spec.children
@@ -140,11 +141,38 @@ local function from_spec(spec: any): any
   return build_node(root_value, root_key, nil)
 end
 
+local function attach(parent: UINode, spec: any): any
+  if type(parent) ~= "table" then
+    error("ui attach parent must be node", 0)
+  end
+  if type(spec) ~= "table" then
+    error("ui attach spec must be table", 0)
+  end
+
+  if spec.tag ~= nil then
+    return build_node(spec, nil, parent)
+  end
+
+  local root_key, root_value = next(spec)
+  if root_key == nil or root_value == nil then
+    error("ui spec root wrapper empty", 0)
+  end
+  if next(spec, root_key) ~= nil then
+    error("ui spec root wrapper must have one key", 0)
+  end
+  if type(root_key) ~= "string" then
+    error("ui spec root key must be string", 0)
+  end
+
+  return build_node(root_value, root_key, parent)
+end
+
 local function from_json(module_id: string): any
   return from_spec(require(module_id))
 end
 
 return {
   from_spec = from_spec,
+  attach = attach,
   from_json = from_json,
 }

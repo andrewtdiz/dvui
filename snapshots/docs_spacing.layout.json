@@ -1,0 +1,105 @@
+{
+  "meta": {
+    "scene": "luau/scenes/dvui_docs/spacing/app",
+    "width": 1280,
+    "height": 720,
+    "pixelWidth": 1600,
+    "pixelHeight": 900,
+    "frame": 2,
+    "dt": 0.000000,
+    "decimals": 2
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "parent": null,
+      "kind": "root",
+      "tag": "",
+      "class": "",
+      "keyPath": "$root",
+      "parentKeyPath": null,
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 1,
+      "parent": 0,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-full h-full bg-neutral-950 p-8 flex flex-row gap-8 items-start ui-path-root",
+      "keyPath": "root",
+      "parentKeyPath": "$root",
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [49.92,49.92,1500.16,800.16],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "bg-neutral-900 border-2 border-neutral-700 p-6 flex flex-col gap-4 ui-path-root.panel",
+      "keyPath": "root.panel",
+      "parentKeyPath": "root",
+      "rect": [49.92,49.92,424.32,499.20],
+      "childRect": [90.48,90.48,343.20,418.08],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 3,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[160] h-[48] bg-blue-600 m-4 ui-path-root.panel.m_all",
+      "keyPath": "root.panel.m_all",
+      "parentKeyPath": "root.panel",
+      "rect": [115.44,115.44,249.60,74.88],
+      "childRect": [115.44,115.44,249.60,74.88],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 4,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[160] h-[48] bg-emerald-600 mt-6 mr-2 mb-1 ml-0 ui-path-root.panel.m_sides",
+      "keyPath": "root.panel.m_sides",
+      "parentKeyPath": "root.panel",
+      "rect": [90.48,277.68,249.60,74.88],
+      "childRect": [90.48,277.68,249.60,74.88],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 5,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[220] h-[140] bg-neutral-800 border border-neutral-600 p-4 ui-path-root.panel.padded",
+      "keyPath": "root.panel.padded",
+      "parentKeyPath": "root.panel",
+      "rect": [90.48,383.76,343.20,218.40],
+      "childRect": [117.00,410.28,290.16,165.36],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 6,
+      "parent": 5,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-full h-full bg-amber-500 ui-path-root.panel.padded.child",
+      "keyPath": "root.panel.padded.child",
+      "parentKeyPath": "root.panel.padded",
+      "rect": [117.00,410.28,290.16,165.36],
+      "childRect": [117.00,410.28,290.16,165.36],
+      "text": "",
+      "textHash": 0
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "meta": {
+    "scene": "luau/scenes/dvui_docs/borders/app",
+    "width": 1280,
+    "height": 720,
+    "pixelWidth": 1600,
+    "pixelHeight": 900,
+    "frame": 2,
+    "dt": 0.000000,
+    "decimals": 2
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "parent": null,
+      "kind": "root",
+      "tag": "",
+      "class": "",
+      "keyPath": "$root",
+      "parentKeyPath": null,
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 1,
+      "parent": 0,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-full h-full bg-neutral-950 flex items-center justify-center p-8 ui-path-root",
+      "keyPath": "root",
+      "parentKeyPath": "$root",
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [49.92,49.92,1500.16,800.16],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "bg-neutral-900 border-2 border-neutral-700 p-8 flex flex-col gap-6 ui-path-root.card",
+      "keyPath": "root.card",
+      "parentKeyPath": "root",
+      "rect": [497.36,116.16,605.28,667.68],
+      "childRect": [550.40,169.20,499.20,561.60],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 3,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[320] h-[72] bg-neutral-800 border border-blue-500 rounded ui-path-root.card.border1",
+      "keyPath": "root.card.border1",
+      "parentKeyPath": "root.card",
+      "rect": [550.40,169.20,499.20,112.32],
+      "childRect": [551.96,170.76,496.08,109.20],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 4,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[320] h-[72] bg-neutral-800 border-x-4 border-y-2 border-x-emerald-500 border-y-amber-500 rounded-xl ui-path-root.card.border2",
+      "keyPath": "root.card.border2",
+      "parentKeyPath": "root.card",
+      "rect": [550.40,318.96,499.20,112.32],
+      "childRect": [556.64,322.08,486.72,106.08],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 5,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[320] h-[72] bg-neutral-800 border-t-4 border-r-2 border-b-6 border-l-1 border-t-red-500 border-r-cyan-500 border-b-lime-500 border-l-fuchsia-500 rounded-full ui-path-root.card.border3",
+      "keyPath": "root.card.border3",
+      "parentKeyPath": "root.card",
+      "rect": [550.40,468.72,499.20,112.32],
+      "childRect": [551.96,474.96,494.52,96.72],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 6,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[320] h-[72] bg-neutral-800 border-px border-neutral-200 rounded-3xl ui-path-root.card.border4",
+      "keyPath": "root.card.border4",
+      "parentKeyPath": "root.card",
+      "rect": [550.40,618.48,499.20,112.32],
+      "childRect": [551.96,620.04,496.08,109.20],
+      "text": "",
+      "textHash": 0
+    }
+  ]
+}

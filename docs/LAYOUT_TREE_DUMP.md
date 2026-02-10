@@ -135,9 +135,10 @@ Recommended identity: `keyPath`
 
 Practical way to carry `keyPath` through the pipeline without modifying dependencies:
 
-- Append an ignored token to `class`, for example `__key=root.card.button`.
+- Give nodes stable keys (`key = "card"`, `key = "button"`, etc).
+- Use `luau/ui/load_ui.luau` (`LoadUI.from_spec` / `LoadUI.attach`) to inject a metadata token `ui-path-<full.path>` into the node `class`.
 - Tailwind parsing ignores unknown tokens, so it won’t affect layout.
-- The Zig dumper extracts `__key=` from `SolidNode.class_name` and emits it as `keyPath`.
+- The Zig dumper extracts `ui-path-` (and legacy `__key=`) from `SolidNode.class_name` and emits it as `keyPath`.
 
 Fallback if no stable key exists:
 
@@ -186,4 +187,3 @@ Where to implement the CLI:
 
 - Add a new executable target (recommended) or extend `luau-native-runner`.
 - Ensure deterministic run controls: fixed window size, fixed dt, fixed number of frames, predictable exit.
-

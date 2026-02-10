@@ -39,6 +39,12 @@ local function App()
   local row = card.row
   local track = row.track
 
+  local toggles = LoadUI.attach(card, Tag.div({ key = "toggles", class = "flex items-center gap-3" }) {
+    Toggle({ key = "off", on = toggle_off, onChange = set_toggle_off }),
+    Toggle({ key = "on", on = toggle_on, onChange = set_toggle_on }),
+    Checkbox({ key = "checkbox", checked = checked, onChange = set_checked }),
+  })
+
   hydrate(card.button){
     onClick = function()
       set_scale_x_target(math.max(scale_x_target() - 0.1, 0))
@@ -64,11 +70,7 @@ local function App()
       card.button,
       card.icon,
       card.row,
-      Tag.div({ class = "flex items-center gap-3 __key=root.card.toggles" }) {
-        Toggle({ on = toggle_off, onChange = set_toggle_off, class = "__key=root.card.toggles.off" }),
-        Toggle({ on = toggle_on, onChange = set_toggle_on, class = "__key=root.card.toggles.on" }),
-        Checkbox({ checked = checked, onChange = set_checked, class = "__key=root.card.toggles.checkbox" }),
-      },
+      toggles,
     },
   }
 

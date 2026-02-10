@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "scene": "luau/scenes/dvui_docs/zindex_opacity/app",
+    "width": 1280,
+    "height": 720,
+    "pixelWidth": 1600,
+    "pixelHeight": 900,
+    "frame": 2,
+    "dt": 0.000000,
+    "decimals": 2
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "parent": null,
+      "kind": "root",
+      "tag": "",
+      "class": "",
+      "keyPath": "$root",
+      "parentKeyPath": null,
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 1,
+      "parent": 0,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-full h-full bg-neutral-950 ui-path-root",
+      "keyPath": "root",
+      "parentKeyPath": "$root",
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-[240] top-[200] w-[360] h-[240] bg-blue-600 z-base ui-path-root.base",
+      "keyPath": "root.base",
+      "parentKeyPath": "root",
+      "rect": [374.40,312.00,561.60,374.40],
+      "childRect": [374.40,312.00,561.60,374.40],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 4,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-[260] top-[220] w-[120] h-[80] bg-fuchsia-600 -z-10 ui-path-root.behind",
+      "keyPath": "root.behind",
+      "parentKeyPath": "root",
+      "rect": [405.60,343.20,187.20,124.80],
+      "childRect": [405.60,343.20,187.20,124.80],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 3,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-[320] top-[260] w-[360] h-[240] bg-amber-500 opacity-50 z-modal ui-path-root.overlay",
+      "keyPath": "root.overlay",
+      "parentKeyPath": "root",
+      "rect": [499.20,405.60,561.60,374.40],
+      "childRect": [499.20,405.60,561.60,374.40],
+      "text": "",
+      "textHash": 0
+    }
+  ]
+}

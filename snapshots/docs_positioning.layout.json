@@ -1,0 +1,131 @@
+{
+  "meta": {
+    "scene": "luau/scenes/dvui_docs/positioning/app",
+    "width": 1280,
+    "height": 720,
+    "pixelWidth": 1600,
+    "pixelHeight": 900,
+    "frame": 2,
+    "dt": 0.000000,
+    "decimals": 2
+  },
+  "nodes": [
+    {
+      "id": 0,
+      "parent": null,
+      "kind": "root",
+      "tag": "",
+      "class": "",
+      "keyPath": "$root",
+      "parentKeyPath": null,
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 1,
+      "parent": 0,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-full h-full bg-neutral-950 flex items-center justify-center ui-path-root",
+      "keyPath": "root",
+      "parentKeyPath": "$root",
+      "rect": [0.00,0.00,1600.00,900.00],
+      "childRect": [0.00,0.00,1600.00,900.00],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "kind": "element",
+      "tag": "div",
+      "class": "w-[640] h-[360] bg-neutral-900 border-2 border-neutral-700 overflow-hidden ui-path-root.stage",
+      "keyPath": "root.stage",
+      "parentKeyPath": "root",
+      "rect": [300.80,169.20,998.40,561.60],
+      "childRect": [303.92,172.32,992.16,555.36],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 4,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute right-2 bottom-2 w-[96] h-[72] bg-emerald-600 anchor-bottom-right ui-path-root.stage.br",
+      "keyPath": "root.stage.br",
+      "parentKeyPath": "root.stage",
+      "rect": [1133.84,602.88,149.76,112.32],
+      "childRect": [1133.84,602.88,149.76,112.32],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 5,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-[50%] top-[50%] w-[96] h-[96] bg-amber-500 anchor-center ui-path-root.stage.center",
+      "keyPath": "root.stage.center",
+      "parentKeyPath": "root.stage",
+      "rect": [725.12,375.12,149.76,149.76],
+      "childRect": [725.12,375.12,149.76,149.76],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 6,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-[-24] top-[80] w-[96] h-[72] bg-fuchsia-600 anchor-top-left ui-path-root.stage.neg",
+      "keyPath": "root.stage.neg",
+      "parentKeyPath": "root.stage",
+      "rect": [266.48,297.12,149.76,112.32],
+      "childRect": [266.48,297.12,149.76,112.32],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 8,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute right-[10%] top-[15%] w-[96] h-[72] bg-cyan-600 anchor-top-right ui-path-root.stage.percent",
+      "keyPath": "root.stage.percent",
+      "parentKeyPath": "root.stage",
+      "rect": [1047.10,255.62,149.76,112.32],
+      "childRect": [1047.10,255.62,149.76,112.32],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 7,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-px top-px w-px h-px bg-white anchor-top-left ui-path-root.stage.px",
+      "keyPath": "root.stage.px",
+      "parentKeyPath": "root.stage",
+      "rect": [305.48,173.88,1.56,1.56],
+      "childRect": [305.48,173.88,1.56,1.56],
+      "text": "",
+      "textHash": 0
+    },
+    {
+      "id": 3,
+      "parent": 2,
+      "kind": "element",
+      "tag": "div",
+      "class": "absolute left-0 top-0 w-[96] h-[72] bg-blue-600 anchor-top-left ui-path-root.stage.tl",
+      "keyPath": "root.stage.tl",
+      "parentKeyPath": "root.stage",
+      "rect": [303.92,172.32,149.76,112.32],
+      "childRect": [303.92,172.32,149.76,112.32],
+      "text": "",
+      "textHash": 0
+    }
+  ]
+}
