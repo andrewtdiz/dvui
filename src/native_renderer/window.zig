@@ -124,30 +124,31 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
     }
 }
 
-fn saveScreenshotPng(renderer: *Renderer, picture: *dvui.Picture) void {
+fn requestScreenshot(renderer: *Renderer) bool {
+    std.fs.cwd().makeDir("artifacts") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => {
+            logMessage(renderer, 3, "screenshot dir create failed: {s}", .{@errorName(err)});
+            return false;
+        },
+    };
+
     var name_buf: [96]u8 = undefined;
     const index = renderer.screenshot_index;
-    renderer.screenshot_index +%= 1;
-    const name = std.fmt.bufPrint(&name_buf, "screenshot-{d}.png", .{index}) catch {
+    const name = std.fmt.bufPrint(&name_buf, "artifacts/screenshot-{d}.png", .{index}) catch {
         logMessage(renderer, 3, "screenshot name failed", .{});
-        return;
+        return false;
     };
-    const file = std.fs.cwd().createFile(name, .{}) catch |err| {
-        logMessage(renderer, 3, "screenshot create failed: {s}", .{@errorName(err)});
-        return;
-    };
-    defer file.close();
-    var buf: [8192]u8 = undefined;
-    var writer = file.writer(&buf);
-    picture.png(&writer.interface) catch |err| {
-        logMessage(renderer, 3, "screenshot write failed: {s}", .{@errorName(err)});
-        return;
-    };
-    writer.end() catch |err| {
-        logMessage(renderer, 3, "screenshot finalize failed: {s}", .{@errorName(err)});
-        return;
-    };
-    logMessage(renderer, 1, "screenshot saved: {s}", .{name});
+
+    const ok = if (renderer.webgpu) |*wgpu_renderer| wgpu_renderer.requestScreenshot(name) else false;
+    if (!ok) {
+        logMessage(renderer, 2, "screenshot request failed", .{});
+        return false;
+    }
+
+    logMessage(renderer, 1, "screenshot requested: {s}", .{name});
+    renderer.screenshot_index +%= 1;
+    return true;
 }
 
 fn drainLuaEvents(renderer: *Renderer, lua_state: *luaz.Lua, ring: *retained.EventRing) void {
@@ -257,6 +258,7 @@ pub fn renderFrame(renderer: *Renderer) void {
             logMessage(renderer, 3, "window begin failed: {s}", .{@errorName(err)});
             return;
         };
+        var auto_close_after_render = false;
         defer {
             if (renderer.webgpu) |*wgpu_renderer| {
                 const present_start_ns = profiling.mark();
@@ -264,6 +266,10 @@ pub fn renderFrame(renderer: *Renderer) void {
                     logMessage(renderer, 3, "webgpu render failed: {s}", .{@errorName(err)});
                 };
                 profiling.addPresent(&renderer.profiler, present_start_ns);
+            }
+            if (auto_close_after_render) {
+                std.Thread.sleep(500 * std.time.ns_per_ms);
+                renderer.pending_destroy = true;
             }
         }
         defer {
@@ -285,14 +291,13 @@ pub fn renderFrame(renderer: *Renderer) void {
             profiling.addInput(&renderer.profiler, input_start_ns);
         }
 
-        var picture_opt: ?dvui.Picture = null;
+        const auto_screenshot = std.process.hasEnvVarConstant("DVUI_SCREENSHOT_AUTO");
         if (renderer.screenshot_key_enabled) {
             const pressed = ray.isKeyPressed(ray.KeyboardKey.print_screen) or ray.isKeyPressed(ray.KeyboardKey.f12);
-            if (pressed) {
-                picture_opt = dvui.Picture.start(dvui.windowRectPixels());
-                if (picture_opt == null) {
-                    logMessage(renderer, 2, "screenshot not supported", .{});
-                }
+            const should_take = pressed or (auto_screenshot and renderer.screenshot_index == 0);
+            if (should_take) {
+                _ = requestScreenshot(renderer);
+                auto_close_after_render = auto_screenshot;
             }
         }
 
@@ -393,13 +398,6 @@ pub fn renderFrame(renderer: *Renderer) void {
             const commands_start_ns = profiling.mark();
             commands.renderCommandsDvui(renderer, win);
             profiling.addCommands(&renderer.profiler, commands_start_ns);
-        }
-
-        if (picture_opt) |*picture| {
-            win.endRendering(.{});
-            picture.stop();
-            saveScreenshotPng(renderer, picture);
-            picture.deinit();
         }
 
         if (renderer.backend) |*backend| {

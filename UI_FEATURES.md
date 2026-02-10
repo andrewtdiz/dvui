@@ -17,7 +17,7 @@
 - [x] Image color/tint
 - [x] Image transparency (separate from background alpha)
 
-## text
+## textp
 - [x] All div basics above (position/size/color/alpha)
 - [x] Text string
 - [x] Text scaling (font size via fontSizing/fontSize)

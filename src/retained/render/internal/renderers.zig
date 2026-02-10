@@ -335,7 +335,7 @@ fn renderElementBody(
         node.markRendered();
         return;
     }
-    renderGeneric(runtime, event_ring, store, node, allocator, tracker, ctx);
+    renderGeneric(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
     node.markRendered();
 }
 
@@ -366,9 +366,12 @@ fn renderNonInteractiveElement(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    // Always draw non-interactive elements directly so backgrounds are guaranteed,
-    // then recurse into children. This bypasses DVUI background handling.
-    renderNonInteractiveDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+    if (shouldDirectDraw(node)) {
+        renderNonInteractiveDirect(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
+        return;
+    }
+
+    renderElementBody(runtime, event_ring, store, node_id, node, allocator, class_spec, tracker, ctx);
 }
 
 fn renderContainer(
@@ -394,7 +397,25 @@ fn renderContainerNormal(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    const rect_layout_opt = node.layout.rect;
+    var rect_opt = node.layout.rect;
+    if (rect_opt == null) {
+        const parent_rect = blk: {
+            if (node.parent) |pid| {
+                if (store.node(pid)) |parent| {
+                    if (parent.layout.rect) |pr| break :blk pr;
+                }
+            }
+            const win = dvui.currentWindow();
+            break :blk types.Rect{
+                .x = 0,
+                .y = 0,
+                .w = win.rect_pixels.w,
+                .h = win.rect_pixels.h,
+            };
+        };
+        layout.computeNodeLayout(store, node, parent_rect);
+        rect_opt = node.layout.rect;
+    }
     // Ensure a background color is present for container nodes.
     if (class_spec.background) |bg_ref| {
         const bg = tailwind.resolveColor(dvui.currentWindow(), bg_ref);
@@ -403,7 +424,7 @@ fn renderContainerNormal(
         }
     }
 
-    if (rect_layout_opt) |rect| {
+    if (rect_opt) |rect| {
         // Draw background ourselves so containers always show their fill.
         var bg_start_ns: i128 = 0;
         if (runtime.timings != null) {
@@ -426,15 +447,15 @@ fn renderContainerNormal(
     const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
     style_apply.resolveFont(&class_spec, &options);
+    options.margin = dvui.Rect{};
     options.background = false;
-    options.border = dvui.Rect{};
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
     applyBorderColorToOptions(node, visual_eff, &options);
     applyLayoutScaleToOptions(node, &options);
     applyTransformScaleToOptions(scale, &options);
     applyAccessibilityOptions(node, &options, .generic_container);
-    if (rect_layout_opt) |rect| {
+    if (rect_opt) |rect| {
         const bounds = nodeBoundsInContext(ctx, node, rect);
         options.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
         options.expand = .none;
@@ -443,7 +464,8 @@ fn renderContainerNormal(
         }
     }
 
-    var box = dvui.box(@src(), .{}, options);
+    var box = dvui.BoxWidget.init(@src(), .{}, options);
+    box.install();
     defer box.deinit();
     applyAccessibilityState(node, box.data());
 
@@ -535,10 +557,56 @@ fn renderGeneric(
     store: *types.NodeStore,
     node: *types.SolidNode,
     allocator: std.mem.Allocator,
+    class_spec: tailwind.ClassSpec,
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    const child_ctx = ctxForChildren(ctx, node, false);
+    var rect_opt = node.layout.rect;
+    if (rect_opt == null) {
+        const parent_rect = blk: {
+            if (node.parent) |pid| {
+                if (store.node(pid)) |parent| {
+                    if (parent.layout.rect) |pr| break :blk pr;
+                }
+            }
+            const win = dvui.currentWindow();
+            break :blk types.Rect{
+                .x = 0,
+                .y = 0,
+                .w = win.rect_pixels.w,
+                .h = win.rect_pixels.h,
+            };
+        };
+        layout.computeNodeLayout(store, node, parent_rect);
+        rect_opt = node.layout.rect;
+    }
+
+    var options = dvui.Options{
+        .name = "solid-generic",
+        .background = false,
+        .expand = .none,
+        .id_extra = nodeIdExtra(node.id),
+    };
+    const scale = effectiveNodeScale(ctx, node);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
+    options.margin = dvui.Rect{};
+    options.background = false;
+    applyLayoutScaleToOptions(node, &options);
+    applyTransformScaleToOptions(scale, &options);
+    if (rect_opt) |rect| {
+        const bounds = nodeBoundsInContext(ctx, node, rect);
+        options.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
+        options.expand = .none;
+        if (options.rotation == null) {
+            options.rotation = transitions.effectiveTransform(node).rotation;
+        }
+    }
+
+    var box = dvui.BoxWidget.init(@src(), .{}, options);
+    box.install();
+    defer box.deinit();
+
+    const child_ctx = ctxForChildren(ctx, node, true);
     renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
 }
 
@@ -610,7 +678,27 @@ fn renderParagraph(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    const rect = node.layout.rect orelse {
+    var rect_opt = node.layout.rect;
+    if (rect_opt == null) {
+        const parent_rect = blk: {
+            if (node.parent) |pid| {
+                if (store.node(pid)) |parent| {
+                    if (parent.layout.rect) |pr| break :blk pr;
+                }
+            }
+            const win = dvui.currentWindow();
+            break :blk types.Rect{
+                .x = 0,
+                .y = 0,
+                .w = win.rect_pixels.w,
+                .h = win.rect_pixels.h,
+            };
+        };
+        layout.computeNodeLayout(store, node, parent_rect);
+        rect_opt = node.layout.rect;
+    }
+
+    const rect = rect_opt orelse {
         renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
         return;
     };
@@ -624,13 +712,39 @@ fn renderParagraph(
         timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
     }
 
+    var scope_options = dvui.Options{
+        .name = "solid-paragraph",
+        .background = false,
+        .expand = .none,
+        .id_extra = nodeIdExtra(node_id),
+    };
+    const scope_scale = effectiveNodeScale(ctx, node);
+    style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &scope_options);
+    scope_options.margin = dvui.Rect{};
+    scope_options.background = false;
+    applyLayoutScaleToOptions(node, &scope_options);
+    applyTransformScaleToOptions(scope_scale, &scope_options);
+    {
+        const bounds = nodeBoundsInContext(ctx, node, rect);
+        scope_options.rect = physicalToDvuiRect(rectToParentLocal(bounds, ctx.origin));
+        scope_options.expand = .none;
+        if (scope_options.rotation == null) {
+            scope_options.rotation = transitions.effectiveTransform(node).rotation;
+        }
+    }
+
+    var scope_box = dvui.BoxWidget.init(@src(), .{}, scope_options);
+    scope_box.install();
+    defer scope_box.deinit();
+
     var text_buffer: std.ArrayList(u8) = .empty;
     defer text_buffer.deinit(allocator);
 
     collectText(allocator, store, node, &text_buffer);
     const trimmed = std.mem.trim(u8, text_buffer.items, " \n\r\t");
     if (trimmed.len == 0) {
-        renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
+        const child_ctx = ctxForChildren(ctx, node, true);
+        renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, true);
         return;
     }
 
@@ -696,7 +810,8 @@ fn renderParagraph(
         timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
     }
 
-    renderChildElements(runtime, event_ring, store, node, allocator, tracker, ctx);
+    const child_ctx = ctxForChildren(ctx, node, true);
+    renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, true);
 }
 
 fn renderText(runtime: *RenderRuntime, store: *types.NodeStore, node: *types.SolidNode, ctx: RenderContext) void {
@@ -718,6 +833,9 @@ fn renderText(runtime: *RenderRuntime, store: *types.NodeStore, node: *types.Sol
                 style_apply.resolveFont(&parent_spec, &options);
             }
         }
+        options.margin = dvui.Rect{};
+        options.border = dvui.Rect{};
+        options.padding = dvui.Rect{};
         const visual_eff = transitions.effectiveVisual(node);
         applyVisualPropsToOptions(visual_eff, &options);
         applyBorderColorToOptions(node, visual_eff, &options);
@@ -761,7 +879,6 @@ fn renderButton(
 ) void {
     const text = buildText(store, node, allocator);
     const trimmed = std.mem.trim(u8, text, " \n\r\t");
-    const caption = if (trimmed.len == 0) "Button" else trimmed;
 
     // Ensure we have a concrete rect; if layout is missing, compute a fallback using the parent rect/screen.
     var rect_opt = node.layout.rect;
@@ -799,6 +916,7 @@ fn renderButton(
     }
     const visual_eff = transitions.effectiveVisual(node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options_base);
+    options_base.margin = dvui.Rect{};
     style_apply.resolveFont(&class_spec, &options_base);
     applyVisualPropsToOptions(visual_eff, &options_base);
     applyBorderColorToOptions(node, visual_eff, &options_base);
@@ -864,42 +982,44 @@ fn renderButton(
         timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
     }
 
-    // Draw caption directly (avoid relying on LabelWidget sizing/refresh timing).
-    // This fixes cases where button text doesn't appear until a later repaint.
-    const content_rs = bw.data().contentRectScale();
-    const text_style = bw.style();
-    const font = text_style.fontGet();
-    const size_nat = font.textSize(caption);
-    const text_w = size_nat.w * content_rs.s;
-    const text_h = size_nat.h * content_rs.s;
+    if (trimmed.len != 0) {
+        const content_rs = bw.data().contentRectScale();
+        const text_style = bw.style();
+        const font = text_style.fontGet();
+        const size_nat = font.textSize(trimmed);
+        const text_w = size_nat.w * content_rs.s;
+        const text_h = size_nat.h * content_rs.s;
 
-    var text_rs = content_rs;
-    if (text_w < text_rs.r.w) text_rs.r.x += (text_rs.r.w - text_w) * 0.5;
-    if (text_h < text_rs.r.h) text_rs.r.y += (text_rs.r.h - text_h) * 0.5;
-    text_rs.r.w = text_w;
-    text_rs.r.h = text_h;
+        var text_rs = content_rs;
+        if (text_w < text_rs.r.w) text_rs.r.x += (text_rs.r.w - text_w) * 0.5;
+        if (text_h < text_rs.r.h) text_rs.r.y += (text_rs.r.h - text_h) * 0.5;
+        text_rs.r.w = text_w;
+        text_rs.r.h = text_h;
 
-    const prev_clip = dvui.clip(content_rs.r);
-    defer dvui.clipSet(prev_clip);
-    var text_start_ns: i128 = 0;
-    if (runtime.timings != null) {
-        text_start_ns = std.time.nanoTimestamp();
-    }
-    dvui.renderText(.{
-        .font = font,
-        .text = caption,
-        .rs = text_rs,
-        .color = text_style.color(.text),
-        .outline_color = text_style.text_outline_color,
-        .outline_thickness = text_style.text_outline_thickness,
-    }) catch |err| {
-        if (runtime.button_text_error_log_count < 8) {
-            runtime.button_text_error_log_count += 1;
-            log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
+        {
+            const prev_clip = dvui.clip(content_rs.r);
+            defer dvui.clipSet(prev_clip);
+            var text_start_ns: i128 = 0;
+            if (runtime.timings != null) {
+                text_start_ns = std.time.nanoTimestamp();
+            }
+            dvui.renderText(.{
+                .font = font,
+                .text = trimmed,
+                .rs = text_rs,
+                .color = text_style.color(.text),
+                .outline_color = text_style.text_outline_color,
+                .outline_thickness = text_style.text_outline_thickness,
+            }) catch |err| {
+                if (runtime.button_text_error_log_count < 8) {
+                    runtime.button_text_error_log_count += 1;
+                    log.err("button caption renderText failed node={d}: {s}", .{ node_id, @errorName(err) });
+                }
+            };
+            if (runtime.timings) |timings| {
+                timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
+            }
         }
-    };
-    if (runtime.timings) |timings| {
-        timings.draw_text_ns += std.time.nanoTimestamp() - text_start_ns;
     }
 
     var focus_bg_start_ns: i128 = 0;
@@ -982,6 +1102,7 @@ fn renderIcon(
     };
     const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
+    options.margin = dvui.Rect{};
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1094,6 +1215,7 @@ fn renderImage(
     };
     const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
+    options.margin = dvui.Rect{};
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1208,6 +1330,7 @@ fn renderSlider(
     });
     const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
+    options.margin = dvui.Rect{};
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);
@@ -1489,6 +1612,7 @@ fn renderInput(
     };
     const scale = effectiveNodeScale(ctx, node);
     style_apply.applyToOptions(dvui.currentWindow(), &class_spec, &options);
+    options.margin = dvui.Rect{};
     style_apply.resolveFont(&class_spec, &options);
     const visual_eff = transitions.effectiveVisual(node);
     applyVisualPropsToOptions(visual_eff, &options);

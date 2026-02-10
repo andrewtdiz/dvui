@@ -7,9 +7,14 @@
 
 ## Summary
 
-Pointer/drag payloads are pushed from Zig as packed binary bytes and forwarded into Luau handlers unchanged. The public handler API therefore exposes low-level transport encoding details instead of structured event objects.
+Historically, pointer/drag payloads were pushed from Zig as packed binary bytes and forwarded into Luau handlers unchanged. This exposed low-level transport encoding details instead of structured event objects.
 
 This is a high-severity API design issue for a declarative reactive UI layer because it leaks ABI details into application code.
+
+## Status (Current)
+
+- Pointer/drag payloads are decoded into Lua tables in `src/native_renderer/window.zig` (`drainLuaEvents`) via `src/native_renderer/event_payload.zig`.
+- `EventRing` still stores detail bytes, and any event kinds that use binary detail payloads must be explicitly decoded in the bridge to avoid leaking bytes to Luau.
 
 ## Why this matters
 
@@ -34,13 +39,13 @@ This blocks productive onboarding for contributors unfamiliar with low-level bri
 
 - `input` / `enter`: UTF-8 string
 - `click` / `focus` / `blur` / hover events: empty string
-- `pointer*` and drag events: raw bytes of packed structs
+- `pointer*` and drag events: table (decoded by the native renderer bridge)
 
 This mixed contract forces each handler author to special-case parsing by event kind.
 
 ## Root cause
 
-Bridge code currently treats event detail as an opaque `[]const u8` and does not decode it into typed Lua values before invoking `on_event`.
+Event transport uses an opaque `[]const u8` detail buffer. The bridge must decode binary payload kinds into typed Lua values before invoking `on_event`; pointer/drag are decoded, but other binary payload kinds still require explicit handling.
 
 ## Resolution strategy
 

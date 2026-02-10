@@ -28,7 +28,7 @@ local function Checkbox(props: CheckboxProps): UINode
   local button_props = cn.props_omit(
     props,
     { checked = true, onChange = true },
-    "w-6 h-6 border border-slate-400 flex items-center justify-center cursor-pointer select-none"
+    "w-6 h-6 p-0 border border-slate-400 text-base flex items-center justify-center cursor-pointer select-none"
   )
 
   button_props.children = function()
@@ -43,4 +43,3 @@ local function Checkbox(props: CheckboxProps): UINode
 end
 
 return Checkbox
-

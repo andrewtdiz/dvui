@@ -2,6 +2,10 @@
 
 This document describes the **current, supported API surface** for DVUI’s retained renderer when driven from **Luau via SolidLuau**: **tag names**, **node properties (“attributes”)**, and **Tailwind-like class names**.
 
+See also:
+- `ARCHITECTURE.md` (module map)
+- `docs/ARCHITECTURE_CONTRACTS.md` (cross-cutting invariants)
+
 ## Mental model
 
 - A UI tree is built in Luau as nested tables (“nodes”).

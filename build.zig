@@ -233,6 +233,24 @@ pub fn build(b: *Build) !void {
         luau_layout_dump_exe.linkLibrary(dep.artifact("raylib"));
     }
     b.installArtifact(luau_layout_dump_exe);
+
+    const screenshot_step = b.step("screenshot", "Run the Luau demo and capture a dvui window screenshot");
+    const luau_screenshot_step = b.step("luau-screenshot", "Run the Luau demo and capture a dvui window screenshot");
+    if (b.graph.host.result.os.tag != .windows or target.result.os.tag != .windows) {
+        const fail = b.addFail("luau screenshot requires a Windows host and target");
+        screenshot_step.dependOn(&fail.step);
+        luau_screenshot_step.dependOn(&fail.step);
+    } else {
+        const luau_screenshot_run_cmd = b.addRunArtifact(luau_runner_exe);
+        if (b.args) |args| {
+            luau_screenshot_run_cmd.addArgs(args);
+        }
+        luau_screenshot_run_cmd.setEnvironmentVariable("DVUI_SCREENSHOT_AUTO", "1");
+        luau_screenshot_run_cmd.stdio = .inherit;
+
+        screenshot_step.dependOn(&luau_screenshot_run_cmd.step);
+        luau_screenshot_step.dependOn(&luau_screenshot_run_cmd.step);
+    }
 }
 
 fn detectLinuxDisplayBackend(b: *Build, target: Build.ResolvedTarget) LinuxDisplayBackend {

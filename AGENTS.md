@@ -18,6 +18,17 @@ Use raw `zigwin build --summary failures` output for deep debugging.
 
 You won't be able to start the runtime or test with `zig build run` or `zig test`, it won't work on WSL.
 
+## Luau UI Screenshot (Windows)
+
+1. Run the Luau demo:
+    - `zigwin build luau`
+2. Take a screenshot of the current DVUI window:
+    - Press `F12` or `PrintScreen` in the window.
+    - Screenshot is saved to `artifacts/screenshot-N.png`.
+
+Verification - runs the luau app demo, takes a screenshot, waits briefly, exits:
+- `zigwin build luau-screenshot` (same as `zigwin build screenshot`)
+
 ---
 
 ## Critical Zig APIs

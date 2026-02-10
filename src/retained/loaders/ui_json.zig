@@ -226,8 +226,8 @@ fn readUiLayout(obj: std.json.ObjectMap, parent_layout: UiLayout) UiLayout {
         .center => (parent_layout.height * 0.5) - (layout.height * 0.5) + pos[1],
         .bottom => parent_layout.height - layout.height - pos[1],
     };
-    layout.x = parent_layout.x + local_x;
-    layout.y = parent_layout.y + local_y;
+    layout.x = local_x;
+    layout.y = local_y;
     return layout;
 }
 

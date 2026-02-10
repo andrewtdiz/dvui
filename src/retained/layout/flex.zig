@@ -4,6 +4,11 @@ const dvui = @import("dvui");
 const types = @import("../core/types.zig");
 const tailwind = @import("../style/tailwind.zig");
 const measure = @import("measure.zig");
+const transitions = @import("../render/transitions.zig");
+
+fn sideValue(value: ?f32) f32 {
+    return value orelse 0;
+}
 
 pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area: types.Rect, spec: tailwind.Spec) void {
     const base_scale = dvui.windowNaturalScale();
@@ -38,7 +43,8 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
             // Skip hidden children entirely
-            const child_spec = child.prepareClassSpec();
+            var child_spec = child.prepareClassSpec();
+            tailwind.applyHover(&child_spec, child.hovered);
             const child_scale = scale * (child_spec.scale orelse 1.0);
             child.layout.layout_scale = child_scale;
             if (child_spec.hidden) {
@@ -55,7 +61,20 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             }
 
             const child_size = measure.measureNodeSize(store, child, available_size);
-            child_sizes.append(lifo, child_size) catch {};
+
+            const margin_base = types.SideOffsets{
+                .left = sideValue(child_spec.margin.left) * child_scale,
+                .right = sideValue(child_spec.margin.right) * child_scale,
+                .top = sideValue(child_spec.margin.top) * child_scale,
+                .bottom = sideValue(child_spec.margin.bottom) * child_scale,
+            };
+            const margin = if (child_spec.transition.enabled and child_spec.transition.props.layout) transitions.effectiveMargin(child, margin_base) else margin_base;
+
+            const outer_size = types.Size{
+                .w = child_size.w + margin.left + margin.right,
+                .h = child_size.h + margin.top + margin.bottom,
+            };
+            child_sizes.append(lifo, outer_size) catch {};
 
             const is_empty_text = child.kind == .text and child_size.w == 0 and child_size.h == 0;
             if (is_empty_text) {
@@ -66,12 +85,12 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             visible_count += 1;
 
             const main = switch (dir) {
-                .horizontal => child_size.w,
-                .vertical => child_size.h,
+                .horizontal => outer_size.w,
+                .vertical => outer_size.h,
             };
             const cross = switch (dir) {
-                .horizontal => child_size.h,
-                .vertical => child_size.w,
+                .horizontal => outer_size.h,
+                .vertical => outer_size.w,
             };
             total_main += main;
             if (cross > max_cross) max_cross = cross;

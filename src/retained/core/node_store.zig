@@ -533,7 +533,8 @@ pub const SolidNode = struct {
 const InsertError = error{
     MissingParent,
     MissingChild,
-};
+    InsertWouldCreateCycle,
+} || std.mem.Allocator.Error;
 
 pub const VersionTracker = struct {
     value: u64 = 0,
@@ -618,9 +619,20 @@ pub const NodeStore = struct {
         self.markNodeChanged(id);
     }
 
-    pub fn insert(self: *NodeStore, parent_id: u32, child_id: u32, before_id: ?u32) !void {
+    pub fn insert(self: *NodeStore, parent_id: u32, child_id: u32, before_id: ?u32) InsertError!void {
         const parent = self.nodes.getPtr(parent_id) orelse return error.MissingParent;
         const child = self.nodes.getPtr(child_id) orelse return error.MissingChild;
+
+        if (parent_id == child_id) return error.InsertWouldCreateCycle;
+        var current: ?u32 = parent_id;
+        var remaining: usize = self.nodes.count() + 1;
+        while (current) |node_id| {
+            if (remaining == 0) return error.InsertWouldCreateCycle;
+            remaining -= 1;
+            if (node_id == child_id) return error.InsertWouldCreateCycle;
+            const node_ptr = self.nodes.getPtr(node_id) orelse break;
+            current = node_ptr.parent;
+        }
 
         self.detachFromParent(child);
         child.parent = parent_id;

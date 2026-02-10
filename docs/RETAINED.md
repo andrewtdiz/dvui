@@ -101,4 +101,4 @@ Here’s the same guidance with file references and no debug overlay suggestion:
 - Reduce dual pipelines: consolidate text rendering so h1/p go through one path (either DVUI or direct) by refactoring src/retained/render/internal/renderers.zig and src/retained/render/direct.zig.
 - Tighten paint‑cache usage: limit painted_rect to cache/dirty logic only, and avoid using it for placement decisions in src/retained/render/cache.zig and src/retained/render/internal/renderers.zig.
 - Add a render regression: a small test scene covering scale + h1/p in a container, referenced in luau/app.luau (or a dedicated sample scene file if you prefer).
-- Write invariants: add a brief “text rendering invariants” section in ARCHITECTURE.md explaining layout rect vs context rect vs painted rect, and which modules may use each.
+- Text rendering invariants: see `docs/ARCHITECTURE_CONTRACTS.md` (“Coordinate Spaces And Rect Contracts”) for layout rect vs context rect vs paint-cache bounds, and which modules should use each.

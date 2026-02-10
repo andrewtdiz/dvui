@@ -9,6 +9,11 @@
 
 Dynamic object props (`visual`, `transform`, `scroll`, `anchor`, `image`) can resolve to `nil` in Luau, but the Zig patch bridge treats `nil` as “skip” rather than “clear”. This leaves previous native state active, producing stale UI behavior that contradicts declarative expectations.
 
+## Status (Current)
+
+- `src/native_renderer/luau_ui.zig` implements explicit clear behavior for object props: when a prop key appears in a patch with `nil`, the bridge calls `clearTransform/clearVisual/clearScroll/clearAnchor/clearImage`.
+- This document is kept as a record of the hazard and the desired contract; verify any future changes preserve the clear semantics.
+
 ## Why this matters
 
 For a declarative reactive API, the rendered state should match current reactive values. If a reactive prop becomes `nil`, developers expect the previous override to disappear. Current behavior keeps old values alive.

@@ -184,6 +184,18 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
     var rect: types.Rect = undefined;
     const is_absolute = spec.position != null and spec.position.? == .absolute;
 
+    const margin_base = types.SideOffsets{
+        .left = sideValue(spec.margin.left) * scale,
+        .right = sideValue(spec.margin.right) * scale,
+        .top = sideValue(spec.margin.top) * scale,
+        .bottom = sideValue(spec.margin.bottom) * scale,
+    };
+    const margin = if (spec.transition.enabled and spec.transition.props.layout) transitions.effectiveMargin(node, margin_base) else margin_base;
+    const margin_left = margin.left;
+    const margin_right = margin.right;
+    const margin_top = margin.top;
+    const margin_bottom = margin.bottom;
+
     if (is_absolute) {
         rect = types.Rect{
             .x = parent_rect.x,
@@ -196,23 +208,27 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         const right_offset = insetOffset(spec.right, parent_w_scaled, scale);
         const top_offset = insetOffset(spec.top, parent_h_scaled, scale);
         const bottom_offset = insetOffset(spec.bottom, parent_h_scaled, scale);
+        const left_total = left_offset + margin_left;
+        const right_total = right_offset + margin_right;
+        const top_total = top_offset + margin_top;
+        const bottom_total = bottom_offset + margin_bottom;
 
         if (spec.width) |w| {
             switch (w) {
-                .full => rect.w = parent_w_scaled,
+                .full => rect.w = @max(0.0, parent_w_scaled - (margin_left + margin_right)),
                 .pixels => |px| rect.w = px * scale,
             }
         } else if (spec.left != null and spec.right != null) {
-            rect.w = @max(0.0, parent_w_scaled - left_offset - right_offset);
+            rect.w = @max(0.0, parent_w_scaled - left_total - right_total);
         }
 
         if (spec.height) |h| {
             switch (h) {
-                .full => rect.h = parent_h_scaled,
+                .full => rect.h = @max(0.0, parent_h_scaled - (margin_top + margin_bottom)),
                 .pixels => |px| rect.h = px * scale,
             }
         } else if (spec.top != null and spec.bottom != null) {
-            rect.h = @max(0.0, parent_h_scaled - top_offset - bottom_offset);
+            rect.h = @max(0.0, parent_h_scaled - top_total - bottom_total);
         }
 
         if (node.kind == .text) {
@@ -227,46 +243,38 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         }
 
         if (spec.layout_anchor) |anchor| {
-            var anchor_x = parent_rect.x;
-            var anchor_y = parent_rect.y;
+            var anchor_x = parent_rect.x + margin_left;
+            var anchor_y = parent_rect.y + margin_top;
             if (spec.left != null) {
-                anchor_x = parent_rect.x + left_offset;
+                anchor_x = parent_rect.x + left_total;
             } else if (spec.right != null) {
-                anchor_x = parent_rect.x + parent_rect.w - right_offset;
+                anchor_x = parent_rect.x + parent_rect.w - right_total;
             }
             if (spec.top != null) {
-                anchor_y = parent_rect.y + top_offset;
+                anchor_y = parent_rect.y + top_total;
             } else if (spec.bottom != null) {
-                anchor_y = parent_rect.y + parent_rect.h - bottom_offset;
+                anchor_y = parent_rect.y + parent_rect.h - bottom_total;
             }
             rect.x = anchor_x - rect.w * anchor[0];
             rect.y = anchor_y - rect.h * anchor[1];
         } else {
             if (spec.left != null) {
-                rect.x = parent_rect.x + left_offset;
+                rect.x = parent_rect.x + left_total;
             } else if (spec.right != null) {
-                rect.x = parent_rect.x + parent_rect.w - right_offset - rect.w;
+                rect.x = parent_rect.x + parent_rect.w - right_total - rect.w;
+            } else {
+                rect.x = parent_rect.x + margin_left;
             }
             if (spec.top != null) {
-                rect.y = parent_rect.y + top_offset;
+                rect.y = parent_rect.y + top_total;
             } else if (spec.bottom != null) {
-                rect.y = parent_rect.y + parent_rect.h - bottom_offset - rect.h;
+                rect.y = parent_rect.y + parent_rect.h - bottom_total - rect.h;
+            } else {
+                rect.y = parent_rect.y + margin_top;
             }
         }
     } else {
         rect = parent_rect;
-
-        const margin_base = types.SideOffsets{
-            .left = sideValue(spec.margin.left) * scale,
-            .right = sideValue(spec.margin.right) * scale,
-            .top = sideValue(spec.margin.top) * scale,
-            .bottom = sideValue(spec.margin.bottom) * scale,
-        };
-        const margin = if (spec.transition.enabled and spec.transition.props.layout) transitions.effectiveMargin(node, margin_base) else margin_base;
-        const margin_left = margin.left;
-        const margin_right = margin.right;
-        const margin_top = margin.top;
-        const margin_bottom = margin.bottom;
 
         rect.x += margin_left;
         rect.y += margin_top;

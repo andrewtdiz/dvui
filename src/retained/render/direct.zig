@@ -204,8 +204,7 @@ pub fn drawTextDirect(rect: types.Rect, text: []const u8, visual: types.VisualPr
 pub fn shouldDirectDraw(node: *const types.SolidNode) bool {
     if (node.isInteractive()) return false;
     if (node.interactiveChildCount() > 0) return false;
-    return std.mem.eql(u8, node.tag, "div") or
-        std.mem.eql(u8, node.tag, "p") or
+    return std.mem.eql(u8, node.tag, "p") or
         std.mem.eql(u8, node.tag, "h1") or
         std.mem.eql(u8, node.tag, "h2") or
         std.mem.eql(u8, node.tag, "h3");

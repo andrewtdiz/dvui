@@ -6,6 +6,11 @@ const yoga = @import("yoga-zig");
 const types = @import("../core/types.zig");
 const tailwind = @import("../style/tailwind.zig");
 const measure = @import("measure.zig");
+const transitions = @import("../render/transitions.zig");
+
+fn sideValue(value: ?f32) f32 {
+    return value orelse 0;
+}
 
 pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area: types.Rect, spec: tailwind.Spec) void {
     const base_scale = dvui.windowNaturalScale();
@@ -37,7 +42,8 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
 
     for (node.children.items) |child_id| {
         const child = store.node(child_id) orelse continue;
-        const child_spec = child.prepareClassSpec();
+        var child_spec = child.prepareClassSpec();
+        tailwind.applyHover(&child_spec, child.hovered);
         const child_scale = scale * (child_spec.scale orelse 1.0);
         child.layout.layout_scale = child_scale;
 
@@ -51,6 +57,14 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
             continue;
         }
 
+        const margin_base = types.SideOffsets{
+            .left = sideValue(child_spec.margin.left) * child_scale,
+            .right = sideValue(child_spec.margin.right) * child_scale,
+            .top = sideValue(child_spec.margin.top) * child_scale,
+            .bottom = sideValue(child_spec.margin.bottom) * child_scale,
+        };
+        const margin = if (child_spec.transition.enabled and child_spec.transition.props.layout) transitions.effectiveMargin(child, margin_base) else margin_base;
+
         const size = measure.measureNodeSize(store, child, available);
         if (child.kind == .text and size.w == 0 and size.h == 0) {
             child.layout.rect = types.Rect{};
@@ -59,8 +73,8 @@ pub fn layoutFlexChildren(store: *types.NodeStore, node: *types.SolidNode, area:
 
         const yoga_child = yoga.Node.new();
         yoga_child.setDisplay(.Flex);
-        yoga_child.setWidth(size.w);
-        yoga_child.setHeight(size.h);
+        yoga_child.setWidth(size.w + margin.left + margin.right);
+        yoga_child.setHeight(size.h + margin.top + margin.bottom);
         root.insertChild(yoga_child, root.getChildCount());
         flex_child_ids.append(lifo, child_id) catch {};
     }
