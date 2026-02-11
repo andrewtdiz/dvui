@@ -11,10 +11,13 @@ end
 
 local root: UI.Node_root = LoadUI.from_json("luau/ui_json/app.json")
 local card = root.card
+local start_menu = root.StartMenu
 
 local root_children = root.children
-assert_ok(type(root_children) == "table" and #root_children == 1, "root children")
+assert_ok(type(start_menu) == "table" and start_menu.tag == "div", "StartMenu node")
+assert_ok(type(root_children) == "table" and #root_children == 2, "root children")
 assert_ok(root_children[1] == card, "card identity")
+assert_ok(root_children[2] == start_menu, "StartMenu identity")
 assert_ok(card.parent == root, "parent link")
 
 Hydrate(root)()
@@ -29,7 +32,7 @@ Hydrate(card){
   class = "x",
 }
 
-assert_ok(root.children == root_children and #root_children == 1, "root children kept")
+assert_ok(root.children == root_children and #root_children == 2, "root children kept")
 assert_ok(card.children == card_children and #card_children == 3, "card siblings kept")
 
 local card_class = card.class
