@@ -468,6 +468,8 @@ const Flex = struct {
     items: ?[]const u8 = null,
     justify: ?[]const u8 = null,
     gap: ?f64 = null,
+    gap_x: ?f64 = null,
+    gap_y: ?f64 = null,
 };
 
 const Margin = struct {
@@ -481,8 +483,13 @@ const Margin = struct {
 };
 
 const Pad = struct {
+    all: ?f64 = null,
     x: ?f64 = null,
     y: ?f64 = null,
+    t: ?f64 = null,
+    r: ?f64 = null,
+    b: ?f64 = null,
+    l: ?f64 = null,
 };
 
 const Border = struct {
@@ -519,6 +526,7 @@ const ZIndex = union(enum) {
 const ParsedStyle = struct {
     layout: Layout = .{},
     has_layout: bool = false,
+    scale: ?f64 = null,
     flex: Flex = .{},
     has_flex: bool = false,
     margin: Margin = .{},
@@ -635,7 +643,6 @@ fn parseBracketInner(inner: []const u8) ?struct { value: f64, is_pct: bool } {
 
 fn parseScaleNumber(inner: []const u8) ?f64 {
     if (inner.len == 0) return null;
-    if (std.mem.eql(u8, inner, "px")) return 1;
     const value = std.fmt.parseFloat(f64, inner) catch return null;
     if (!std.math.isFinite(value) or value < 0) return null;
     return value;
@@ -726,6 +733,37 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
                 out.has_margin = true;
             } else {
                 addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, tok, "scale-")) {
+            const suffix = tok["scale-".len..];
+            if (suffix.len == 0) {
+                addExtraToken(&out, allocator, tok);
+                continue;
+            }
+            if (suffix[0] == '[' and suffix[suffix.len - 1] == ']') {
+                const inner = suffix[1 .. suffix.len - 1];
+                const value = std.fmt.parseFloat(f64, inner) catch {
+                    addExtraToken(&out, allocator, tok);
+                    continue;
+                };
+                if (!std.math.isFinite(value) or value <= 0) {
+                    addExtraToken(&out, allocator, tok);
+                    continue;
+                }
+                out.scale = value;
+            } else {
+                const raw = std.fmt.parseFloat(f64, suffix) catch {
+                    addExtraToken(&out, allocator, tok);
+                    continue;
+                };
+                if (!std.math.isFinite(raw) or raw <= 0) {
+                    addExtraToken(&out, allocator, tok);
+                    continue;
+                }
+                out.scale = if (raw >= 10) raw / 100.0 else raw;
             }
             continue;
         }
@@ -934,13 +972,34 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
         }
         if (std.mem.startsWith(u8, tok, "gap-")) {
             const suffix = tok["gap-".len..];
-            if (std.mem.startsWith(u8, suffix, "x-") or std.mem.startsWith(u8, suffix, "y-")) {
-                addExtraToken(&out, allocator, tok);
+            if (std.mem.startsWith(u8, suffix, "x-")) {
+                const inner = suffix["x-".len..];
+                if (parseScaleNumber(inner)) |value| {
+                    out.flex.present = true;
+                    out.flex.gap_x = value;
+                    out.has_flex = true;
+                } else {
+                    addExtraToken(&out, allocator, tok);
+                }
                 continue;
             }
+            if (std.mem.startsWith(u8, suffix, "y-")) {
+                const inner = suffix["y-".len..];
+                if (parseScaleNumber(inner)) |value| {
+                    out.flex.present = true;
+                    out.flex.gap_y = value;
+                    out.has_flex = true;
+                } else {
+                    addExtraToken(&out, allocator, tok);
+                }
+                continue;
+            }
+
             if (parseScaleNumber(suffix)) |value| {
                 out.flex.present = true;
                 out.flex.gap = value;
+                out.flex.gap_x = null;
+                out.flex.gap_y = null;
                 out.has_flex = true;
             } else {
                 addExtraToken(&out, allocator, tok);
@@ -951,8 +1010,13 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
         if (std.mem.startsWith(u8, tok, "p-")) {
             const suffix = tok["p-".len..];
             if (parseScaleNumber(suffix)) |value| {
-                out.pad.x = value;
-                out.pad.y = value;
+                out.pad.all = value;
+                out.pad.x = null;
+                out.pad.y = null;
+                out.pad.t = null;
+                out.pad.r = null;
+                out.pad.b = null;
+                out.pad.l = null;
                 out.has_pad = true;
             } else {
                 addExtraToken(&out, allocator, tok);
@@ -963,6 +1027,8 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
             const suffix = tok["px-".len..];
             if (parseScaleNumber(suffix)) |value| {
                 out.pad.x = value;
+                out.pad.l = null;
+                out.pad.r = null;
                 out.has_pad = true;
             } else {
                 addExtraToken(&out, allocator, tok);
@@ -973,6 +1039,48 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
             const suffix = tok["py-".len..];
             if (parseScaleNumber(suffix)) |value| {
                 out.pad.y = value;
+                out.pad.t = null;
+                out.pad.b = null;
+                out.has_pad = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "pt-")) {
+            const suffix = tok["pt-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.t = value;
+                out.has_pad = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "pr-")) {
+            const suffix = tok["pr-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.r = value;
+                out.has_pad = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "pb-")) {
+            const suffix = tok["pb-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.b = value;
+                out.has_pad = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "pl-")) {
+            const suffix = tok["pl-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.l = value;
                 out.has_pad = true;
             } else {
                 addExtraToken(&out, allocator, tok);
@@ -1210,6 +1318,7 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
 fn hasTailwindJsonKeys(obj: std.json.ObjectMap) bool {
     const keys = [_][]const u8{
         "layout",
+        "scale",
         "flex",
         "margin",
         "pad",
@@ -1309,6 +1418,7 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
     if (already_structured) {
         const style_keys = [_][]const u8{
             "layout",
+            "scale",
             "flex",
             "margin",
             "pad",
@@ -1352,12 +1462,31 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
             try out_obj.put("layout", .{ .object = layout_obj });
         }
 
-        if (p.has_flex and (p.flex.present or p.flex.dir != null or p.flex.items != null or p.flex.justify != null or p.flex.gap != null)) {
+        if (p.scale) |v| {
+            try out_obj.put("scale", .{ .float = v });
+        }
+
+        if (p.has_flex and (p.flex.present or p.flex.dir != null or p.flex.items != null or p.flex.justify != null or p.flex.gap != null or p.flex.gap_x != null or p.flex.gap_y != null)) {
             var flex_obj = std.json.ObjectMap.init(allocator);
             if (p.flex.dir) |v| try flex_obj.put("dir", .{ .string = v });
             if (p.flex.items) |v| try flex_obj.put("items", .{ .string = v });
             if (p.flex.justify) |v| try flex_obj.put("justify", .{ .string = v });
-            if (p.flex.gap) |v| try flex_obj.put("gap", .{ .float = v });
+            if (p.flex.gap_x != null or p.flex.gap_y != null) {
+                const x = p.flex.gap_x orelse p.flex.gap;
+                const y = p.flex.gap_y orelse p.flex.gap;
+                if (x != null and y != null and x.? == y.?) {
+                    try flex_obj.put("gap", .{ .float = x.? });
+                } else {
+                    var gap_obj = std.json.ObjectMap.init(allocator);
+                    if (x) |vx| try gap_obj.put("x", .{ .float = vx });
+                    if (y) |vy| try gap_obj.put("y", .{ .float = vy });
+                    if (gap_obj.count() > 0) {
+                        try flex_obj.put("gap", .{ .object = gap_obj });
+                    }
+                }
+            } else if (p.flex.gap) |v| {
+                try flex_obj.put("gap", .{ .float = v });
+            }
             try out_obj.put("flex", .{ .object = flex_obj });
         }
 
@@ -1377,9 +1506,16 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
 
         if (p.has_pad) {
             var pad_obj = std.json.ObjectMap.init(allocator);
+            if (p.pad.all) |v| try pad_obj.put("all", .{ .float = v });
             if (p.pad.x) |v| try pad_obj.put("x", .{ .float = v });
             if (p.pad.y) |v| try pad_obj.put("y", .{ .float = v });
-            try out_obj.put("pad", .{ .object = pad_obj });
+            if (p.pad.t) |v| try pad_obj.put("t", .{ .float = v });
+            if (p.pad.r) |v| try pad_obj.put("r", .{ .float = v });
+            if (p.pad.b) |v| try pad_obj.put("b", .{ .float = v });
+            if (p.pad.l) |v| try pad_obj.put("l", .{ .float = v });
+            if (pad_obj.count() > 0) {
+                try out_obj.put("pad", .{ .object = pad_obj });
+            }
         }
 
         if (p.bg) |bg| {
@@ -1470,6 +1606,7 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
         if (std.mem.eql(u8, k, "children")) continue;
 
         if (std.mem.eql(u8, k, "layout") or
+            std.mem.eql(u8, k, "scale") or
             std.mem.eql(u8, k, "flex") or
             std.mem.eql(u8, k, "margin") or
             std.mem.eql(u8, k, "pad") or

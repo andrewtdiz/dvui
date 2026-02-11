@@ -10,6 +10,9 @@ local function is_tailwind_json_spec(spec: any): boolean
   if spec.layout ~= nil then
     return true
   end
+  if spec.scale ~= nil then
+    return true
+  end
   if spec.flex ~= nil then
     return true
   end

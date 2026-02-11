@@ -110,6 +110,24 @@ local function layout_to_tokens(node: any, out: { string })
   end
 end
 
+local function scale_to_tokens(node: any, out: { string })
+  local v = node.scale
+  if type(v) ~= "number" then
+    return
+  end
+  if v ~= v or v == math.huge or v == -math.huge or v <= 0 then
+    return
+  end
+
+  local p = v * 100
+  local rounded = math.floor(p + 0.5)
+  if math.abs(p - rounded) < 1e-6 and rounded >= 10 then
+    push_token(out, "scale-" .. tostring(rounded))
+  else
+    push_token(out, "scale-[" .. format_number(v) .. "]")
+  end
+end
+
 local function flex_to_tokens(node: any, out: { string })
   local flex = node.flex
   if type(flex) ~= "table" then
@@ -144,8 +162,22 @@ local function flex_to_tokens(node: any, out: { string })
     push_token(out, "justify-around")
   end
 
-  if type(flex.gap) == "number" then
-    push_token(out, "gap-" .. format_number(flex.gap))
+  local gap = flex.gap
+  if type(gap) == "number" then
+    push_token(out, "gap-" .. format_number(gap))
+  elseif type(gap) == "table" then
+    local x = gap.x
+    local y = gap.y
+    if type(x) == "number" and type(y) == "number" and x == y then
+      push_token(out, "gap-" .. format_number(x))
+    else
+      if type(x) == "number" then
+        push_token(out, "gap-x-" .. format_number(x))
+      end
+      if type(y) == "number" then
+        push_token(out, "gap-y-" .. format_number(y))
+      end
+    end
   end
 end
 
@@ -182,11 +214,26 @@ local function pad_to_tokens(node: any, out: { string })
   if type(pad) ~= "table" then
     return
   end
+  if type(pad.all) == "number" then
+    push_token(out, "p-" .. format_number(pad.all))
+  end
   if type(pad.x) == "number" then
     push_token(out, "px-" .. format_number(pad.x))
   end
   if type(pad.y) == "number" then
     push_token(out, "py-" .. format_number(pad.y))
+  end
+  if type(pad.t) == "number" then
+    push_token(out, "pt-" .. format_number(pad.t))
+  end
+  if type(pad.r) == "number" then
+    push_token(out, "pr-" .. format_number(pad.r))
+  end
+  if type(pad.b) == "number" then
+    push_token(out, "pb-" .. format_number(pad.b))
+  end
+  if type(pad.l) == "number" then
+    push_token(out, "pl-" .. format_number(pad.l))
   end
 end
 
@@ -332,6 +379,7 @@ local function toClass(node: any): string?
 
   local tokens: { string } = {}
   layout_to_tokens(node, tokens)
+  scale_to_tokens(node, tokens)
   flex_to_tokens(node, tokens)
   margin_to_tokens(node, tokens)
   pad_to_tokens(node, tokens)
@@ -376,10 +424,17 @@ local function parse_bracket_number(inner: string): (number?, boolean)
 end
 
 local function parse_scale_number(inner: string): number?
-  if inner == "px" then
-    return 1
+  local n = tonumber(inner)
+  if n == nil then
+    return nil
   end
-  return tonumber(inner)
+  if n ~= n or n == math.huge or n == -math.huge then
+    return nil
+  end
+  if n < 0 then
+    return nil
+  end
+  return n
 end
 
 local function parse_class_extra(token: string, out: { string })
@@ -501,7 +556,7 @@ local function fromClass(class_value: string): any
       end
     elseif string.sub(tok, 1, 2) == "w-" then
       local suffix = string.sub(tok, 3)
-      local n = tonumber(suffix)
+      local n = parse_scale_number(suffix)
       if n ~= nil then
         local layout = ensure_table(out, "layout")
         local size = ensure_table(layout, "size")
@@ -533,13 +588,35 @@ local function fromClass(class_value: string): any
       end
     elseif string.sub(tok, 1, 2) == "h-" then
       local suffix = string.sub(tok, 3)
-      local n = tonumber(suffix)
+      local n = parse_scale_number(suffix)
       if n ~= nil then
         local layout = ensure_table(out, "layout")
         local size = ensure_table(layout, "size")
         size.h = { tw = n }
       else
         parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 6) == "scale-" then
+      local suffix = string.sub(tok, 7)
+      if string.sub(suffix, 1, 1) == "[" and string.sub(suffix, -1) == "]" then
+        local inner = string.sub(suffix, 2, -2)
+        local n = tonumber(inner)
+        if n ~= nil and n == n and n ~= math.huge and n ~= -math.huge and n > 0 then
+          out.scale = n
+        else
+          parse_class_extra(tok, extra)
+        end
+      else
+        local raw = tonumber(suffix)
+        if raw ~= nil and raw == raw and raw ~= math.huge and raw ~= -math.huge and raw > 0 then
+          if raw >= 10 then
+            out.scale = raw / 100
+          else
+            out.scale = raw
+          end
+        else
+          parse_class_extra(tok, extra)
+        end
       end
     elseif string.sub(tok, 1, 3) == "mt-" then
       local n = parse_scale_number(string.sub(tok, 4))
@@ -641,10 +718,38 @@ local function fromClass(class_value: string): any
       flex.justify = "around"
     elseif string.sub(tok, 1, 4) == "gap-" then
       local suffix = string.sub(tok, 5)
-      if string.sub(suffix, 1, 2) == "x-" or string.sub(suffix, 1, 2) == "y-" then
-        parse_class_extra(tok, extra)
+      if string.sub(suffix, 1, 2) == "x-" then
+        local n = parse_scale_number(string.sub(suffix, 3))
+        if n ~= nil then
+          local flex = ensure_table(out, "flex")
+          local gap = flex.gap
+          if type(gap) == "number" then
+            flex.gap = { x = n, y = gap }
+          elseif type(gap) == "table" then
+            gap.x = n
+          else
+            flex.gap = { x = n }
+          end
+        else
+          parse_class_extra(tok, extra)
+        end
+      elseif string.sub(suffix, 1, 2) == "y-" then
+        local n = parse_scale_number(string.sub(suffix, 3))
+        if n ~= nil then
+          local flex = ensure_table(out, "flex")
+          local gap = flex.gap
+          if type(gap) == "number" then
+            flex.gap = { x = gap, y = n }
+          elseif type(gap) == "table" then
+            gap.y = n
+          else
+            flex.gap = { y = n }
+          end
+        else
+          parse_class_extra(tok, extra)
+        end
       else
-        local n = tonumber(suffix)
+        local n = parse_scale_number(suffix)
         if n ~= nil then
           local flex = ensure_table(out, "flex")
           flex.gap = n
@@ -653,27 +758,68 @@ local function fromClass(class_value: string): any
         end
       end
     elseif string.sub(tok, 1, 2) == "p-" then
-      local n = tonumber(string.sub(tok, 3))
+      local n = parse_scale_number(string.sub(tok, 3))
       if n ~= nil then
         local pad = ensure_table(out, "pad")
-        pad.x = n
-        pad.y = n
+        pad.all = n
+        pad.x = nil
+        pad.y = nil
+        pad.t = nil
+        pad.r = nil
+        pad.b = nil
+        pad.l = nil
       else
         parse_class_extra(tok, extra)
       end
     elseif string.sub(tok, 1, 3) == "px-" then
-      local n = tonumber(string.sub(tok, 4))
+      local n = parse_scale_number(string.sub(tok, 4))
       if n ~= nil then
         local pad = ensure_table(out, "pad")
         pad.x = n
+        pad.l = nil
+        pad.r = nil
       else
         parse_class_extra(tok, extra)
       end
     elseif string.sub(tok, 1, 3) == "py-" then
-      local n = tonumber(string.sub(tok, 4))
+      local n = parse_scale_number(string.sub(tok, 4))
       if n ~= nil then
         local pad = ensure_table(out, "pad")
         pad.y = n
+        pad.t = nil
+        pad.b = nil
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "pt-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local pad = ensure_table(out, "pad")
+        pad.t = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "pr-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local pad = ensure_table(out, "pad")
+        pad.r = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "pb-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local pad = ensure_table(out, "pad")
+        pad.b = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "pl-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local pad = ensure_table(out, "pad")
+        pad.l = n
       else
         parse_class_extra(tok, extra)
       end

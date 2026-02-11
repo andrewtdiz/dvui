@@ -56,6 +56,7 @@ All fields are optional. If a field is missing, it does not emit any class token
     "inset": { "left": { "pct": 0.5 }, "top": { "pct": 0.5 } },
     "size": { "w": 420, "h": 320 }
   },
+  "scale": 1,
   "flex": { "dir": "col", "items": "center", "justify": "center", "gap": 2 },
   "margin": { "t": 2 },
   "pad": { "x": 6, "y": 3 },
@@ -97,10 +98,24 @@ Spacing:
 
 - `margin`, `pad`, and `flex.gap` are Tailwind-style scale numbers (emits `mt-N`, `px-N`, `gap-N`, etc).
   - These are scaled by DVUI `spacing_unit` at parse time (see `DVUI_DOCS.md`).
+- `flex.gap`
+  - number: emits `gap-N`
+  - `{ "x": number }`: emits `gap-x-N`
+  - `{ "y": number }`: emits `gap-y-N`
+  - `{ "x": number, "y": number }`: emits `gap-x-N gap-y-N` (or `gap-N` if equal)
 - `margin`
   - `margin.all`: emits `m-N`
   - `margin.x` / `margin.y`: emits `mx-N` / `my-N`
   - `margin.t` / `margin.r` / `margin.b` / `margin.l`: emits `mt-N` / `mr-N` / `mb-N` / `ml-N`
+- `pad`
+  - `pad.all`: emits `p-N`
+  - `pad.x` / `pad.y`: emits `px-N` / `py-N`
+  - `pad.t` / `pad.r` / `pad.b` / `pad.l`: emits `pt-N` / `pr-N` / `pb-N` / `pl-N`
+
+Scale:
+
+- `scale`
+  - number: multiplier (emits `scale-N` when `scale * 100` is an integer `>= 10`; otherwise emits `scale-[N]`)
 
 Border:
 
