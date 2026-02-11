@@ -13,6 +13,9 @@ local function is_tailwind_json_spec(spec: any): boolean
   if spec.flex ~= nil then
     return true
   end
+  if spec.margin ~= nil then
+    return true
+  end
   if spec.pad ~= nil then
     return true
   end

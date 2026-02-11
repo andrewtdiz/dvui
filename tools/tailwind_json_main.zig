@@ -439,6 +439,7 @@ fn normalizeJson5(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
 const LayoutSize = union(enum) {
     full,
     pixels: f64,
+    tw: f64,
 };
 
 const InsetValue = union(enum) {
@@ -467,6 +468,16 @@ const Flex = struct {
     items: ?[]const u8 = null,
     justify: ?[]const u8 = null,
     gap: ?f64 = null,
+};
+
+const Margin = struct {
+    all: ?f64 = null,
+    x: ?f64 = null,
+    y: ?f64 = null,
+    t: ?f64 = null,
+    r: ?f64 = null,
+    b: ?f64 = null,
+    l: ?f64 = null,
 };
 
 const Pad = struct {
@@ -510,6 +521,8 @@ const ParsedStyle = struct {
     has_layout: bool = false,
     flex: Flex = .{},
     has_flex: bool = false,
+    margin: Margin = .{},
+    has_margin: bool = false,
     pad: Pad = .{},
     has_pad: bool = false,
     bg: ?[]const u8 = null,
@@ -620,6 +633,14 @@ fn parseBracketInner(inner: []const u8) ?struct { value: f64, is_pct: bool } {
     return .{ .value = value, .is_pct = false };
 }
 
+fn parseScaleNumber(inner: []const u8) ?f64 {
+    if (inner.len == 0) return null;
+    if (std.mem.eql(u8, inner, "px")) return 1;
+    const value = std.fmt.parseFloat(f64, inner) catch return null;
+    if (!std.math.isFinite(value) or value < 0) return null;
+    return value;
+}
+
 fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
     var out: ParsedStyle = .{};
     out.class_extra = .empty;
@@ -627,6 +648,87 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
     var it = std.mem.tokenizeAny(u8, class_name, " \t\r\n");
     while (it.next()) |tok| {
         if (tok.len == 0) continue;
+
+        if (std.mem.startsWith(u8, tok, "mt-")) {
+            const suffix = tok["mt-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.t = value;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "mr-")) {
+            const suffix = tok["mr-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.r = value;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "mb-")) {
+            const suffix = tok["mb-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.b = value;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "ml-")) {
+            const suffix = tok["ml-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.l = value;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "mx-")) {
+            const suffix = tok["mx-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.x = value;
+                out.margin.l = null;
+                out.margin.r = null;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "my-")) {
+            const suffix = tok["my-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.y = value;
+                out.margin.t = null;
+                out.margin.b = null;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "m-")) {
+            const suffix = tok["m-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.margin.all = value;
+                out.margin.x = null;
+                out.margin.y = null;
+                out.margin.t = null;
+                out.margin.r = null;
+                out.margin.b = null;
+                out.margin.l = null;
+                out.has_margin = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
 
         if (std.mem.eql(u8, tok, "absolute")) {
             out.layout.abs = true;
@@ -691,29 +793,77 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
             out.has_layout = true;
             continue;
         }
+        if (std.mem.eql(u8, tok, "w-screen")) {
+            out.layout.w = .full;
+            out.has_layout = true;
+            continue;
+        }
+        if (std.mem.eql(u8, tok, "w-px")) {
+            out.layout.w = .{ .pixels = 1 };
+            out.has_layout = true;
+            continue;
+        }
         if (std.mem.eql(u8, tok, "h-full")) {
             out.layout.h = .full;
             out.has_layout = true;
             continue;
         }
+        if (std.mem.eql(u8, tok, "h-screen")) {
+            out.layout.h = .full;
+            out.has_layout = true;
+            continue;
+        }
+        if (std.mem.eql(u8, tok, "h-px")) {
+            out.layout.h = .{ .pixels = 1 };
+            out.has_layout = true;
+            continue;
+        }
         if (std.mem.startsWith(u8, tok, "w-[") and std.mem.endsWith(u8, tok, "]")) {
             const inner = tok["w-[".len .. tok.len - 1];
-            const value = std.fmt.parseFloat(f64, inner) catch {
+            if (parseBracketInner(inner)) |v| {
+                if (v.is_pct) {
+                    addExtraToken(&out, allocator, tok);
+                } else {
+                    out.layout.w = .{ .pixels = v.value };
+                    out.has_layout = true;
+                }
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.layout.w = .{ .pixels = value };
-            out.has_layout = true;
+            }
             continue;
         }
         if (std.mem.startsWith(u8, tok, "h-[") and std.mem.endsWith(u8, tok, "]")) {
             const inner = tok["h-[".len .. tok.len - 1];
-            const value = std.fmt.parseFloat(f64, inner) catch {
+            if (parseBracketInner(inner)) |v| {
+                if (v.is_pct) {
+                    addExtraToken(&out, allocator, tok);
+                } else {
+                    out.layout.h = .{ .pixels = v.value };
+                    out.has_layout = true;
+                }
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.layout.h = .{ .pixels = value };
-            out.has_layout = true;
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "w-")) {
+            const suffix = tok["w-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.layout.w = .{ .tw = value };
+                out.has_layout = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
+            continue;
+        }
+        if (std.mem.startsWith(u8, tok, "h-")) {
+            const suffix = tok["h-".len..];
+            if (parseScaleNumber(suffix)) |value| {
+                out.layout.h = .{ .tw = value };
+                out.has_layout = true;
+            } else {
+                addExtraToken(&out, allocator, tok);
+            }
             continue;
         }
 
@@ -788,45 +938,45 @@ fn parseClass(allocator: Allocator, class_name: []const u8) ParsedStyle {
                 addExtraToken(&out, allocator, tok);
                 continue;
             }
-            const value = std.fmt.parseFloat(f64, suffix) catch {
+            if (parseScaleNumber(suffix)) |value| {
+                out.flex.present = true;
+                out.flex.gap = value;
+                out.has_flex = true;
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.flex.present = true;
-            out.flex.gap = value;
-            out.has_flex = true;
+            }
             continue;
         }
 
         if (std.mem.startsWith(u8, tok, "p-")) {
             const suffix = tok["p-".len..];
-            const value = std.fmt.parseFloat(f64, suffix) catch {
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.x = value;
+                out.pad.y = value;
+                out.has_pad = true;
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.pad.x = value;
-            out.pad.y = value;
-            out.has_pad = true;
+            }
             continue;
         }
         if (std.mem.startsWith(u8, tok, "px-")) {
             const suffix = tok["px-".len..];
-            const value = std.fmt.parseFloat(f64, suffix) catch {
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.x = value;
+                out.has_pad = true;
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.pad.x = value;
-            out.has_pad = true;
+            }
             continue;
         }
         if (std.mem.startsWith(u8, tok, "py-")) {
             const suffix = tok["py-".len..];
-            const value = std.fmt.parseFloat(f64, suffix) catch {
+            if (parseScaleNumber(suffix)) |value| {
+                out.pad.y = value;
+                out.has_pad = true;
+            } else {
                 addExtraToken(&out, allocator, tok);
-                continue;
-            };
-            out.pad.y = value;
-            out.has_pad = true;
+            }
             continue;
         }
 
@@ -1061,6 +1211,7 @@ fn hasTailwindJsonKeys(obj: std.json.ObjectMap) bool {
     const keys = [_][]const u8{
         "layout",
         "flex",
+        "margin",
         "pad",
         "bg",
         "border",
@@ -1159,6 +1310,7 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
         const style_keys = [_][]const u8{
             "layout",
             "flex",
+            "margin",
             "pad",
             "bg",
             "border",
@@ -1192,8 +1344,8 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
 
             if (p.layout.w != null or p.layout.h != null) {
                 var size_obj = std.json.ObjectMap.init(allocator);
-                if (p.layout.w) |v| try size_obj.put("w", sizeValueToJson(v));
-                if (p.layout.h) |v| try size_obj.put("h", sizeValueToJson(v));
+                if (p.layout.w) |v| try size_obj.put("w", try sizeValueToJson(allocator, v));
+                if (p.layout.h) |v| try size_obj.put("h", try sizeValueToJson(allocator, v));
                 try layout_obj.put("size", .{ .object = size_obj });
             }
 
@@ -1207,6 +1359,20 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
             if (p.flex.justify) |v| try flex_obj.put("justify", .{ .string = v });
             if (p.flex.gap) |v| try flex_obj.put("gap", .{ .float = v });
             try out_obj.put("flex", .{ .object = flex_obj });
+        }
+
+        if (p.has_margin) {
+            var margin_obj = std.json.ObjectMap.init(allocator);
+            if (p.margin.all) |v| try margin_obj.put("all", .{ .float = v });
+            if (p.margin.x) |v| try margin_obj.put("x", .{ .float = v });
+            if (p.margin.y) |v| try margin_obj.put("y", .{ .float = v });
+            if (p.margin.t) |v| try margin_obj.put("t", .{ .float = v });
+            if (p.margin.r) |v| try margin_obj.put("r", .{ .float = v });
+            if (p.margin.b) |v| try margin_obj.put("b", .{ .float = v });
+            if (p.margin.l) |v| try margin_obj.put("l", .{ .float = v });
+            if (margin_obj.count() > 0) {
+                try out_obj.put("margin", .{ .object = margin_obj });
+            }
         }
 
         if (p.has_pad) {
@@ -1305,6 +1471,7 @@ fn migrateNodeObject(allocator: Allocator, obj: std.json.ObjectMap) Allocator.Er
 
         if (std.mem.eql(u8, k, "layout") or
             std.mem.eql(u8, k, "flex") or
+            std.mem.eql(u8, k, "margin") or
             std.mem.eql(u8, k, "pad") or
             std.mem.eql(u8, k, "bg") or
             std.mem.eql(u8, k, "border") or
@@ -1348,10 +1515,15 @@ fn insetValueToJson(allocator: Allocator, v: InsetValue) Allocator.Error!std.jso
     };
 }
 
-fn sizeValueToJson(v: LayoutSize) std.json.Value {
+fn sizeValueToJson(allocator: Allocator, v: LayoutSize) Allocator.Error!std.json.Value {
     return switch (v) {
         .full => .{ .string = "full" },
         .pixels => |n| .{ .float = n },
+        .tw => |n| blk: {
+            var obj = std.json.ObjectMap.init(allocator);
+            try obj.put("tw", .{ .float = n });
+            break :blk .{ .object = obj };
+        },
     };
 }
 

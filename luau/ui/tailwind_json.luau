@@ -93,14 +93,18 @@ local function layout_to_tokens(node: any, out: { string })
     local w = size.w
     if type(w) == "number" then
       push_token(out, "w-[" .. format_number(w) .. "]")
-    elseif w == "full" then
+    elseif type(w) == "table" and type(w.tw) == "number" then
+      push_token(out, "w-" .. format_number(w.tw))
+    elseif w == "full" or w == "screen" then
       push_token(out, "w-full")
     end
 
     local h = size.h
     if type(h) == "number" then
       push_token(out, "h-[" .. format_number(h) .. "]")
-    elseif h == "full" then
+    elseif type(h) == "table" and type(h.tw) == "number" then
+      push_token(out, "h-" .. format_number(h.tw))
+    elseif h == "full" or h == "screen" then
       push_token(out, "h-full")
     end
   end
@@ -142,6 +146,34 @@ local function flex_to_tokens(node: any, out: { string })
 
   if type(flex.gap) == "number" then
     push_token(out, "gap-" .. format_number(flex.gap))
+  end
+end
+
+local function margin_to_tokens(node: any, out: { string })
+  local margin = node.margin
+  if type(margin) ~= "table" then
+    return
+  end
+  if type(margin.all) == "number" then
+    push_token(out, "m-" .. format_number(margin.all))
+  end
+  if type(margin.x) == "number" then
+    push_token(out, "mx-" .. format_number(margin.x))
+  end
+  if type(margin.y) == "number" then
+    push_token(out, "my-" .. format_number(margin.y))
+  end
+  if type(margin.t) == "number" then
+    push_token(out, "mt-" .. format_number(margin.t))
+  end
+  if type(margin.r) == "number" then
+    push_token(out, "mr-" .. format_number(margin.r))
+  end
+  if type(margin.b) == "number" then
+    push_token(out, "mb-" .. format_number(margin.b))
+  end
+  if type(margin.l) == "number" then
+    push_token(out, "ml-" .. format_number(margin.l))
   end
 end
 
@@ -301,6 +333,7 @@ local function toClass(node: any): string?
   local tokens: { string } = {}
   layout_to_tokens(node, tokens)
   flex_to_tokens(node, tokens)
+  margin_to_tokens(node, tokens)
   pad_to_tokens(node, tokens)
   visual_to_tokens(node, tokens)
   text_to_tokens(node, tokens)
@@ -340,6 +373,13 @@ local function parse_bracket_number(inner: string): (number?, boolean)
     return nil, false
   end
   return num, false
+end
+
+local function parse_scale_number(inner: string): number?
+  if inner == "px" then
+    return 1
+  end
+  return tonumber(inner)
 end
 
 local function parse_class_extra(token: string, out: { string })
@@ -437,31 +477,133 @@ local function fromClass(class_value: string): any
       else
         parse_class_extra(tok, extra)
       end
+    elseif tok == "w-screen" then
+      local layout = ensure_table(out, "layout")
+      local size = ensure_table(layout, "size")
+      size.w = "full"
     elseif tok == "w-full" then
       local layout = ensure_table(out, "layout")
       local size = ensure_table(layout, "size")
       size.w = "full"
-    elseif tok == "h-full" then
+    elseif tok == "w-px" then
       local layout = ensure_table(out, "layout")
       local size = ensure_table(layout, "size")
-      size.h = "full"
+      size.w = 1
     elseif string.sub(tok, 1, 3) == "w-[" and string.sub(tok, -1) == "]" then
       local inner = string.sub(tok, 4, -2)
-      local num = tonumber(inner)
-      if num ~= nil then
+      local num, is_pct = parse_bracket_number(inner)
+      if num ~= nil and not is_pct then
         local layout = ensure_table(out, "layout")
         local size = ensure_table(layout, "size")
         size.w = num
       else
         parse_class_extra(tok, extra)
       end
+    elseif string.sub(tok, 1, 2) == "w-" then
+      local suffix = string.sub(tok, 3)
+      local n = tonumber(suffix)
+      if n ~= nil then
+        local layout = ensure_table(out, "layout")
+        local size = ensure_table(layout, "size")
+        size.w = { tw = n }
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif tok == "h-screen" then
+      local layout = ensure_table(out, "layout")
+      local size = ensure_table(layout, "size")
+      size.h = "full"
+    elseif tok == "h-full" then
+      local layout = ensure_table(out, "layout")
+      local size = ensure_table(layout, "size")
+      size.h = "full"
+    elseif tok == "h-px" then
+      local layout = ensure_table(out, "layout")
+      local size = ensure_table(layout, "size")
+      size.h = 1
     elseif string.sub(tok, 1, 3) == "h-[" and string.sub(tok, -1) == "]" then
       local inner = string.sub(tok, 4, -2)
-      local num = tonumber(inner)
-      if num ~= nil then
+      local num, is_pct = parse_bracket_number(inner)
+      if num ~= nil and not is_pct then
         local layout = ensure_table(out, "layout")
         local size = ensure_table(layout, "size")
         size.h = num
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 2) == "h-" then
+      local suffix = string.sub(tok, 3)
+      local n = tonumber(suffix)
+      if n ~= nil then
+        local layout = ensure_table(out, "layout")
+        local size = ensure_table(layout, "size")
+        size.h = { tw = n }
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "mt-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.t = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "mr-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.r = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "mb-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.b = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "ml-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.l = n
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "mx-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.x = n
+        margin.l = nil
+        margin.r = nil
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 3) == "my-" then
+      local n = parse_scale_number(string.sub(tok, 4))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.y = n
+        margin.t = nil
+        margin.b = nil
+      else
+        parse_class_extra(tok, extra)
+      end
+    elseif string.sub(tok, 1, 2) == "m-" then
+      local n = parse_scale_number(string.sub(tok, 3))
+      if n ~= nil then
+        local margin = ensure_table(out, "margin")
+        margin.all = n
+        margin.x = nil
+        margin.y = nil
+        margin.t = nil
+        margin.r = nil
+        margin.b = nil
+        margin.l = nil
       else
         parse_class_extra(tok, extra)
       end

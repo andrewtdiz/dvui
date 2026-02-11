@@ -28,7 +28,7 @@
             {
               "icon": {
                 "tag": "image",
-                "classExtra": ["w-16", "h-16"],
+                "layout": { "size": { "w": { "tw": 16 }, "h": { "tw": 16 } } },
                 "src": "assets/sprite.png"
               }
             },
@@ -43,7 +43,8 @@
                       "bg": "red-500",
                       "border": { "w": 2, "color": "black" },
                       "rounded": "full",
-                      "classExtra": ["relative", "h-6", "w-64"],
+                      "layout": { "size": { "w": { "tw": 64 }, "h": { "tw": 6 } } },
+                      "classExtra": ["relative"],
                       "children": [
                         {
                           "fill": {
@@ -91,37 +92,40 @@
               "Subtitle": {
                 "tag": "p",
                 "text": { "size": "lg", "color": "neutral-300" },
-                "classExtra": ["mt-2"],
+                "margin": { "t": 2 },
                 "children": ["Start Menu"]
               }
             },
             {
               "StartButton": {
                 "tag": "button",
-                "layout": { "size": { "w": "full" } },
+                "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
+                "margin": { "t": 8 },
                 "bg": "neutral-800",
                 "rounded": "md",
-                "classExtra": ["mt-8", "h-12", "hover:bg-neutral-700"],
+                "classExtra": ["hover:bg-neutral-700"],
                 "children": ["Start"]
               }
             },
             {
               "OptionsButton": {
                 "tag": "button",
-                "layout": { "size": { "w": "full" } },
+                "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
+                "margin": { "t": 4 },
                 "bg": "neutral-800",
                 "rounded": "md",
-                "classExtra": ["mt-4", "h-12", "hover:bg-neutral-700"],
+                "classExtra": ["hover:bg-neutral-700"],
                 "children": ["Options"]
               }
             },
             {
               "QuitButton": {
                 "tag": "button",
-                "layout": { "size": { "w": "full" } },
+                "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
+                "margin": { "t": 4 },
                 "bg": "neutral-800",
                 "rounded": "md",
-                "classExtra": ["mt-4", "h-12", "hover:bg-neutral-700"],
+                "classExtra": ["hover:bg-neutral-700"],
                 "children": ["Quit"]
               }
             }
