@@ -234,6 +234,18 @@ pub fn build(b: *Build) !void {
     }
     b.installArtifact(luau_layout_dump_exe);
 
+    const tailwind_json_mod = b.createModule(.{
+        .root_source_file = b.path("tools/tailwind_json_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const tailwind_json_exe = b.addExecutable(.{
+        .name = "tailwind-json",
+        .root_module = tailwind_json_mod,
+        .use_lld = use_lld,
+    });
+    b.installArtifact(tailwind_json_exe);
+
     const screenshot_step = b.step("screenshot", "Run the Luau demo and capture a dvui window screenshot");
     const luau_screenshot_step = b.step("luau-screenshot", "Run the Luau demo and capture a dvui window screenshot");
     if (b.graph.host.result.os.tag != .windows or target.result.os.tag != .windows) {
@@ -245,7 +257,7 @@ pub fn build(b: *Build) !void {
         if (b.args) |args| {
             luau_screenshot_run_cmd.addArgs(args);
         }
-        luau_screenshot_run_cmd.setEnvironmentVariable("DVUI_SCREENSHOT_AUTO", "1");
+        luau_screenshot_run_cmd.addArg("--screenshot-auto");
         luau_screenshot_run_cmd.stdio = .inherit;
 
         screenshot_step.dependOn(&luau_screenshot_run_cmd.step);

@@ -1,47 +1,67 @@
 {
   "root": {
     "tag": "div",
-    "class": "w-full h-full flex items-center justify-center bg-neutral-950",
+    "layout": { "size": { "w": "full", "h": "full" } },
+    "flex": { "items": "center", "justify": "center" },
+    "bg": "neutral-950",
     "children": [
       {
         "card": {
           "tag": "div",
-          "class": "hidden px-6 py-3 rounded-xl border-2 border-blue-500 text-lg text-white cursor-pointer flex flex-col gap-2",
+          "hidden": true,
+          "flex": { "dir": "col", "gap": 2 },
+          "pad": { "x": 6, "y": 3 },
+          "border": { "w": 2, "color": "blue-500" },
+          "rounded": "xl",
+          "text": { "size": "lg", "color": "white" },
+          "classExtra": ["cursor-pointer"],
           "children": [
             {
               "button": {
                 "tag": "button",
-                "class": "bg-neutral-700 hover:bg-neutral-800 text-amber-200",
+                "bg": "neutral-700",
+                "text": { "color": "amber-200" },
+                "classExtra": ["hover:bg-neutral-800"],
                 "children": ["Hover me"]
               }
             },
             {
               "icon": {
                 "tag": "image",
-                "class": "w-16 h-16",
+                "classExtra": ["w-16", "h-16"],
                 "src": "assets/sprite.png"
               }
             },
             {
               "row": {
                 "tag": "div",
-                "class": "flex items-center gap-3",
+                "flex": { "items": "center", "gap": 3 },
                 "children": [
                   {
                     "track": {
                       "tag": "div",
-                      "class": "relative h-6 w-64 rounded-full bg-slate-800 rounded-full bg-red-500 border-2 border-black",
+                      "bg": "red-500",
+                      "border": { "w": 2, "color": "black" },
+                      "rounded": "full",
+                      "classExtra": ["relative", "h-6", "w-64"],
                       "children": [
                         {
                           "fill": {
                             "tag": "div",
-                            "class": "h-full w-full transition-all duration-300 bg-green-500 rounded-full"
+                            "layout": { "size": { "w": "full", "h": "full" } },
+                            "bg": "green-500",
+                            "rounded": "full",
+                            "classExtra": ["transition-all", "duration-300"]
                           }
                         },
                         {
                           "label": {
                             "tag": "p",
-                            "class": "absolute left-[50%] top-[50%] anchor-center",
+                            "layout": {
+                              "abs": true,
+                              "anchor": "center",
+                              "inset": { "left": { "pct": 0.5 }, "top": { "pct": 0.5 } }
+                            }
                           }
                         }
                       ]
@@ -53,42 +73,61 @@
           ]
         }
       },
-	      {
-	        "StartMenu": {
-	          "tag": "div",
-	          "class": "absolute left-[50%] top-[50%] anchor-center w-[420] h-[320] bg-neutral-950 border border-neutral-700 rounded-xl flex flex-col items-center",
-	          "children": [
-	            {
-	              "Subtitle": {
-	                "tag": "p",
-	                "class": "mt-2 text-lg text-neutral-300",
-	                "children": ["Start Menu"]
+      {
+        "StartMenu": {
+          "tag": "div",
+          "layout": {
+            "abs": true,
+            "anchor": "center",
+            "inset": { "left": { "pct": 0.5 }, "top": { "pct": 0.5 } },
+            "size": { "w": 420, "h": 320 }
+          },
+          "flex": { "dir": "col", "items": "center" },
+          "bg": "neutral-950",
+          "border": { "color": "neutral-700" },
+          "rounded": "xl",
+          "children": [
+            {
+              "Subtitle": {
+                "tag": "p",
+                "text": { "size": "lg", "color": "neutral-300" },
+                "classExtra": ["mt-2"],
+                "children": ["Start Menu"]
               }
             },
             {
               "StartButton": {
                 "tag": "button",
-                "class": "mt-8 w-full h-12 bg-neutral-800 hover:bg-neutral-700 rounded-md",
+                "layout": { "size": { "w": "full" } },
+                "bg": "neutral-800",
+                "rounded": "md",
+                "classExtra": ["mt-8", "h-12", "hover:bg-neutral-700"],
                 "children": ["Start"]
               }
             },
             {
               "OptionsButton": {
                 "tag": "button",
-                "class": "mt-4 w-full h-12 bg-neutral-800 hover:bg-neutral-700 rounded-md",
+                "layout": { "size": { "w": "full" } },
+                "bg": "neutral-800",
+                "rounded": "md",
+                "classExtra": ["mt-4", "h-12", "hover:bg-neutral-700"],
                 "children": ["Options"]
               }
             },
             {
-	              "QuitButton": {
-	                "tag": "button",
-	                "class": "mt-4 w-full h-12 bg-neutral-800 hover:bg-neutral-700 rounded-md",
-	                "children": ["Quit"]
-	              }
-	            }
-	          ]
-	        }
-	      }
-	    ]
+              "QuitButton": {
+                "tag": "button",
+                "layout": { "size": { "w": "full" } },
+                "bg": "neutral-800",
+                "rounded": "md",
+                "classExtra": ["mt-4", "h-12", "hover:bg-neutral-700"],
+                "children": ["Quit"]
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }

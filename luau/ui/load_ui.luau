@@ -1,6 +1,50 @@
 local Types = require("ui/types")
+local TailwindJson = require("luau/ui/tailwind_json")
 
 type UINode = Types.UINode
+
+local function is_tailwind_json_spec(spec: any): boolean
+  if type(spec) ~= "table" then
+    return false
+  end
+  if spec.layout ~= nil then
+    return true
+  end
+  if spec.flex ~= nil then
+    return true
+  end
+  if spec.pad ~= nil then
+    return true
+  end
+  if spec.bg ~= nil then
+    return true
+  end
+  if spec.border ~= nil then
+    return true
+  end
+  if spec.rounded ~= nil then
+    return true
+  end
+  if spec.opacity ~= nil then
+    return true
+  end
+  if spec.z ~= nil then
+    return true
+  end
+  if spec.text ~= nil then
+    return true
+  end
+  if spec.hidden ~= nil then
+    return true
+  end
+  if spec.clip ~= nil then
+    return true
+  end
+  if spec.classExtra ~= nil then
+    return true
+  end
+  return false
+end
 
 local function compute_key_path(key: string?, parent: UINode?): string?
   if type(key) ~= "string" or key == "" then
@@ -42,6 +86,102 @@ local function with_path_token(class_value: any, key_path: string): any
   return class_value
 end
 
+local function append_class_token(class_value: any, tok: string): any
+  if type(class_value) == "string" then
+    if class_value == "" then
+      return tok
+    end
+    return class_value .. " " .. tok
+  end
+  if class_value == nil then
+    return tok
+  end
+  if type(class_value) == "function" then
+    return function()
+      return append_class_token(class_value(), tok)
+    end
+  end
+  return class_value
+end
+
+local function size_token_from_value(kind: "w" | "h", v: any): string?
+  if v == nil then
+    return nil
+  end
+  if type(v) == "number" then
+    return kind .. "-[" .. tostring(v) .. "]"
+  end
+  if type(v) ~= "string" or v == "" then
+    return nil
+  end
+
+  local prefix = kind .. "-"
+  if string.sub(v, 1, #prefix) == prefix then
+    return v
+  end
+
+  if v == "full" then
+    return kind .. "-full"
+  end
+  if v == "screen" then
+    return kind .. "-screen"
+  end
+  if v == "px" then
+    return kind .. "-px"
+  end
+  if string.sub(v, -2) == "px" then
+    local n = tonumber(string.sub(v, 1, -3))
+    if n ~= nil then
+      return kind .. "-[" .. tostring(n) .. "]"
+    end
+    return nil
+  end
+  if string.sub(v, -1) == "%" then
+    local n = tonumber(string.sub(v, 1, -2))
+    if n ~= nil and n == 100 then
+      return kind .. "-full"
+    end
+    return nil
+  end
+
+  local n = tonumber(v)
+  if n ~= nil then
+    return kind .. "-[" .. tostring(n) .. "]"
+  end
+  return nil
+end
+
+local function with_size_tokens(class_value: any, width_value: any, height_value: any): any
+  if type(class_value) == "function" or type(width_value) == "function" or type(height_value) == "function" then
+    return function()
+      local c = class_value
+      if type(c) == "function" then
+        c = c()
+      end
+      local w = width_value
+      if type(w) == "function" then
+        w = w()
+      end
+      local h = height_value
+      if type(h) == "function" then
+        h = h()
+      end
+      return with_size_tokens(c, w, h)
+    end
+  end
+
+  local out = class_value
+  local w_tok = size_token_from_value("w", width_value)
+  if type(w_tok) == "string" then
+    out = append_class_token(out, w_tok)
+  end
+  local h_tok = size_token_from_value("h", height_value)
+  if type(h_tok) == "string" then
+    out = append_class_token(out, h_tok)
+  end
+  return out
+end
+
 local function build_node(spec: any, forced_key: string?, parent: UINode?): UINode
   if type(spec) ~= "table" then
     error("ui spec node must be table", 0)
@@ -73,10 +213,22 @@ local function build_node(spec: any, forced_key: string?, parent: UINode?): UINo
   node.tag = tag
   node.key = key
   node.parent = parent
+
+  if is_tailwind_json_spec(spec) then
+    node.class = TailwindJson.toClass(spec)
+  end
+
   local key_path = compute_key_path(key, parent)
   node.__keyPath = key_path
   if type(key_path) == "string" then
     node.class = with_path_token(node.class, key_path)
+  end
+  local has_layout_size = false
+  if type(spec.layout) == "table" and type(spec.layout.size) == "table" then
+    has_layout_size = true
+  end
+  if not has_layout_size then
+    node.class = with_size_tokens(node.class, node.width, node.height)
   end
 
   local children_spec = spec.children
