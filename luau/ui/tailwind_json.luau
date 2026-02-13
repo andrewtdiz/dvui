@@ -29,7 +29,7 @@ local function is_color_token(s: any): boolean
   if type(s) ~= "string" or s == "" then
     return false
   end
-  if s == "black" or s == "white" then
+  if s == "black" or s == "white" or s == "transparent" then
     return true
   end
   if string.find(s, "-", 1, true) ~= nil then

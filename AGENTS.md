@@ -26,8 +26,8 @@ You won't be able to start the runtime or test with `zig build run` or `zig test
     - Press `F12` or `PrintScreen` in the window.
     - Screenshot is saved to `artifacts/screenshot-N.png`.
 
-Verification - runs the luau app demo, takes a screenshot, waits briefly, exits:
-- `zigwin build luau-screenshot` (same as `zigwin build screenshot`)
+Verification - only run when requested by user. Runs the luau app demo, takes a screenshot, waits briefly, exits:
+- `zigwin build luau-screenshot`
 
 ---
 

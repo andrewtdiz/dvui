@@ -62,12 +62,15 @@ pub const Renderer = struct {
     retained_event_ring_ptr: ?*anyopaque = null,
     retained_event_ring_ready: bool = false,
     lua_entry_path: ?[]const u8 = null,
+    lua_app_module: ?[]const u8 = null,
     // Luau VM state for retained UI
     lua_state: ?*luaz.Lua = null,
     lua_ui: ?*luau_ui.LuaUi = null,
     lua_ready: bool = false,
     screenshot_key_enabled: bool = false,
     screenshot_index: u32 = 0,
+    screenshot_auto: bool = false,
+    screenshot_out_path: ?[]const u8 = null,
 };
 
 // ============================================================

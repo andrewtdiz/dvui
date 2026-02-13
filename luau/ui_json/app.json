@@ -83,17 +83,17 @@
             "inset": { "left": { "pct": 0.5 }, "top": { "pct": 0.5 } },
             "size": { "w": 420, "h": 320 }
           },
-          "scale": 1.05,
+          "scale": 1,
           "flex": { "dir": "col", "items": "center" },
           "pad": { "x": 8, "t": 6, "b": 4 },
-          "bg": "neutral-950",
+          "bg": "transparent",
           "border": { "color": "neutral-700" },
           "rounded": "xl",
           "children": [
             {
               "Subtitle": {
                 "tag": "p",
-                "text": { "size": "lg", "color": "neutral-300" },
+                "text": { "size": "lg", "color": "neutral-200" },
                 "margin": { "t": 2 },
                 "children": ["Start Menu"]
               }
@@ -104,6 +104,7 @@
                 "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
                 "margin": { "t": 8 },
                 "pad": { "x": 6, "y": 2 },
+                "text": { "size": "sm", "color": "neutral-200" },
                 "bg": "neutral-800",
                 "rounded": "md",
                 "classExtra": ["hover:bg-neutral-700"],
@@ -116,6 +117,7 @@
                 "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
                 "margin": { "t": 4 },
                 "pad": { "l": 8, "r": 6, "y": 2 },
+                "text": { "size": "sm", "color": "neutral-200" },
                 "bg": "neutral-800",
                 "rounded": "md",
                 "classExtra": ["hover:bg-neutral-700"],
@@ -128,6 +130,7 @@
                 "layout": { "size": { "w": "full", "h": { "tw": 12 } } },
                 "margin": { "t": 4 },
                 "pad": { "all": 2, "x": 6 },
+                "text": { "size": "sm", "color": "neutral-200" },
                 "bg": "neutral-800",
                 "rounded": "md",
                 "classExtra": ["hover:bg-neutral-700"],

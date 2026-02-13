@@ -154,6 +154,65 @@ fn rectToParentLocal(rect: types.Rect, parent_origin: dvui.Point.Physical) types
     };
 }
 
+fn isContainerTag(tag: []const u8) bool {
+    return std.mem.eql(u8, tag, "div") or std.mem.eql(u8, tag, "scroll") or std.mem.eql(u8, tag, "scrollframe");
+}
+
+const ScrollSession = struct {
+    viewport: types.Rect,
+    scroll_id: dvui.Id,
+    info: dvui.ScrollInfo,
+};
+
+fn beginScrollSession(runtime: *const RenderRuntime, node: *types.SolidNode, viewport_opt: ?types.Rect) ?ScrollSession {
+    if (viewport_opt == null) return null;
+    if (!node.scroll.isEnabled()) return null;
+
+    const viewport = viewport_opt.?;
+    const allow_x = node.scroll.allowX();
+    const allow_y = node.scroll.allowY();
+    const virtual_w = if (allow_x) @max(node.scroll.content_width, viewport.w) else viewport.w;
+    const virtual_h = if (allow_y) @max(node.scroll.content_height, viewport.h) else viewport.h;
+    var info: dvui.ScrollInfo = .{
+        .horizontal = if (allow_x) .given else .none,
+        .vertical = if (allow_y) .given else .none,
+        .virtual_size = .{ .w = virtual_w, .h = virtual_h },
+        .viewport = .{
+            .x = if (allow_x) node.scroll.offset_x else 0,
+            .y = if (allow_y) node.scroll.offset_y else 0,
+            .w = viewport.w,
+            .h = viewport.h,
+        },
+    };
+    if (allow_x) info.scrollToOffset(.horizontal, info.viewport.x);
+    if (allow_y) info.scrollToOffset(.vertical, info.viewport.y);
+
+    const scroll_id = state.scrollContentId(node.id);
+    _ = interaction.handleScrollInput(runtime, node, viewport, &info, scroll_id);
+    return .{
+        .viewport = viewport,
+        .scroll_id = scroll_id,
+        .info = info,
+    };
+}
+
+fn commitScrollSession(store: *types.NodeStore, node: *types.SolidNode, session: *const ScrollSession) bool {
+    if (!node.scroll.isEnabled()) return false;
+
+    const prev_x = node.scroll.offset_x;
+    const prev_y = node.scroll.offset_y;
+    const next_x = if (node.scroll.allowX()) session.info.viewport.x else prev_x;
+    const next_y = if (node.scroll.allowY()) session.info.viewport.y else prev_y;
+
+    if (next_x == prev_x and next_y == prev_y) return false;
+
+    node.scroll.offset_x = next_x;
+    node.scroll.offset_y = next_y;
+    layout.applyScrollOffsetDelta(store, node, next_x - prev_x, next_y - prev_y);
+    store.markNodePaintChanged(node.id);
+    return true;
+}
+
 fn ctxForChildren(parent_ctx: RenderContext, node: *types.SolidNode, use_origin: bool) RenderContext {
     var next = parent_ctx;
     if (node.layout.rect) |rect| {
@@ -285,7 +344,7 @@ fn renderElementBody(
     tracker: *DirtyRegionTracker,
     ctx: RenderContext,
 ) void {
-    if (std.mem.eql(u8, node.tag, "div")) {
+    if (isContainerTag(node.tag)) {
         renderContainer(runtime, event_ring, store, node, allocator, class_spec, tracker, ctx);
         node.markRendered();
         return;
@@ -424,6 +483,7 @@ fn renderContainerNormal(
         }
     }
 
+    var viewport_opt: ?types.Rect = null;
     if (rect_opt) |rect| {
         // Draw background ourselves so containers always show their fill.
         var bg_start_ns: i128 = 0;
@@ -434,6 +494,7 @@ fn renderContainerNormal(
         if (runtime.timings) |timings| {
             timings.draw_bg_ns += std.time.nanoTimestamp() - bg_start_ns;
         }
+        viewport_opt = node.layout.child_rect orelse rect;
     }
 
     const tab_info = focus.tabIndexForNode(store, node);
@@ -500,8 +561,19 @@ fn renderContainerNormal(
         }
     }
 
+    var scroll_session = beginScrollSession(runtime, node, viewport_opt);
+    if (scroll_session) |*session| {
+        _ = commitScrollSession(store, node, session);
+    }
+
     const child_ctx = ctxForChildren(ctx, node, true);
     renderChildrenOrdered(runtime, event_ring, store, node, allocator, tracker, child_ctx, false);
+
+    if (scroll_session) |*session| {
+        _ = interaction.renderScrollBars(runtime, node, session.viewport, &session.info, session.scroll_id, scale.uniform);
+        _ = commitScrollSession(store, node, session);
+    }
+
     node.markRendered();
 }
 
@@ -1994,4 +2066,42 @@ test "applyTransformScaleToOptions scales font and metrics" {
     try std.testing.expectEqual(dvui.Rect.all(12), options.corner_radius.?);
     try std.testing.expectEqual(@as(f32, 4), options.text_outline_thickness.?);
     try std.testing.expectEqual(@as(f32, 20), options.font.?.size);
+}
+
+test "commitScrollSession updates offset and shifts child layout" {
+    var store: types.NodeStore = undefined;
+    try store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.upsertElement(1, "div");
+    try store.insert(0, 1, null);
+    try store.upsertElement(2, "div");
+    try store.insert(1, 2, null);
+
+    const scroll_node = store.node(1) orelse return error.TestUnexpectedResult;
+    const child_node = store.node(2) orelse return error.TestUnexpectedResult;
+
+    scroll_node.scroll.class_enabled = true;
+    scroll_node.scroll.class_x = false;
+    scroll_node.scroll.class_y = true;
+    scroll_node.scroll.offset_y = 0;
+    child_node.layout.rect = .{ .x = 20, .y = 40, .w = 80, .h = 30 };
+    child_node.layout.child_rect = .{ .x = 24, .y = 44, .w = 72, .h = 22 };
+
+    var session = ScrollSession{
+        .viewport = .{ .x = 0, .y = 0, .w = 120, .h = 90 },
+        .scroll_id = undefined,
+        .info = .{
+            .horizontal = .none,
+            .vertical = .given,
+            .virtual_size = .{ .w = 120, .h = 280 },
+            .viewport = .{ .x = 0, .y = 28, .w = 120, .h = 90 },
+        },
+    };
+
+    try std.testing.expect(commitScrollSession(&store, scroll_node, &session));
+    try std.testing.expectApproxEqAbs(@as(f32, 28), scroll_node.scroll.offset_y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12), child_node.layout.rect.?.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 16), child_node.layout.child_rect.?.y, 0.001);
+    try std.testing.expect(!commitScrollSession(&store, scroll_node, &session));
 }

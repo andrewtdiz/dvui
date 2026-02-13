@@ -125,19 +125,39 @@ fn sendResizeEventIfNeeded(renderer: *Renderer) void {
 }
 
 fn requestScreenshot(renderer: *Renderer) bool {
-    std.fs.cwd().makeDir("artifacts") catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => {
-            logMessage(renderer, 3, "screenshot dir create failed: {s}", .{@errorName(err)});
-            return false;
-        },
-    };
+    const out_path_opt: ?[]const u8 = renderer.screenshot_out_path;
 
     var name_buf: [96]u8 = undefined;
-    const index = renderer.screenshot_index;
-    const name = std.fmt.bufPrint(&name_buf, "artifacts/screenshot-{d}.png", .{index}) catch {
-        logMessage(renderer, 3, "screenshot name failed", .{});
-        return false;
+    const name = if (out_path_opt) |out_path| blk: {
+        if (std.fs.path.isAbsolute(out_path)) {
+            logMessage(renderer, 3, "screenshot path must be relative: {s}", .{out_path});
+            return false;
+        }
+        if (std.fs.path.dirname(out_path)) |dir| {
+            std.fs.cwd().makePath(dir) catch |mk_err| switch (mk_err) {
+                error.PathAlreadyExists => {},
+                else => {
+                    logMessage(renderer, 3, "screenshot dir create failed: {s}", .{@errorName(mk_err)});
+                    return false;
+                },
+            };
+        }
+        break :blk out_path;
+    } else blk: {
+        std.fs.cwd().makePath("artifacts") catch |mk_err| switch (mk_err) {
+            error.PathAlreadyExists => {},
+            else => {
+                logMessage(renderer, 3, "screenshot dir create failed: {s}", .{@errorName(mk_err)});
+                return false;
+            },
+        };
+
+        const index = renderer.screenshot_index;
+        const generated = std.fmt.bufPrint(&name_buf, "artifacts/screenshot-{d}.png", .{index}) catch {
+            logMessage(renderer, 3, "screenshot name failed", .{});
+            return false;
+        };
+        break :blk generated;
     };
 
     const ok = if (renderer.webgpu) |*wgpu_renderer| wgpu_renderer.requestScreenshot(name) else false;
@@ -291,7 +311,7 @@ pub fn renderFrame(renderer: *Renderer) void {
             profiling.addInput(&renderer.profiler, input_start_ns);
         }
 
-        const auto_screenshot = std.process.hasEnvVarConstant("DVUI_SCREENSHOT_AUTO");
+        const auto_screenshot = renderer.screenshot_auto;
         if (renderer.screenshot_key_enabled) {
             const pressed = ray.isKeyPressed(ray.KeyboardKey.print_screen) or ray.isKeyPressed(ray.KeyboardKey.f12);
             const should_take = pressed or (auto_screenshot and renderer.screenshot_index == 0);

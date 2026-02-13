@@ -121,13 +121,15 @@ fn updateLayoutIfDirty(store: *types.NodeStore, node: *types.SolidNode, parent_r
     // Skip hidden elements entirely - they should not take up layout space
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
+    applyScrollClassSpec(node, &spec);
     if (spec.hidden) {
         node.layout.rect = types.Rect{}; // Zero rect
         return;
     }
 
     if (!layout_force_recompute and !node.needsLayoutUpdate()) {
-        const layout_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
+        const base_layout_rect = node.layout.child_rect orelse node.layout.rect orelse parent_rect;
+        const layout_rect = scrolledLayoutRect(base_layout_rect, &node.scroll);
         for (node.children.items) |child_id| {
             if (store.node(child_id)) |child| {
                 updateLayoutIfDirty(store, child, layout_rect);
@@ -153,12 +155,28 @@ fn insetOffset(value: ?tailwind.Inset, parent_axis_scaled: f32, scale: f32) f32 
     return 0;
 }
 
+fn applyScrollClassSpec(node: *types.SolidNode, spec: *const tailwind.Spec) void {
+    const class_enabled = spec.scroll_x or spec.scroll_y;
+    node.scroll.class_enabled = class_enabled;
+    node.scroll.class_x = spec.scroll_x;
+    node.scroll.class_y = spec.scroll_y;
+}
+
+fn scrolledLayoutRect(viewport: types.Rect, scroll: *const types.ScrollState) types.Rect {
+    if (!scroll.isEnabled()) return viewport;
+    var rect = viewport;
+    if (scroll.allowX()) rect.x -= scroll.offset_x;
+    if (scroll.allowY()) rect.y -= scroll.offset_y;
+    return rect;
+}
+
 pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent_rect: types.Rect) void {
     const prev_rect = node.layout.rect;
     const prev_child_rect = node.layout.child_rect;
     const prev_scale = node.layout.layout_scale;
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
+    applyScrollClassSpec(node, &spec);
     const base_scale = dvui.windowNaturalScale();
     var parent_scale = base_scale;
     if (node.parent) |pid| {
@@ -346,7 +364,7 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
         }
     }
 
-    const layout_rect = child_rect;
+    const layout_rect = scrolledLayoutRect(child_rect, &node.scroll);
 
     if (spec.is_flex) {
         if (use_yoga_layout) {
@@ -361,6 +379,13 @@ pub fn computeNodeLayout(store: *types.NodeStore, node: *types.SolidNode, parent
                 updateLayoutIfDirty(store, child, layout_rect);
             }
         }
+    }
+
+    if (node.scroll.isEnabled()) {
+        updateScrollContentSize(store, node, child_rect);
+    } else {
+        node.scroll.content_width = child_rect.w;
+        node.scroll.content_height = child_rect.h;
     }
 }
 
@@ -387,6 +412,18 @@ fn offsetLayoutSubtree(store: *types.NodeStore, node: *types.SolidNode, dx: f32,
     for (node.children.items) |child_id| {
         if (store.node(child_id)) |child| {
             offsetLayoutSubtree(store, child, dx, dy, version);
+        }
+    }
+}
+
+pub fn applyScrollOffsetDelta(store: *types.NodeStore, node: *types.SolidNode, delta_x: f32, delta_y: f32) void {
+    const move_x = if (node.scroll.allowX()) -delta_x else 0;
+    const move_y = if (node.scroll.allowY()) -delta_y else 0;
+    if (move_x == 0 and move_y == 0) return;
+    const version = store.currentVersion();
+    for (node.children.items) |child_id| {
+        if (store.node(child_id)) |child| {
+            offsetLayoutSubtree(store, child, move_x, move_y, version);
         }
     }
 }
@@ -483,4 +520,76 @@ fn computeScrollAutoSize(store: *types.NodeStore, node: *types.SolidNode, viewpo
         .w = @max(0.0, max_x - min_x),
         .h = @max(0.0, max_y - min_y),
     };
+}
+
+test "scroll area applies overflow-y class, offset, and content size" {
+    var store: types.NodeStore = undefined;
+    try store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.upsertElement(1, "div");
+    try store.insert(0, 1, null);
+    try store.setClassName(1, "overflow-y-scroll");
+
+    try store.upsertElement(2, "div");
+    try store.insert(1, 2, null);
+
+    const scroll_node = store.node(1) orelse return error.TestUnexpectedResult;
+    const child_node = store.node(2) orelse return error.TestUnexpectedResult;
+
+    scroll_node.scroll.offset_x = 33;
+    scroll_node.scroll.offset_y = 50;
+    scroll_node.layout.child_rect = .{ .x = 100, .y = 100, .w = 200, .h = 120 };
+    child_node.layout.rect = .{ .x = 80, .y = 40, .w = 260, .h = 320 };
+
+    const spec = scroll_node.prepareClassSpec();
+    applyScrollClassSpec(scroll_node, &spec);
+    const layout_rect = scrolledLayoutRect(scroll_node.layout.child_rect.?, &scroll_node.scroll);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), layout_rect.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), layout_rect.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 200), layout_rect.w, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 120), layout_rect.h, 0.001);
+
+    updateScrollContentSize(&store, scroll_node, scroll_node.layout.child_rect.?);
+    try std.testing.expect(scroll_node.scroll.class_enabled);
+    try std.testing.expect(!scroll_node.scroll.class_x);
+    try std.testing.expect(scroll_node.scroll.class_y);
+    try std.testing.expectApproxEqAbs(@as(f32, 200), scroll_node.scroll.content_width, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 320), scroll_node.scroll.content_height, 0.001);
+}
+
+test "applyScrollOffsetDelta shifts descendants opposite to delta" {
+    var store: types.NodeStore = undefined;
+    try store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.upsertElement(1, "div");
+    try store.insert(0, 1, null);
+    try store.upsertElement(2, "div");
+    try store.insert(1, 2, null);
+    try store.upsertElement(3, "div");
+    try store.insert(2, 3, null);
+
+    const scroll_node = store.node(1) orelse return error.TestUnexpectedResult;
+    const child_node = store.node(2) orelse return error.TestUnexpectedResult;
+    const grandchild_node = store.node(3) orelse return error.TestUnexpectedResult;
+
+    scroll_node.scroll.class_enabled = true;
+    scroll_node.scroll.class_x = false;
+    scroll_node.scroll.class_y = true;
+
+    scroll_node.layout.rect = .{ .x = 100, .y = 80, .w = 200, .h = 120 };
+    scroll_node.layout.child_rect = .{ .x = 110, .y = 90, .w = 180, .h = 100 };
+    child_node.layout.rect = .{ .x = 112, .y = 95, .w = 160, .h = 90 };
+    child_node.layout.child_rect = .{ .x = 114, .y = 97, .w = 156, .h = 86 };
+    grandchild_node.layout.rect = .{ .x = 116, .y = 101, .w = 120, .h = 40 };
+
+    applyScrollOffsetDelta(&store, scroll_node, 10, 24);
+
+    try std.testing.expectApproxEqAbs(@as(f32, 112), child_node.layout.rect.?.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 71), child_node.layout.rect.?.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 116), grandchild_node.layout.rect.?.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 77), grandchild_node.layout.rect.?.y, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), scroll_node.layout.rect.?.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 80), scroll_node.layout.rect.?.y, 0.001);
 }

@@ -9,6 +9,7 @@ const usage =
     \\  luau-layout-dump <scene> [options]
     \\  luau-layout-dump --scene <scene> [options]
     \\  luau-layout-dump --lua-entry <path> [options]
+    \\  luau-layout-dump --ui-json <path> [options]
     \\
     \\Options:
     \\  --list-scenes
@@ -16,6 +17,8 @@ const usage =
     \\  --update-baseline
     \\
     \\  --lua-entry <path>
+    \\  --app-module <id>
+    \\  --ui-json <path>
     \\  --width <u32>              Default: 1280
     \\  --height <u32>             Default: 720
     \\  --pixel-width <u32>        Default: width
@@ -30,8 +33,15 @@ const usage =
     \\
 ;
 
+const RunMode = enum {
+    luau,
+    ui_json,
+};
+
 const SceneConfig = struct {
     lua_entry: ?[]const u8 = null,
+    app_module: ?[]const u8 = null,
+    ui_json: ?[]const u8 = null,
     width: ?u32 = null,
     height: ?u32 = null,
     pixel_width: ?u32 = null,
@@ -44,6 +54,8 @@ const SceneConfig = struct {
 
 const CliOverrides = struct {
     lua_entry: ?[]const u8 = null,
+    app_module: ?[]const u8 = null,
+    ui_json: ?[]const u8 = null,
     width: ?u32 = null,
     height: ?u32 = null,
     pixel_width: ?u32 = null,
@@ -58,8 +70,12 @@ const CliOverrides = struct {
 };
 
 const RunConfig = struct {
+    mode: RunMode,
     scene_name: ?[]const u8,
+    scene_path: []const u8,
     lua_entry: []const u8,
+    app_module: ?[]const u8,
+    ui_json: ?[]const u8,
     width: u32,
     height: u32,
     pixel_width: u32,
@@ -127,6 +143,14 @@ pub fn main() !void {
         }
         if (std.mem.eql(u8, arg, "--lua-entry")) {
             overrides.lua_entry = try nextArg(args, &i);
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--app-module")) {
+            overrides.app_module = try nextArg(args, &i);
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--ui-json")) {
+            overrides.ui_json = try nextArg(args, &i);
             continue;
         }
         if (std.mem.eql(u8, arg, "--width")) {
@@ -286,6 +310,14 @@ fn parseSceneConfig(val: std.json.Value) !SceneConfig {
         if (v != .string) return error.InvalidScene;
         cfg.lua_entry = v.string;
     }
+    if (obj.get("appModule")) |v| {
+        if (v != .string) return error.InvalidScene;
+        cfg.app_module = v.string;
+    }
+    if (obj.get("uiJson")) |v| {
+        if (v != .string) return error.InvalidScene;
+        cfg.ui_json = v.string;
+    }
     if (obj.get("width")) |v| cfg.width = try parseJsonU32(v);
     if (obj.get("height")) |v| cfg.height = try parseJsonU32(v);
     if (obj.get("pixelWidth")) |v| cfg.pixel_width = try parseJsonU32(v);
@@ -334,6 +366,9 @@ fn resolveConfig(
     update_baseline: bool,
 ) !RunConfig {
     const lua_entry = overrides.lua_entry orelse scene.lua_entry orelse "luau/index.luau";
+    const app_module = overrides.app_module orelse scene.app_module;
+    const ui_json = overrides.ui_json orelse scene.ui_json;
+    const mode: RunMode = if (ui_json != null) .ui_json else .luau;
     const width = overrides.width orelse scene.width orelse 1280;
     const height = overrides.height orelse scene.height orelse 720;
     const pixel_width = overrides.pixel_width orelse scene.pixel_width orelse width;
@@ -349,9 +384,15 @@ fn resolveConfig(
     const text_max = overrides.text_max orelse 64;
     const max_diff = overrides.max_diff orelse 20;
 
+    const scene_path = if (mode == .ui_json) ui_json.? else if (app_module != null) app_module.? else lua_entry;
+
     return .{
+        .mode = mode,
         .scene_name = scene_name,
+        .scene_path = scene_path,
         .lua_entry = lua_entry,
+        .app_module = app_module,
+        .ui_json = ui_json,
         .width = width,
         .height = height,
         .pixel_width = pixel_width,
@@ -430,7 +471,7 @@ fn nodeRowLessThan(_: void, a: NodeRow, b: NodeRow) bool {
 }
 
 fn run(cfg: RunConfig, allocator: std.mem.Allocator) !void {
-    const renderer = native.lifecycle.createRendererWithLuaEntryImpl(&logCallback, null, cfg.lua_entry) orelse {
+    const renderer = native.lifecycle.createRendererWithLuaEntryAndAppImpl(&logCallback, null, cfg.lua_entry, cfg.app_module) orelse {
         return error.RendererInitFailed;
     };
     defer native.lifecycle.destroyRendererImpl(renderer);
@@ -448,10 +489,20 @@ fn run(cfg: RunConfig, allocator: std.mem.Allocator) !void {
         var time_ns: i128 = 0;
         try win.begin(time_ns);
 
+        if (cfg.mode == .ui_json) {
+            const cw = dvui.currentWindow();
+            const scale = dvui.windowNaturalScale();
+            const root_w: f32 = if (scale != 0) cw.rect_pixels.w / scale else cw.rect_pixels.w;
+            const root_h: f32 = if (scale != 0) cw.rect_pixels.h / scale else cw.rect_pixels.h;
+            try loadUiJsonSnapshot(allocator, store, cfg.ui_json.?, root_w, root_h);
+        }
+
         const dt_ns = dtToNs(cfg.dt);
         var frame: u32 = 0;
         while (frame < cfg.frames) : (frame += 1) {
-            try luaUpdate(renderer, cfg.dt);
+            if (cfg.mode == .luau) {
+                try luaUpdate(renderer, cfg.dt);
+            }
             retained.updateLayouts(store);
 
             if (frame + 1 == cfg.frames) {
@@ -498,6 +549,23 @@ fn dtToNs(dt: f32) i128 {
     const scaled: f64 = @as(f64, dt) * 1_000_000_000.0;
     const rounded: i128 = @intFromFloat(@round(scaled));
     return if (rounded >= 1000) rounded else 1000;
+}
+
+fn loadUiJsonSnapshot(
+    allocator: std.mem.Allocator,
+    store: *retained.NodeStore,
+    path: []const u8,
+    root_w: f32,
+    root_h: f32,
+) !void {
+    const bytes = try readFileAlloc(allocator, path, 16 * 1024 * 1024);
+    defer allocator.free(bytes);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, bytes, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+
+    const ok = retained.ui_json.setSnapshotFromUiJsonValue(store, null, parsed.value, root_w, root_h);
+    if (!ok) return error.UiJsonLoadFailed;
 }
 
 fn luaUpdate(renderer: *native.Renderer, dt: f32) !void {
@@ -607,7 +675,7 @@ fn dumpLayout(allocator: std.mem.Allocator, cfg: RunConfig, store: *retained.Nod
     try w.writeAll("{\n");
     try w.writeAll("  \"meta\": {\n");
     try w.writeAll("    \"scene\": ");
-    try writeJsonString(&w, cfg.lua_entry);
+    try writeJsonString(&w, cfg.scene_path);
     try w.writeAll(",\n");
     const cw = dvui.currentWindow();
     const win_size = cw.backend.windowSize();
@@ -700,12 +768,16 @@ fn computeKeyPath(allocator: std.mem.Allocator, parent_key: []const u8, child: *
 
 fn extractKeyToken(class_name: []const u8) ?[]const u8 {
     var it = std.mem.tokenizeScalar(u8, class_name, ' ');
+    var ui_path: ?[]const u8 = null;
     while (it.next()) |tok| {
         if (std.mem.startsWith(u8, tok, "__key=")) {
             return tok["__key=".len..];
         }
+        if (ui_path == null and std.mem.startsWith(u8, tok, "ui-path-")) {
+            ui_path = tok["ui-path-".len..];
+        }
     }
-    return null;
+    return ui_path;
 }
 
 fn writeJsonString(w: anytype, s: []const u8) !void {

@@ -10,9 +10,17 @@ pub fn apply(win: *dvui.Window, node: *types.SolidNode) tailwind.Spec {
     var spec = node.prepareClassSpec();
     tailwind.applyHover(&spec, node.hovered);
 
+    node.scroll.class_enabled = spec.scroll_x or spec.scroll_y;
+    node.scroll.class_x = spec.scroll_x;
+    node.scroll.class_y = spec.scroll_y;
+
     node.visual = node.visual_props;
 
     applyClassSpecToVisual(win, node, &spec);
+
+    if (node.scroll.isEnabled()) {
+        node.visual.clip_children = true;
+    }
 
     return spec;
 }

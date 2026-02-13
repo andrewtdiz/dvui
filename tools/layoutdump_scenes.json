@@ -8,6 +8,62 @@
       "dt": 0,
       "out": "artifacts/app.layout.json",
       "baseline": "snapshots/app.layout.json"
+    },
+    "docs_borders": {
+      "appModule": "luau/scenes/dvui_docs/borders/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_flex": {
+      "appModule": "luau/scenes/dvui_docs/flex/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_overflow": {
+      "appModule": "luau/scenes/dvui_docs/overflow/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_positioning": {
+      "appModule": "luau/scenes/dvui_docs/positioning/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_sizing": {
+      "appModule": "luau/scenes/dvui_docs/sizing/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_spacing": {
+      "appModule": "luau/scenes/dvui_docs/spacing/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_typography": {
+      "appModule": "luau/scenes/dvui_docs/typography/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
+    },
+    "docs_zindex_opacity": {
+      "appModule": "luau/scenes/dvui_docs/zindex_opacity/app",
+      "width": 1280,
+      "height": 720,
+      "frames": 2,
+      "dt": 0
     }
   }
 }

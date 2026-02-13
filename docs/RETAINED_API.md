@@ -195,7 +195,7 @@ You can also set a top-level `scale` on the node (outside `transform`) which map
 
 Note: Tailwind also supports a `scale-*` class which is a **layout scale** (it affects layout and sizing). Transform scale and layout scale are different and multiply together when both are used.
 
-### `scroll: { ... }` (accepted; currently not applied)
+### `scroll: { ... }`
 
 Accepted keys:
 
@@ -206,7 +206,12 @@ Accepted keys:
 - `canvasHeight: number`
 - `autoCanvas: boolean`
 
-These values are stored on the node, but **scrolling is not currently wired into layout/render**.
+These values are applied by retained layout/render:
+
+- `scrollX`/`scrollY` offset the child layout viewport.
+- `canvasWidth`/`canvasHeight` set minimum scrollable content bounds for allowed axes.
+- `autoCanvas` expands scrollable content bounds from child layout extents.
+- `enabled` enables scrolling even without `overflow-*` class tokens.
 
 ### `anchor: { ... }` (accepted; currently not applied)
 
@@ -384,7 +389,7 @@ Absolute anchor point (custom extension; affects how `top/left/right/bottom` pla
 - `hidden` (skips layout and rendering for the element)
 - `overflow-hidden` (clips descendants to the element rect)
 
-Overflow scrolling tokens are parsed but currently not applied:
+Overflow scrolling tokens are applied:
 
 - `overflow-scroll`, `overflow-x-scroll`, `overflow-y-scroll`
 

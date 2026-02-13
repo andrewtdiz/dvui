@@ -209,7 +209,7 @@ fn applyUiElement(
 fn readUiLayout(obj: std.json.ObjectMap, parent_layout: UiLayout) UiLayout {
     var layout: UiLayout = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
     if (obj.get("size")) |size_val| {
-        if (readSizeObject(size_val)) |size| {
+        if (readSizeObject(size_val, parent_layout)) |size| {
             layout.width = size[0];
             layout.height = size[1];
         }
@@ -272,26 +272,30 @@ fn resolveUiAxisValue(value: std.json.Value, axis_size: f32) f32 {
 }
 
 fn parseUiAxisString(value: []const u8, axis_size: f32) f32 {
+    return parseUiAxisStringMaybe(value, axis_size) orelse 0;
+}
+
+fn parseUiAxisStringMaybe(value: []const u8, axis_size: f32) ?f32 {
     if (std.mem.endsWith(u8, value, "px")) {
-        if (value.len <= 2) return 0;
-        const number = std.fmt.parseFloat(f32, value[0 .. value.len - 2]) catch return 0;
+        if (value.len <= 2) return null;
+        const number = std.fmt.parseFloat(f32, value[0 .. value.len - 2]) catch return null;
         return number;
     }
     if (std.mem.endsWith(u8, value, "%")) {
-        if (value.len <= 1) return 0;
-        const number = std.fmt.parseFloat(f32, value[0 .. value.len - 1]) catch return 0;
+        if (value.len <= 1) return null;
+        const number = std.fmt.parseFloat(f32, value[0 .. value.len - 1]) catch return null;
         return axis_size * (number / 100.0);
     }
-    return 0;
+    return null;
 }
 
-fn readSizeObject(value: std.json.Value) ?[2]f32 {
+fn readSizeObject(value: std.json.Value, parent_layout: UiLayout) ?[2]f32 {
     if (value != .object) return null;
     const obj = value.object;
     const width_val = obj.get("width") orelse return null;
     const height_val = obj.get("height") orelse return null;
-    const width = readF32(width_val) orelse return null;
-    const height = readF32(height_val) orelse return null;
+    const width = resolveUiSizeAxisValue(width_val, parent_layout.width, "w-full") orelse return null;
+    const height = resolveUiSizeAxisValue(height_val, parent_layout.height, "h-full") orelse return null;
     return .{ width, height };
 }
 
@@ -309,6 +313,23 @@ fn readF32(value: std.json.Value) ?f32 {
         .float => |val| @floatCast(val),
         else => null,
     };
+}
+
+fn resolveUiSizeAxisValue(value: std.json.Value, axis_size: f32, full_token: []const u8) ?f32 {
+    return switch (value) {
+        .integer => |val| @floatFromInt(val),
+        .float => |val| @floatCast(val),
+        .string => |val| parseUiSizeAxisString(val, axis_size, full_token),
+        else => null,
+    };
+}
+
+fn parseUiSizeAxisString(value: []const u8, axis_size: f32, full_token: []const u8) ?f32 {
+    if (std.mem.eql(u8, value, "full")) return axis_size;
+    if (std.mem.eql(u8, value, full_token)) return axis_size;
+    if (parseUiAxisStringMaybe(value, axis_size)) |v| return v;
+    const number = std.fmt.parseFloat(f32, value) catch return null;
+    return if (std.math.isFinite(number)) number else null;
 }
 
 fn readColorChannel(value: std.json.Value) ?u32 {

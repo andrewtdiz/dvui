@@ -44,7 +44,7 @@ pub fn scan(
                     visitor.hit(node, spec, rect, ord);
                 }
 
-                const clip_children = spec.clip_children orelse node.visual_props.clip_children;
+                const clip_children = (spec.clip_children orelse node.visual_props.clip_children) or spec.scroll_x or spec.scroll_y or node.scroll.isEnabled();
                 if (clip_children) {
                     if (next_ctx.clip) |clip| {
                         next_ctx.clip = state.intersectRect(clip, rect);
@@ -78,4 +78,53 @@ pub fn scan(
             scan(store, child, point, next_ctx, visitor, order, opts);
         }
     }
+}
+
+test "overflow-y-scroll clips descendants during hit testing" {
+    const std = @import("std");
+    var store: types.NodeStore = undefined;
+    try store.init(std.testing.allocator);
+    defer store.deinit();
+
+    try store.upsertElement(1, "div");
+    try store.insert(0, 1, null);
+    try store.setClassName(1, "overflow-y-scroll");
+
+    try store.upsertElement(2, "div");
+    try store.insert(1, 2, null);
+
+    const scroll_node = store.node(1) orelse return error.TestUnexpectedResult;
+    const child_node = store.node(2) orelse return error.TestUnexpectedResult;
+
+    scroll_node.layout.rect = .{ .x = 0, .y = 0, .w = 100, .h = 100 };
+    child_node.layout.rect = .{ .x = 0, .y = 120, .w = 80, .h = 60 };
+
+    var hit_child = false;
+    var visitor = struct {
+        hit_child: *bool,
+
+        pub fn count(self: *@This(), node: *types.SolidNode, spec: anytype) bool {
+            _ = self;
+            _ = node;
+            _ = spec;
+            return true;
+        }
+
+        pub fn hit(self: *@This(), node: *types.SolidNode, spec: anytype, rect: types.Rect, ord: u32) void {
+            _ = spec;
+            _ = rect;
+            _ = ord;
+            if (node.id == 2) {
+                self.hit_child.* = true;
+            }
+        }
+    }{ .hit_child = &hit_child };
+
+    const root = store.node(0) orelse return error.TestUnexpectedResult;
+    const point = dvui.Point.Physical{ .x = 10, .y = 130 };
+    const ctx = RenderContext{ .origin = .{ .x = 0, .y = 0 }, .clip = null, .scale = .{ 1, 1 }, .offset = .{ 0, 0 } };
+    var order: u32 = 0;
+    scan(&store, root, point, ctx, &visitor, &order, .{ .skip_portals = false });
+
+    try std.testing.expect(!hit_child);
 }

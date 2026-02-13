@@ -920,6 +920,10 @@ fn loadLuaScript(renderer: *Renderer) bool {
             logMessage(renderer, 3, "lua script compile error: {s}", .{trimmed});
             return false;
         }
+        if (renderer.lua_app_module) |app_module| {
+            lua_state.state.pushLString(app_module);
+            lua_state.state.setGlobal("__dvui_app_module");
+        }
         const exec_result = lua_state.exec(compile_result.ok, void) catch |err| {
             logLuaError(renderer, "script exec", err);
             return false;
@@ -1141,10 +1145,19 @@ pub fn finalizeDestroy(renderer: *Renderer) void {
 // ============================================================
 
 pub fn createRendererImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.EventFn) ?*Renderer {
-    return createRendererWithLuaEntryImpl(log_cb, event_cb, null);
+    return createRendererWithLuaEntryAndAppImpl(log_cb, event_cb, null, null);
 }
 
 pub fn createRendererWithLuaEntryImpl(log_cb: ?*const types.LogFn, event_cb: ?*const types.EventFn, lua_entry_path: ?[]const u8) ?*Renderer {
+    return createRendererWithLuaEntryAndAppImpl(log_cb, event_cb, lua_entry_path, null);
+}
+
+pub fn createRendererWithLuaEntryAndAppImpl(
+    log_cb: ?*const types.LogFn,
+    event_cb: ?*const types.EventFn,
+    lua_entry_path: ?[]const u8,
+    lua_app_module: ?[]const u8,
+) ?*Renderer {
     const renderer = std.heap.c_allocator.create(Renderer) catch return null;
 
     renderer.* = .{
@@ -1172,6 +1185,7 @@ pub fn createRendererWithLuaEntryImpl(log_cb: ?*const types.LogFn, event_cb: ?*c
         .retained_event_ring_ptr = null,
         .retained_event_ring_ready = false,
         .lua_entry_path = lua_entry_path,
+        .lua_app_module = lua_app_module,
         .lua_state = null,
         .lua_ui = null,
         .lua_ready = false,

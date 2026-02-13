@@ -279,6 +279,15 @@ fn drawScrollBarStatic(rect: types.Rect, scroll_info: dvui.ScrollInfo, dir: dvui
     grab.fill(.all(100), .{ .color = theme.text.opacity(0.5), .fade = 1.0 });
 }
 
+fn rectToViewportLocal(rect: types.Rect, viewport: types.Rect) types.Rect {
+    return .{
+        .x = rect.x - viewport.x,
+        .y = rect.y - viewport.y,
+        .w = rect.w,
+        .h = rect.h,
+    };
+}
+
 pub fn renderScrollBars(
     runtime: *const RenderRuntime,
     node: *types.SolidNode,
@@ -307,7 +316,7 @@ pub fn renderScrollBars(
         if (runtime.input_enabled_state) {
             const options = dvui.Options{
                 .name = "solid-scrollbar",
-                .rect = physicalToDvuiRect(bar_rect),
+                .rect = physicalToDvuiRect(rectToViewportLocal(bar_rect, viewport)),
                 .background = true,
                 .id_extra = nodeIdExtra(node.id ^ 0x9e3779b9),
             };
@@ -335,7 +344,7 @@ pub fn renderScrollBars(
         if (runtime.input_enabled_state) {
             const options = dvui.Options{
                 .name = "solid-scrollbar",
-                .rect = physicalToDvuiRect(bar_rect),
+                .rect = physicalToDvuiRect(rectToViewportLocal(bar_rect, viewport)),
                 .background = true,
                 .id_extra = nodeIdExtra(node.id ^ 0x3c6ef372),
             };
@@ -354,4 +363,14 @@ pub fn renderScrollBars(
     }
 
     return scroll_info.viewport.x != prev_x or scroll_info.viewport.y != prev_y;
+}
+
+test "scrollbar rect converts to viewport local coordinates" {
+    const viewport = types.Rect{ .x = 500, .y = 320, .w = 240, .h = 120 };
+    const bar_rect = types.Rect{ .x = 728, .y = 320, .w = 12, .h = 120 };
+    const local = rectToViewportLocal(bar_rect, viewport);
+    try @import("std").testing.expectApproxEqAbs(@as(f32, 228), local.x, 0.001);
+    try @import("std").testing.expectApproxEqAbs(@as(f32, 0), local.y, 0.001);
+    try @import("std").testing.expectApproxEqAbs(@as(f32, 12), local.w, 0.001);
+    try @import("std").testing.expectApproxEqAbs(@as(f32, 120), local.h, 0.001);
 }
