@@ -81,7 +81,7 @@
             "abs": true,
             "anchor": "center",
             "inset": { "left": { "pct": 0.5 }, "top": { "pct": 0.5 } },
-            "size": { "w": 420, "h": 320 }
+            "size": { "w": 420 }
           },
           "scale": 1,
           "flex": { "dir": "col", "items": "center" },

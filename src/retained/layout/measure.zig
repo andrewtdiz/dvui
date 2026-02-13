@@ -99,11 +99,19 @@ pub fn measureNodeSize(store: *types.NodeStore, node: *types.SolidNode, parent_a
                 const child_scale = scale * (child_spec.scale orelse 1.0);
                 child.layout.layout_scale = child_scale;
                 const child_size = measureNodeSize(store, child, parent_available);
+                const margin_left = sideValue(child_spec.margin.left) * child_scale;
+                const margin_right = sideValue(child_spec.margin.right) * child_scale;
+                const margin_top = sideValue(child_spec.margin.top) * child_scale;
+                const margin_bottom = sideValue(child_spec.margin.bottom) * child_scale;
+                const outer_size = types.Size{
+                    .w = child_size.w + margin_left + margin_right,
+                    .h = child_size.h + margin_top + margin_bottom,
+                };
                 if (child.kind == .text and child_size.w == 0 and child_size.h == 0) continue;
 
                 visible_count += 1;
-                const main = if (dir == .horizontal) child_size.w else child_size.h;
-                const cross = if (dir == .horizontal) child_size.h else child_size.w;
+                const main = if (dir == .horizontal) outer_size.w else outer_size.h;
+                const cross = if (dir == .horizontal) outer_size.h else outer_size.w;
                 total_main += main;
                 if (cross > max_cross) max_cross = cross;
             }
